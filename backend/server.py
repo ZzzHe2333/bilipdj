@@ -327,7 +327,7 @@ def _safe_static_path(request_path: str) -> Path | None:
     if path in {"/", ""}:
         path = "/config"
     if path == "/config":
-        path = "/index.html"
+        path = "/config.html"
     if path == "/index":
         path = "/index.html"
     if path == "/cookie-login":
