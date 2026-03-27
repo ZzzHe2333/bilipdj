@@ -249,6 +249,8 @@ def save_config(config: dict[str, Any]) -> None:
                 myjs_lines.append(f'  {key}: "{text}"')
     myjs_block = "\n".join(myjs_lines) if myjs_lines else "  # 可在此覆盖前端 myjs.js 配置"
 
+    cookie_text = str(api.get("cookie", "")).replace('"', '\\"')
+
     content = f"""# Danmuji 全局配置
 server:
   host: {server.get('host', DEFAULT_HOST)}
@@ -257,7 +259,7 @@ server:
 api:
   roomid: {int(api.get('roomid', 0))}
   uid: {int(api.get('uid', 0))}
-  cookie: "{str(api.get('cookie', '')).replace('\\"', '\\\\"')}"
+  cookie: "{cookie_text}"
 
 qr_login:
   # 最近一次扫码成功信息（由 /api/bili/qr/poll 自动写入）
