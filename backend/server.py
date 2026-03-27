@@ -106,6 +106,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "server": {"host": DEFAULT_HOST, "port": DEFAULT_PORT},
     "api": {"roomid": 0, "uid": 0, "cookie": ""},
     "myjs": {},
+    "ui": {"startup_splash_seconds": 5},
     "logging": {"level": "INFO", "retention_days": 15},
     "queue_archive": {"enabled": True, "slots": 3},
 }
@@ -118,8 +119,26 @@ def load_config() -> dict[str, Any]:
 def save_config(config: dict[str, Any]) -> None:
     server = config.get("server", {})
     api = config.get("api", {})
+    myjs_cfg = config.get("myjs", {})
+    ui_cfg = config.get("ui", {})
     logging_cfg = config.get("logging", {})
     queue_archive = config.get("queue_archive", {})
+
+    myjs_lines = []
+    if isinstance(myjs_cfg, dict):
+        for key, value in myjs_cfg.items():
+            if not isinstance(key, str):
+                continue
+            if isinstance(value, bool):
+                myjs_lines.append(f"  {key}: {'true' if value else 'false'}")
+            elif isinstance(value, (int, float)):
+                myjs_lines.append(f"  {key}: {value}")
+            elif value is None:
+                myjs_lines.append(f"  {key}: null")
+            else:
+                text = str(value).replace("\\", "\\\\").replace('"', '\\"')
+                myjs_lines.append(f'  {key}: "{text}"')
+    myjs_block = "\n".join(myjs_lines) if myjs_lines else "  # 可在此覆盖前端 myjs.js 配置"
 
     content = f"""# Danmuji 全局配置
 server:
@@ -133,6 +152,11 @@ api:
 
 # 前端 myjs.js 可覆盖配置（如需扩展可继续加键值）
 myjs:
+{myjs_block}
+
+ui:
+  # 页面启动提示层展示时长（秒）
+  startup_splash_seconds: {max(0, int(ui_cfg.get('startup_splash_seconds', 5)))}
 
 logging:
   # 支持 DEBUG / INFO / WARNING / ERROR / CRITICAL
@@ -446,6 +470,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                     "uid": int(cfg.get("api", {}).get("uid", 0)),
                     "cookie": str(cfg.get("api", {}).get("cookie", "")),
                     "myjs": cfg.get("myjs", {}),
+                    "ui": cfg.get("ui", {}),
                 }
             )
             return
