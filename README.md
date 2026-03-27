@@ -36,3 +36,12 @@ python backend/server.py
 ```bash
 DANMUJI_BACKEND_HOST=0.0.0.0 DANMUJI_BACKEND_PORT=9816 python backend/server.py
 ```
+
+## 新增配置与日志说明
+
+- 根目录新增 `config.yaml`：集中管理服务端口、API 注入信息、日志级别、日志保留天数、排队存档槽位等配置。
+- 运行日志统一写入 `log/` 目录，服务每次启动时会自动清理 **15 天前** 的旧日志（可在 `config.yaml -> logging.retention_days` 调整）。
+- 默认日志等级是 `INFO`（可在 `config.yaml -> logging.level` 修改）。
+- 新增 `POST /api/queue/log`：
+  - 前端每次处理排队消息都会调用该接口记录一次快照。
+  - 排队快照按“游戏存档”思路以 CSV 写入 `log/queue_archive_slot_1.csv` ~ `log/queue_archive_slot_3.csv` 三个槽位循环覆盖。

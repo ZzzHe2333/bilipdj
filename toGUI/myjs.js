@@ -195,6 +195,26 @@ function PDJ_Send(payload) {
     ws.send(payload);
 }
 
+function PDJ_NormalizeQueueItem(queueItem) {
+    return stripHtml(queueItem || "").replace(/\s+/g, " ").trim();
+}
+
+async function PDJ_RecordQueueSnapshot(actor, message) {
+    try {
+        await fetch('/api/queue/log', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                actor: actor || 'unknown',
+                message: message || '',
+                queue: persons.map(PDJ_NormalizeQueueItem)
+            })
+        });
+    } catch (err) {
+        console.warn('[PDJ] 排队存档写入失败', err);
+    }
+}
+
 function stripHtml(text) {
     return (text || "").replace(/<[^>]*>/g, "");
 }
@@ -919,6 +939,7 @@ function jsontoprint(data) {
             //let node = document.createTextNode(data.info[2][1]+':'+data.info[1])
             //para.appendChild(node)
             document.getElementById('danmu').innerHTML=persons.join(""); 
+            PDJ_RecordQueueSnapshot(person, message);
             break; 
         case 'SUPER_CHAT_MESSAGE':
             document.getElementById('danmu').append(data.data.price+'$'+data.data.user_info.uname+':'+data.data.message+'\n')
