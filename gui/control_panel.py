@@ -122,6 +122,7 @@ class ControlPanelApp:
 
         self._build_ui()
         self.load_from_file()
+        self.root.after(200, self.start_server)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def _build_ui(self) -> None:
@@ -249,7 +250,7 @@ class ControlPanelApp:
 
     def open_web(self) -> None:
         port = self.port_var.get().strip() or "9816"
-        webbrowser.open(f"http://127.0.0.1:{port}/index.html")
+        webbrowser.open(f"http://127.0.0.1:{port}/")
 
     def on_close(self) -> None:
         if self.server_proc and self.server_proc.poll() is None:
