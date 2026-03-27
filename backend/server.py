@@ -32,6 +32,7 @@ except ImportError:  # pragma: no cover - 运行时环境可选依赖
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 9816
+MAX_QUEUE_ARCHIVE_SLOTS = 5
 
 REPO_DIR = Path(__file__).resolve().parent.parent
 BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", REPO_DIR))
@@ -48,6 +49,7 @@ WS_MAGIC_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 BILIBILI_QR_GENERATE_URL = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
 BILIBILI_QR_POLL_URL = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
 BILIBILI_DANMU_INFO_URL = "https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo"
+BILIBILI_ROOM_INIT_URL = "https://api.live.bilibili.com/room/v1/Room/room_init"
 
 try:
     import brotli
@@ -235,7 +237,7 @@ def ensure_runtime_layout(config_slots: int = 3) -> None:
     if not CONFIG_PATH.exists():
         save_config(DEFAULT_CONFIG)
 
-    slots = max(1, int(config_slots))
+    slots = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(config_slots)))
     for slot in range(1, slots + 1):
         slot_file = PD_DIR / f"queue_archive_slot_{slot}.csv"
         if not slot_file.exists():
@@ -315,8 +317,8 @@ logging:
 
 queue_archive:
   enabled: {'true' if bool(queue_archive.get('enabled', True)) else 'false'}
-  # 三个存档位（像游戏存档）
-  slots: {int(queue_archive.get('slots', 3))}
+  # 存档位（1~5）
+  slots: {min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(queue_archive.get('slots', 3))))}
 
 callback:
   enabled: {'true' if bool(callback_cfg.get('enabled', False)) else 'false'}
@@ -362,7 +364,7 @@ def setup_logging(config: dict[str, Any]) -> logging.Logger:
 
 class QueueArchiveManager:
     def __init__(self, slots: int = 3, enabled: bool = True) -> None:
-        self.slots = max(1, int(slots))
+        self.slots = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(slots)))
         self.enabled = enabled
         PD_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -479,6 +481,20 @@ def _bilibili_get_danmu_info(roomid: int, cookie: str = "") -> dict[str, Any]:
     if cookie:
         headers["Cookie"] = cookie
     req = urllib.request.Request(f"{BILIBILI_DANMU_INFO_URL}?{query}", headers=headers)
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return json.loads(resp.read().decode("utf-8", errors="replace"))
+
+
+def _bilibili_room_init(roomid: int, cookie: str = "") -> dict[str, Any]:
+    query = urllib.parse.urlencode({"id": roomid})
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Referer": "https://live.bilibili.com/",
+        "Origin": "https://live.bilibili.com",
+    }
+    if cookie:
+        headers["Cookie"] = cookie
+    req = urllib.request.Request(f"{BILIBILI_ROOM_INIT_URL}?{query}", headers=headers)
     with urllib.request.urlopen(req, timeout=10) as resp:
         return json.loads(resp.read().decode("utf-8", errors="replace"))
 
@@ -602,12 +618,49 @@ class BilibiliDanmuRelay(threading.Thread):
             return
 
         self.logger.info("开始获取直播间弹幕 ws 地址，roomid=%s", roomid)
-        payload = _bilibili_get_danmu_info(roomid, cookie)
-        data = payload.get("data", {}) if isinstance(payload, dict) else {}
-        token = str(data.get("token", ""))
-        host_list = data.get("host_list", [])
-        real_room_id = int(data.get("room_id", roomid))
-        if not token or not isinstance(host_list, list) or not host_list:
+        real_room_id = roomid
+        try:
+            room_init_payload = _bilibili_room_init(roomid, cookie)
+            room_init_data = room_init_payload.get("data", {}) if isinstance(room_init_payload, dict) else {}
+            init_real_room_id = int(room_init_data.get("room_id", roomid) or roomid)
+            if init_real_room_id > 0:
+                real_room_id = init_real_room_id
+                if real_room_id != roomid:
+                    self.logger.info("room_init 已解析真实房间号：%s -> %s", roomid, real_room_id)
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("room_init 查询失败，将使用原房间号继续: %s", exc)
+
+        request_candidates: list[tuple[int, str, str]] = [
+            (roomid, cookie, "id+cookie"),
+        ]
+        if real_room_id != roomid:
+            request_candidates.append((real_room_id, cookie, "real_id+cookie"))
+        if cookie:
+            request_candidates.append((roomid, "", "id+no_cookie"))
+            if real_room_id != roomid:
+                request_candidates.append((real_room_id, "", "real_id+no_cookie"))
+
+        payload: dict[str, Any] | None = None
+        token = ""
+        host_list: list[dict[str, Any]] = []
+        selected_room_id = real_room_id
+
+        for candidate_room_id, candidate_cookie, mode in request_candidates:
+            payload = _bilibili_get_danmu_info(candidate_room_id, candidate_cookie)
+            code = int(payload.get("code", -1)) if isinstance(payload, dict) else -1
+            data = payload.get("data", {}) if isinstance(payload, dict) else {}
+            candidate_token = str(data.get("token", ""))
+            candidate_hosts = data.get("host_list", [])
+            if code == 0 and candidate_token and isinstance(candidate_hosts, list) and candidate_hosts:
+                token = candidate_token
+                host_list = candidate_hosts
+                selected_room_id = int(data.get("room_id", candidate_room_id) or candidate_room_id)
+                if mode.endswith("no_cookie"):
+                    self.logger.warning("getDanmuInfo 在带 Cookie 模式失败，已回退到无 Cookie 模式")
+                break
+            self.logger.warning("getDanmuInfo 失败(%s): %s", mode, payload)
+
+        if not token or not host_list:
             raise RuntimeError(f"getDanmuInfo 返回异常: {payload}")
 
         candidate = random.choice(host_list)
@@ -617,17 +670,17 @@ class BilibiliDanmuRelay(threading.Thread):
             raise RuntimeError(f"getDanmuInfo host 为空: {payload}")
 
         self.logger.info("直播间弹幕服务地址：wss://%s:%s/sub", host, wss_port)
-        self._emit_status("danmu_connecting", roomid=real_room_id, host=host, port=wss_port)
+        self._emit_status("danmu_connecting", roomid=selected_room_id, host=host, port=wss_port)
 
         raw_conn = socket.create_connection((host, wss_port), timeout=10)
         context = ssl.create_default_context()
         conn = context.wrap_socket(raw_conn, server_hostname=host)
         conn.settimeout(1.0)
         try:
-            self._send_auth(conn, real_room_id, uid, token)
+            self._send_auth(conn, selected_room_id, uid, token)
             self._send_heartbeat(conn)
-            self._emit_status("danmu_connected", roomid=real_room_id, host=host)
-            self.logger.info("已连接直播间弹幕流，roomid=%s", real_room_id)
+            self._emit_status("danmu_connected", roomid=selected_room_id, host=host)
+            self.logger.info("已连接直播间弹幕流，roomid=%s", selected_room_id)
             next_heartbeat = time.time() + 30
 
             while not self._stop_event.is_set():
