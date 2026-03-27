@@ -75,6 +75,7 @@ def save_config(path: Path, config: dict) -> None:
     api = config.get("api", {})
     logging_cfg = config.get("logging", {})
     queue_archive = config.get("queue_archive", {})
+    escaped_cookie = str(api.get("cookie", "")).replace('"', '\\"')
 
     content = f"""# Danmuji 全局配置
 server:
@@ -84,7 +85,7 @@ server:
 api:
   roomid: {int(api.get('roomid', 0))}
   uid: {int(api.get('uid', 0))}
-  cookie: \"{str(api.get('cookie', '')).replace('\\"', '\\\\"')}\"
+  cookie: \"{escaped_cookie}\"
 
 # 前端 myjs.js 可覆盖配置（如需扩展可继续加键值）
 myjs:
