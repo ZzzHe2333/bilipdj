@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import base64
+import csv
+import datetime as dt
 import hashlib
 import json
+import logging
 import os
 import socket
 import struct
@@ -10,7 +13,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 9816
@@ -18,18 +21,186 @@ DEFAULT_PORT = 9816
 ROOT_DIR = Path(__file__).resolve().parent.parent
 MODEL_JSON_PATH = ROOT_DIR / "models" / "danmuji_initial_model.json"
 TOGUI_DIR = ROOT_DIR / "toGUI"
+CONFIG_PATH = ROOT_DIR / "config.yaml"
+LOG_DIR = ROOT_DIR / "log"
+QUEUE_STATE_PATH = LOG_DIR / "queue_archive_state.json"
 
 WS_MAGIC_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 
+class BackendServer(ThreadingHTTPServer):
+    daemon_threads = True
+    runtime_config: dict[str, Any]
+    logger: logging.Logger
+    queue_archive: "QueueArchiveManager"
+
+
+def _parse_scalar(value: str) -> Any:
+    value = value.strip()
+    if value == "":
+        return ""
+    if value.lower() in {"true", "false"}:
+        return value.lower() == "true"
+    if value.lower() in {"null", "none"}:
+        return None
+    if (value.startswith('"') and value.endswith('"')) or (
+        value.startswith("'") and value.endswith("'")
+    ):
+        return value[1:-1]
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        return value
+
+
+def load_simple_yaml(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+
+    root: dict[str, Any] = {}
+    stack: list[tuple[int, dict[str, Any]]] = [(-1, root)]
+
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        indent = len(line) - len(line.lstrip(" "))
+        if ":" not in stripped:
+            continue
+
+        key, value = stripped.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+
+        while stack and indent <= stack[-1][0]:
+            stack.pop()
+
+        current = stack[-1][1] if stack else root
+        if value == "":
+            child: dict[str, Any] = {}
+            current[key] = child
+            stack.append((indent, child))
+        else:
+            current[key] = _parse_scalar(value)
+
+    return root
+
+
+def _merge_config(defaults: dict[str, Any], custom: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(defaults)
+    for key, value in custom.items():
+        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+            merged[key] = _merge_config(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+DEFAULT_CONFIG: dict[str, Any] = {
+    "server": {"host": DEFAULT_HOST, "port": DEFAULT_PORT},
+    "api": {"roomid": 0, "uid": 0, "cookie": ""},
+    "myjs": {},
+    "logging": {"level": "INFO", "retention_days": 15},
+    "queue_archive": {"enabled": True, "slots": 3},
+}
+
+
+def load_config() -> dict[str, Any]:
+    return _merge_config(DEFAULT_CONFIG, load_simple_yaml(CONFIG_PATH))
+
+
+def _cleanup_old_logs(retention_days: int) -> None:
+    if retention_days <= 0:
+        return
+    cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=retention_days)
+    for log_file in LOG_DIR.glob("*.log"):
+        modified = dt.datetime.fromtimestamp(log_file.stat().st_mtime, dt.timezone.utc)
+        if modified < cutoff:
+            log_file.unlink(missing_ok=True)
+
+
+def setup_logging(config: dict[str, Any]) -> logging.Logger:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    retention_days = int(config.get("logging", {}).get("retention_days", 15))
+    _cleanup_old_logs(retention_days)
+
+    level_name = str(config.get("logging", {}).get("level", "INFO")).upper()
+    level = getattr(logging, level_name, logging.INFO)
+    log_path = LOG_DIR / f"backend_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        handlers=[
+            logging.FileHandler(log_path, encoding="utf-8"),
+            logging.StreamHandler(),
+        ],
+    )
+    logger = logging.getLogger("danmuji.backend")
+    logger.info("Logging initialized at %s", log_path)
+    logger.info("Log cleanup retention_days=%s", retention_days)
+    return logger
+
+
+class QueueArchiveManager:
+    def __init__(self, slots: int = 3, enabled: bool = True) -> None:
+        self.slots = max(1, int(slots))
+        self.enabled = enabled
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+    def _read_state(self) -> dict[str, int]:
+        if not QUEUE_STATE_PATH.exists():
+            return {"next_slot": 1}
+        try:
+            return json.loads(QUEUE_STATE_PATH.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return {"next_slot": 1}
+
+    def _write_state(self, state: dict[str, int]) -> None:
+        QUEUE_STATE_PATH.write_text(
+            json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    def _slot_file(self, slot: int) -> Path:
+        return LOG_DIR / f"queue_archive_slot_{slot}.csv"
+
+    def write_snapshot(self, actor: str, message: str, queue_items: list[str]) -> Path | None:
+        if not self.enabled:
+            return None
+
+        state = self._read_state()
+        slot = int(state.get("next_slot", 1))
+        slot = ((slot - 1) % self.slots) + 1
+        out = self._slot_file(slot)
+
+        now = dt.datetime.now().isoformat(timespec="seconds")
+        with out.open("w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["timestamp", now])
+            writer.writerow(["actor", actor])
+            writer.writerow(["message", message])
+            writer.writerow([])
+            writer.writerow(["position", "queue_item"])
+            for idx, item in enumerate(queue_items, start=1):
+                writer.writerow([idx, item])
+
+        state["next_slot"] = (slot % self.slots) + 1
+        self._write_state(state)
+        return out
+
+
 def load_model() -> dict[str, Any]:
-    """Load the initial model JSON from disk."""
     with MODEL_JSON_PATH.open("r", encoding="utf-8") as f:
         return json.load(f)
 
 
 def _safe_static_path(request_path: str) -> Path | None:
-    """Resolve static asset path under toGUI directory safely."""
     parsed = urlparse(request_path)
     path = parsed.path
     if path in {"/", ""}:
@@ -60,7 +231,10 @@ def _guess_content_type(path: Path) -> str:
 
 
 class ApiHandler(BaseHTTPRequestHandler):
-    server_version = "DanmujiBackend/0.2"
+    server_version = "DanmujiBackend/0.3"
+
+    def log_message(self, format: str, *args: Any) -> None:
+        self.server.logger.info("%s - %s", self.address_string(), format % args)
 
     def _write_json(self, payload: dict[str, Any], status: int = HTTPStatus.OK) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -232,12 +406,13 @@ class ApiHandler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/api/config":
+            cfg = self.server.runtime_config
             self._write_json(
                 {
-                    "roomid": int(parse_qs(parsed.query).get("roomid", [0])[0]),
-                    "uid": int(parse_qs(parsed.query).get("uid", [0])[0]),
-                    "cookie": "",
-                    "myjs": {},
+                    "roomid": int(cfg.get("api", {}).get("roomid", 0)),
+                    "uid": int(cfg.get("api", {}).get("uid", 0)),
+                    "cookie": str(cfg.get("api", {}).get("cookie", "")),
+                    "myjs": cfg.get("myjs", {}),
                 }
             )
             return
@@ -247,20 +422,78 @@ class ApiHandler(BaseHTTPRequestHandler):
             status=HTTPStatus.NOT_FOUND,
         )
 
+    def do_POST(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        if parsed.path != "/api/queue/log":
+            self._write_json(
+                {"status": "error", "message": f"Path not found: {self.path}"},
+                status=HTTPStatus.NOT_FOUND,
+            )
+            return
 
-class BackendServer(ThreadingHTTPServer):
-    daemon_threads = True
+        length = int(self.headers.get("Content-Length", "0"))
+        if length <= 0:
+            self._write_json(
+                {"status": "error", "message": "Empty request body"},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        raw = self.rfile.read(length).decode("utf-8", errors="replace")
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            self._write_json(
+                {"status": "error", "message": "Body must be valid JSON"},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        actor = str(payload.get("actor", "unknown"))
+        message = str(payload.get("message", ""))
+        queue_items = payload.get("queue", [])
+        if not isinstance(queue_items, list):
+            queue_items = []
+        queue_items = [str(item) for item in queue_items]
+
+        archive_path = self.server.queue_archive.write_snapshot(actor, message, queue_items)
+        self.server.logger.info(
+            "[queue] actor=%s message=%s queue_size=%s archive=%s",
+            actor,
+            message,
+            len(queue_items),
+            archive_path,
+        )
+        self._write_json(
+            {
+                "status": "ok",
+                "archive": str(archive_path) if archive_path else None,
+                "queue_size": len(queue_items),
+            }
+        )
 
 
 def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
+    runtime_config = load_config()
+    logger = setup_logging(runtime_config)
+    archive_cfg = runtime_config.get("queue_archive", {})
+
     httpd = BackendServer((host, port), ApiHandler)
-    print(f"Danmuji backend started on http://{host}:{port}")
-    print(f"Index page: http://127.0.0.1:{port}/index.html")
-    print(f"WebSocket: ws://127.0.0.1:{port}/ws")
+    httpd.runtime_config = runtime_config
+    httpd.logger = logger
+    httpd.queue_archive = QueueArchiveManager(
+        slots=int(archive_cfg.get("slots", 3)),
+        enabled=bool(archive_cfg.get("enabled", True)),
+    )
+
+    logger.info("Danmuji backend started on http://%s:%s", host, port)
+    logger.info("Index page: http://127.0.0.1:%s/index.html", port)
+    logger.info("WebSocket: ws://127.0.0.1:%s/ws", port)
     httpd.serve_forever()
 
 
 if __name__ == "__main__":
-    host = os.getenv("DANMUJI_BACKEND_HOST", DEFAULT_HOST)
-    port = int(os.getenv("DANMUJI_BACKEND_PORT", DEFAULT_PORT))
+    config = load_config()
+    host = os.getenv("DANMUJI_BACKEND_HOST", str(config.get("server", {}).get("host", DEFAULT_HOST)))
+    port = int(os.getenv("DANMUJI_BACKEND_PORT", int(config.get("server", {}).get("port", DEFAULT_PORT))))
     run_server(host=host, port=port)
