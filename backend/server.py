@@ -115,6 +115,39 @@ def load_config() -> dict[str, Any]:
     return _merge_config(DEFAULT_CONFIG, load_simple_yaml(CONFIG_PATH))
 
 
+def save_config(config: dict[str, Any]) -> None:
+    server = config.get("server", {})
+    api = config.get("api", {})
+    logging_cfg = config.get("logging", {})
+    queue_archive = config.get("queue_archive", {})
+
+    content = f"""# Danmuji 全局配置
+server:
+  host: {server.get('host', DEFAULT_HOST)}
+  port: {int(server.get('port', DEFAULT_PORT))}
+
+api:
+  roomid: {int(api.get('roomid', 0))}
+  uid: {int(api.get('uid', 0))}
+  cookie: "{str(api.get('cookie', '')).replace('\\"', '\\\\"')}"
+
+# 前端 myjs.js 可覆盖配置（如需扩展可继续加键值）
+myjs:
+
+logging:
+  # 支持 DEBUG / INFO / WARNING / ERROR / CRITICAL
+  level: {str(logging_cfg.get('level', 'INFO')).upper()}
+  # 每次启动默认清理多少天前日志
+  retention_days: {int(logging_cfg.get('retention_days', 15))}
+
+queue_archive:
+  enabled: {'true' if bool(queue_archive.get('enabled', True)) else 'false'}
+  # 三个存档位（像游戏存档）
+  slots: {int(queue_archive.get('slots', 3))}
+"""
+    CONFIG_PATH.write_text(content, encoding="utf-8")
+
+
 def _cleanup_old_logs(retention_days: int) -> None:
     if retention_days <= 0:
         return
@@ -358,7 +391,7 @@ class ApiHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
-        if parsed.path == "/ws":
+        if parsed.path in {"/ws", "/danmu/sub"}:
             self._handle_websocket_upgrade()
             return
 
@@ -424,6 +457,44 @@ class ApiHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path == "/api/config":
+            length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0:
+                self._write_json(
+                    {"status": "error", "message": "Empty request body"},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+
+            raw = self.rfile.read(length).decode("utf-8", errors="replace")
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                self._write_json(
+                    {"status": "error", "message": "Body must be valid JSON"},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+
+            roomid = int(payload.get("roomid", 0))
+            uid = int(payload.get("uid", 0))
+            cookie = str(payload.get("cookie", ""))
+
+            updated = _merge_config(
+                self.server.runtime_config,
+                {"api": {"roomid": roomid, "uid": uid, "cookie": cookie}},
+            )
+            save_config(updated)
+            self.server.runtime_config = updated
+            self._write_json(
+                {
+                    "status": "ok",
+                    "roomid": roomid,
+                    "uid": uid,
+                }
+            )
+            return
+
         if parsed.path != "/api/queue/log":
             self._write_json(
                 {"status": "error", "message": f"Path not found: {self.path}"},
@@ -488,7 +559,7 @@ def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
 
     logger.info("Danmuji backend started on http://%s:%s", host, port)
     logger.info("Index page: http://127.0.0.1:%s/index.html", port)
-    logger.info("WebSocket: ws://127.0.0.1:%s/ws", port)
+    logger.info("WebSocket: ws://127.0.0.1:%s/ws (alias: /danmu/sub)", port)
     httpd.serve_forever()
 
 

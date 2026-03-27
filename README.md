@@ -55,6 +55,15 @@ python gui/control_panel.py
 
 GUI 支持：
 
-- 一键启动/停止后端服务。
+- 启动 GUI 后自动拉起后端服务（也可手动启动/停止后端）。
 - 修改并保存 `config.yaml` 中的核心配置（host/port/roomid/uid/cookie/日志/存档槽位）。
-- 一键打开 Web 控制页 `index.html`。
+- 一键打开 Web 控制页（由后端统一托管前端静态资源）。
+
+## 前后端合并与自动反代说明
+
+- 后端会同时提供 API、WebSocket 和前端静态页面：
+  - 页面入口：`/`（自动跳转到 `/index.html`）
+  - 配置接口：`GET /api/config`、`POST /api/config`
+  - 队列日志接口：`POST /api/queue/log`
+  - WebSocket：`/ws`（兼容别名 `/danmu/sub`）
+- 因此前端始终走同源地址，不需要手动再配额外反向代理。
