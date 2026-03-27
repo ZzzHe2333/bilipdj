@@ -45,3 +45,16 @@ DANMUJI_BACKEND_HOST=0.0.0.0 DANMUJI_BACKEND_PORT=9816 python backend/server.py
 - 新增 `POST /api/queue/log`：
   - 前端每次处理排队消息都会调用该接口记录一次快照。
   - 排队快照按“游戏存档”思路以 CSV 写入 `log/queue_archive_slot_1.csv` ~ `log/queue_archive_slot_3.csv` 三个槽位循环覆盖。
+
+
+### 3) 启动桌面 GUI 控制台
+
+```bash
+python gui/control_panel.py
+```
+
+GUI 支持：
+
+- 一键启动/停止后端服务。
+- 修改并保存 `config.yaml` 中的核心配置（host/port/roomid/uid/cookie/日志/存档槽位）。
+- 一键打开 Web 控制页 `index.html`。
