@@ -40,6 +40,7 @@ DANMUJI_BACKEND_HOST=0.0.0.0 DANMUJI_BACKEND_PORT=9816 python backend/server.py
 ## 新增配置与日志说明
 
 - 根目录新增 `config.yaml`：集中管理服务端口、API 注入信息、日志级别、日志保留天数、排队存档槽位等配置。
+- `config.yaml -> ui.startup_splash_seconds` 可配置 Web 控制台启动提示层展示时长（默认 5 秒），并显示免费软件退款提示。
 - 运行日志统一写入 `log/` 目录，服务每次启动时会自动清理 **15 天前** 的旧日志（可在 `config.yaml -> logging.retention_days` 调整）。
 - 默认日志等级是 `INFO`（可在 `config.yaml -> logging.level` 修改）。
 - 新增 `POST /api/queue/log`：

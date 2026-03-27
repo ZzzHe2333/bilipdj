@@ -10,6 +10,11 @@ api:
 
 # 前端 myjs.js 可覆盖配置（如需扩展可继续加键值）
 myjs:
+  # 可在此覆盖前端 myjs.js 配置
+
+ui:
+  # 页面启动提示层展示时长（秒）
+  startup_splash_seconds: 5
 
 logging:
   # 支持 DEBUG / INFO / WARNING / ERROR / CRITICAL
