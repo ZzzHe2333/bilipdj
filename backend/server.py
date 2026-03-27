@@ -4,6 +4,7 @@ import base64
 import csv
 import datetime as dt
 import hashlib
+import io
 import json
 import logging
 import os
@@ -18,6 +19,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+
+try:
+    import qrcode
+except ImportError:  # pragma: no cover - 运行时环境可选依赖
+    qrcode = None
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 9816
@@ -115,6 +121,7 @@ def _merge_config(defaults: dict[str, Any], custom: dict[str, Any]) -> dict[str,
 DEFAULT_CONFIG: dict[str, Any] = {
     "server": {"host": DEFAULT_HOST, "port": DEFAULT_PORT},
     "api": {"roomid": 0, "uid": 0, "cookie": ""},
+    "callback": {"enabled": False, "url": "", "auth_token": "", "timeout_seconds": 5},
     "myjs": {},
     "ui": {"startup_splash_seconds": 5},
     "logging": {"level": "INFO", "retention_days": 15},
@@ -143,6 +150,7 @@ def load_config() -> dict[str, Any]:
 def save_config(config: dict[str, Any]) -> None:
     server = config.get("server", {})
     api = config.get("api", {})
+    callback_cfg = config.get("callback", {})
     myjs_cfg = config.get("myjs", {})
     ui_cfg = config.get("ui", {})
     logging_cfg = config.get("logging", {})
@@ -192,6 +200,12 @@ queue_archive:
   enabled: {'true' if bool(queue_archive.get('enabled', True)) else 'false'}
   # 三个存档位（像游戏存档）
   slots: {int(queue_archive.get('slots', 3))}
+
+callback:
+  enabled: {'true' if bool(callback_cfg.get('enabled', False)) else 'false'}
+  url: "{str(callback_cfg.get('url', '')).replace('\\"', '\\\\"')}"
+  auth_token: "{str(callback_cfg.get('auth_token', '')).replace('\\"', '\\\\"')}"
+  timeout_seconds: {max(1, int(callback_cfg.get('timeout_seconds', 5)))}
 """
     CONFIG_PATH.write_text(content, encoding="utf-8")
 
@@ -319,6 +333,65 @@ def _bilibili_qr_poll(qrcode_key: str) -> tuple[dict[str, Any], str]:
         payload = json.loads(resp.read().decode("utf-8", errors="replace"))
         raw_cookie_headers = resp.headers.get_all("Set-Cookie") or []
     return payload, _extract_cookie_string(raw_cookie_headers)
+
+
+def _build_qr_png_base64(text: str) -> tuple[str, str]:
+    if not text:
+        return "", "二维码内容为空"
+    if qrcode is None:
+        return "", "缺少依赖 qrcode，请先安装：pip install qrcode[pil]"
+
+    qr = qrcode.QRCode(version=1, box_size=10, border=2)
+    qr.add_data(text)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    encoded = base64.b64encode(buf.getvalue()).decode("ascii")
+    return encoded, ""
+
+
+def _dispatch_login_callback(
+    callback_cfg: dict[str, Any],
+    *,
+    cookie: str,
+    bilibili_data: dict[str, Any],
+    logger: logging.Logger,
+) -> tuple[bool, str]:
+    if not bool(callback_cfg.get("enabled", False)):
+        return False, "callback disabled"
+
+    callback_url = str(callback_cfg.get("url", "")).strip()
+    if not callback_url:
+        return False, "callback url is empty"
+
+    payload = {
+        "event": "bilibili_qr_login_success",
+        "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "cookie": cookie,
+        "bilibili": bilibili_data,
+    }
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    timeout_seconds = max(1, int(callback_cfg.get("timeout_seconds", 5)))
+    headers = {
+        "Content-Type": "application/json; charset=utf-8",
+        "User-Agent": "DanmujiBackend/0.3",
+    }
+    auth_token = str(callback_cfg.get("auth_token", "")).strip()
+    if auth_token:
+        headers["Authorization"] = f"Bearer {auth_token}"
+
+    req = urllib.request.Request(callback_url, data=body, method="POST", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
+            status = int(getattr(resp, "status", 200))
+            if 200 <= status < 300:
+                return True, f"callback ok (status={status})"
+            return False, f"callback failed (status={status})"
+    except urllib.error.URLError as exc:
+        logger.warning("扫码回调失败: %s", exc)
+        return False, f"callback failed ({exc})"
 
 
 def _safe_static_path(request_path: str) -> Path | None:
@@ -539,6 +612,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                     "roomid": int(cfg.get("api", {}).get("roomid", 0)),
                     "uid": int(cfg.get("api", {}).get("uid", 0)),
                     "cookie": str(cfg.get("api", {}).get("cookie", "")),
+                    "callback": cfg.get("callback", {}),
                     "myjs": cfg.get("myjs", {}),
                     "ui": cfg.get("ui", {}),
                 }
@@ -561,6 +635,15 @@ class ApiHandler(BaseHTTPRequestHandler):
                 )
                 return
 
+            data = payload.get("data", {})
+            if isinstance(data, dict):
+                qr_url = str(data.get("url", "")).strip()
+                qr_base64, qr_error = _build_qr_png_base64(qr_url)
+                if qr_base64:
+                    data["qr_image_base64"] = qr_base64
+                if qr_error:
+                    data["qr_image_error"] = qr_error
+                payload["data"] = data
             self._write_json(payload)
             return
 
@@ -593,10 +676,23 @@ class ApiHandler(BaseHTTPRequestHandler):
             roomid = int(payload.get("roomid", 0))
             uid = int(payload.get("uid", 0))
             cookie = str(payload.get("cookie", ""))
+            callback_payload = payload.get("callback", {})
+            callback_enabled = bool(callback_payload.get("enabled", False)) if isinstance(callback_payload, dict) else False
+            callback_url = str(callback_payload.get("url", "")).strip() if isinstance(callback_payload, dict) else ""
+            callback_auth_token = str(callback_payload.get("auth_token", "")).strip() if isinstance(callback_payload, dict) else ""
+            callback_timeout = int(callback_payload.get("timeout_seconds", 5)) if isinstance(callback_payload, dict) else 5
 
             updated = _merge_config(
                 self.server.runtime_config,
-                {"api": {"roomid": roomid, "uid": uid, "cookie": cookie}},
+                {
+                    "api": {"roomid": roomid, "uid": uid, "cookie": cookie},
+                    "callback": {
+                        "enabled": callback_enabled,
+                        "url": callback_url,
+                        "auth_token": callback_auth_token,
+                        "timeout_seconds": max(1, callback_timeout),
+                    },
+                },
             )
             save_config(updated)
             self.server.runtime_config = updated
@@ -668,6 +764,17 @@ class ApiHandler(BaseHTTPRequestHandler):
                     )
                     save_config(updated)
                     self.server.runtime_config = updated
+                    callback_ok, callback_message = _dispatch_login_callback(
+                        self.server.runtime_config.get("callback", {}),
+                        cookie=cookie_text,
+                        bilibili_data=data,
+                        logger=self.server.logger,
+                    )
+                    data["callback"] = {
+                        "attempted": True,
+                        "ok": callback_ok,
+                        "message": callback_message,
+                    }
                     self.server.logger.info("Bilibili 扫码成功，Cookie 已自动写入 config.yaml")
             self._write_json(bilibili_payload)
             return

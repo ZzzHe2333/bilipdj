@@ -18,6 +18,15 @@
             <label>Cookie</label>
             <textarea v-model.trim="form.cookie" rows="3" placeholder="粘贴 Bilibili Cookie（至少包含 SESSDATA）"></textarea>
         </div>
+        <div class="row">
+            <label>回调地址</label>
+            <input v-model.trim="form.callback.url" type="text" placeholder="扫码成功后 POST 到该地址（可留空）" />
+        </div>
+        <div class="row">
+            <label>回调开关</label>
+            <input v-model="form.callback.enabled" type="checkbox" />
+            <span class="hint">开启后，扫码成功会回调后端程序</span>
+        </div>
         <div class="actions">
             <button @click="saveConfig">保存配置</button>
             <button @click="readLocalCookie">读取当前页面 Cookie</button>
@@ -33,7 +42,7 @@
         createApp({
             data() {
                 return {
-                    form: { roomid: '', uid: '', cookie: '' },
+                    form: { roomid: '', uid: '', cookie: '', callback: { enabled: false, url: '', auth_token: '', timeout_seconds: 5 } },
                     statusText: '等待初始化...'
                 }
             },
@@ -48,6 +57,10 @@
                         this.form.roomid = cfg.roomid || '';
                         this.form.uid = cfg.uid || '';
                         this.form.cookie = cfg.cookie || '';
+                        this.form.callback = Object.assign(
+                            { enabled: false, url: '', auth_token: '', timeout_seconds: 5 },
+                            cfg.callback || {}
+                        );
                         this.statusText = '配置已加载';
                     } catch (e) {
                         this.statusText = '加载失败: ' + e;
@@ -59,7 +72,13 @@
                         const body = {
                             roomid: Number(this.form.roomid || 0),
                             uid: Number(this.form.uid || 0),
-                            cookie: this.form.cookie || ''
+                            cookie: this.form.cookie || '',
+                            callback: {
+                                enabled: Boolean(this.form.callback.enabled),
+                                url: this.form.callback.url || '',
+                                auth_token: this.form.callback.auth_token || '',
+                                timeout_seconds: Number(this.form.callback.timeout_seconds || 5)
+                            }
                         };
                         const res = await fetch('/api/config', {
                             method: 'POST',
