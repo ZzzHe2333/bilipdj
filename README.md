@@ -95,3 +95,4 @@ callback:
 - `enabled=true` 且 `url` 非空时，扫码成功会向该地址发送 `POST` JSON 回调。
 - `auth_token` 非空时会自动带 `Authorization: Bearer <token>`。
 - 回调内容包含事件名、时间戳、Cookie 以及 Bilibili 原始轮询数据。
+- 后端在扫码成功后会同步把关键信息写入 `config.yaml -> qr_login`（最近成功时间、qrcode_key、code/message、cookie），便于排查与二次处理。

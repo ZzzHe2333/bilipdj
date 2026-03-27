@@ -190,6 +190,13 @@ def _merge_config(defaults: dict[str, Any], custom: dict[str, Any]) -> dict[str,
 DEFAULT_CONFIG: dict[str, Any] = {
     "server": {"host": DEFAULT_HOST, "port": DEFAULT_PORT},
     "api": {"roomid": 0, "uid": 0, "cookie": ""},
+    "qr_login": {
+        "last_success_at": "",
+        "qrcode_key": "",
+        "poll_code": -1,
+        "message": "",
+        "cookie": "",
+    },
     "callback": {"enabled": False, "url": "", "auth_token": "", "timeout_seconds": 5},
     "myjs": {},
     "ui": {"startup_splash_seconds": 5},
@@ -219,6 +226,7 @@ def load_config() -> dict[str, Any]:
 def save_config(config: dict[str, Any]) -> None:
     server = config.get("server", {})
     api = config.get("api", {})
+    qr_login = config.get("qr_login", {})
     callback_cfg = config.get("callback", {})
     myjs_cfg = config.get("myjs", {})
     ui_cfg = config.get("ui", {})
@@ -250,6 +258,14 @@ api:
   roomid: {int(api.get('roomid', 0))}
   uid: {int(api.get('uid', 0))}
   cookie: "{str(api.get('cookie', '')).replace('\\"', '\\\\"')}"
+
+qr_login:
+  # 最近一次扫码成功信息（由 /api/bili/qr/poll 自动写入）
+  last_success_at: "{str(qr_login.get('last_success_at', '')).replace('\\"', '\\\\"')}"
+  qrcode_key: "{str(qr_login.get('qrcode_key', '')).replace('\\"', '\\\\"')}"
+  poll_code: {int(qr_login.get('poll_code', -1))}
+  message: "{str(qr_login.get('message', '')).replace('\\"', '\\\\"')}"
+  cookie: "{str(qr_login.get('cookie', '')).replace('\\"', '\\\\"')}"
 
 # 前端 myjs.js 可覆盖配置（如需扩展可继续加键值）
 myjs:
@@ -672,6 +688,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                     "roomid": int(cfg.get("api", {}).get("roomid", 0)),
                     "uid": int(cfg.get("api", {}).get("uid", 0)),
                     "cookie": str(cfg.get("api", {}).get("cookie", "")),
+                    "qr_login": cfg.get("qr_login", {}),
                     "callback": cfg.get("callback", {}),
                     "myjs": cfg.get("myjs", {}),
                     "ui": cfg.get("ui", {}),
@@ -828,9 +845,19 @@ class ApiHandler(BaseHTTPRequestHandler):
                     poll_code = -1
 
                 if poll_code == 0 and cookie_text:
+                    success_time = dt.datetime.now(dt.timezone.utc).isoformat()
                     updated = _merge_config(
                         self.server.runtime_config,
-                        {"api": {"cookie": cookie_text}},
+                        {
+                            "api": {"cookie": cookie_text},
+                            "qr_login": {
+                                "last_success_at": success_time,
+                                "qrcode_key": qrcode_key,
+                                "poll_code": poll_code,
+                                "message": str(data.get("message", "")),
+                                "cookie": cookie_text,
+                            },
+                        },
                     )
                     save_config(updated)
                     self.server.runtime_config = updated
