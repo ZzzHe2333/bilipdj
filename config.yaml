@@ -8,6 +8,14 @@ api:
   uid: 0
   cookie: ""
 
+qr_login:
+  # 最近一次扫码成功信息（由 /api/bili/qr/poll 自动写入）
+  last_success_at: ""
+  qrcode_key: ""
+  poll_code: -1
+  message: ""
+  cookie: ""
+
 # 前端 myjs.js 可覆盖配置（如需扩展可继续加键值）
 myjs:
   # 可在此覆盖前端 myjs.js 配置
