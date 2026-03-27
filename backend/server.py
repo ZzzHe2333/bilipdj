@@ -11,6 +11,7 @@ import os
 import socket
 import struct
 import sys
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -49,6 +50,74 @@ class BackendServer(ThreadingHTTPServer):
     runtime_config: dict[str, Any]
     logger: logging.Logger
     queue_archive: "QueueArchiveManager"
+    ws_hub: "WebSocketHub"
+
+
+class WebSocketHub:
+    def __init__(self, logger: logging.Logger) -> None:
+        self.logger = logger
+        self._clients: set[socket.socket] = set()
+        self._lock = threading.Lock()
+        self.last_message_at: str = ""
+
+    @property
+    def client_count(self) -> int:
+        with self._lock:
+            return len(self._clients)
+
+    def register(self, conn: socket.socket) -> None:
+        with self._lock:
+            self._clients.add(conn)
+            count = len(self._clients)
+        self.logger.info("WebSocket client connected, total=%s", count)
+
+    def unregister(self, conn: socket.socket) -> None:
+        with self._lock:
+            self._clients.discard(conn)
+            count = len(self._clients)
+        self.logger.info("WebSocket client disconnected, total=%s", count)
+
+    def broadcast_json(self, sender: socket.socket | None, payload: dict[str, Any]) -> None:
+        text = json.dumps(payload, ensure_ascii=False)
+        self.broadcast_text(sender, text)
+
+    def broadcast_text(self, sender: socket.socket | None, text: str) -> None:
+        dead: list[socket.socket] = []
+        with self._lock:
+            targets = list(self._clients)
+
+        for conn in targets:
+            if sender is not None and conn is sender:
+                continue
+            try:
+                _ws_send_text(conn, text)
+            except OSError:
+                dead.append(conn)
+
+        if dead:
+            with self._lock:
+                for conn in dead:
+                    self._clients.discard(conn)
+
+    def mark_message(self) -> None:
+        self.last_message_at = dt.datetime.now(dt.timezone.utc).isoformat()
+
+
+def _ws_send_text(conn: socket.socket, text: str, opcode: int = 0x1) -> None:
+    payload = text.encode("utf-8")
+    header = bytearray([0x80 | (opcode & 0x0F)])
+    length = len(payload)
+
+    if length <= 125:
+        header.append(length)
+    elif length <= 65535:
+        header.append(126)
+        header.extend(struct.pack("!H", length))
+    else:
+        header.append(127)
+        header.extend(struct.pack("!Q", length))
+
+    conn.sendall(bytes(header) + payload)
 
 
 def _parse_scalar(value: str) -> Any:
@@ -473,7 +542,8 @@ class ApiHandler(BaseHTTPRequestHandler):
 
         client = self.connection
         client.settimeout(120)
-
+        hub = self.server.ws_hub
+        hub.register(client)
         self._ws_send_json(
             client,
             {
@@ -483,19 +553,18 @@ class ApiHandler(BaseHTTPRequestHandler):
             },
         )
 
-        while True:
-            message = self._ws_recv_text(client)
-            if message is None:
-                break
+        try:
+            while True:
+                message = self._ws_recv_text(client)
+                if message is None:
+                    break
+                if message == "":
+                    continue
 
-            self._ws_send_json(
-                client,
-                {
-                    "type": "PDJ_STATUS",
-                    "status": "echo",
-                    "message": message,
-                },
-            )
+                hub.mark_message()
+                hub.broadcast_text(client, message)
+        finally:
+            hub.unregister(client)
 
     def _ws_recv_text(self, conn: socket.socket) -> str | None:
         try:
@@ -510,48 +579,39 @@ class ApiHandler(BaseHTTPRequestHandler):
 
             if opcode == 0x8:
                 return None
+            if opcode == 0x9:  # ping
+                _ws_send_text(conn, "", opcode=0xA)
+                return ""
             if opcode != 0x1:
                 return ""
-            if not masked:
-                return None
 
             if payload_len == 126:
                 payload_len = struct.unpack("!H", conn.recv(2))[0]
             elif payload_len == 127:
                 payload_len = struct.unpack("!Q", conn.recv(8))[0]
 
-            mask_key = conn.recv(4)
-            masked_payload = b""
+            mask_key = conn.recv(4) if masked else b""
+            payload = b""
             remaining = payload_len
             while remaining > 0:
                 chunk = conn.recv(remaining)
                 if not chunk:
                     return None
-                masked_payload += chunk
+                payload += chunk
                 remaining -= len(chunk)
 
-            decoded = bytes(
-                b ^ mask_key[i % 4] for i, b in enumerate(masked_payload)
-            ).decode("utf-8", errors="replace")
+            if masked:
+                payload = bytes(
+                    b ^ mask_key[i % 4] for i, b in enumerate(payload)
+                )
+
+            decoded = payload.decode("utf-8", errors="replace")
             return decoded
         except (ConnectionError, OSError, TimeoutError):
             return None
 
     def _ws_send_text(self, conn: socket.socket, text: str) -> None:
-        payload = text.encode("utf-8")
-        header = bytearray([0x81])
-        length = len(payload)
-
-        if length <= 125:
-            header.append(length)
-        elif length <= 65535:
-            header.append(126)
-            header.extend(struct.pack("!H", length))
-        else:
-            header.append(127)
-            header.extend(struct.pack("!Q", length))
-
-        conn.sendall(bytes(header) + payload)
+        _ws_send_text(conn, text)
 
     def _ws_send_json(self, conn: socket.socket, payload: dict[str, Any]) -> None:
         self._ws_send_text(conn, json.dumps(payload, ensure_ascii=False))
@@ -615,6 +675,16 @@ class ApiHandler(BaseHTTPRequestHandler):
                     "callback": cfg.get("callback", {}),
                     "myjs": cfg.get("myjs", {}),
                     "ui": cfg.get("ui", {}),
+                }
+            )
+            return
+        if parsed.path == "/api/runtime-status":
+            self._write_json(
+                {
+                    "status": "ok",
+                    "ws_clients": self.server.ws_hub.client_count,
+                    "danmu_stream_active": bool(self.server.ws_hub.last_message_at),
+                    "last_message_at": self.server.ws_hub.last_message_at,
                 }
             )
             return
@@ -841,6 +911,7 @@ def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
         slots=int(archive_cfg.get("slots", 3)),
         enabled=bool(archive_cfg.get("enabled", True)),
     )
+    httpd.ws_hub = WebSocketHub(logger)
 
     logger.info("Danmuji backend started on http://%s:%s", host, port)
     logger.info("Backend config page: http://127.0.0.1:%s/config", port)
