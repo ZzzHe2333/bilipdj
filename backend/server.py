@@ -10,6 +10,9 @@ import os
 import socket
 import struct
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -31,6 +34,8 @@ PD_DIR = APP_DIR / "pd"
 QUEUE_STATE_PATH = PD_DIR / "queue_archive_state.json"
 
 WS_MAGIC_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+BILIBILI_QR_GENERATE_URL = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
+BILIBILI_QR_POLL_URL = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
 
 
 class BackendServer(ThreadingHTTPServer):
@@ -276,11 +281,57 @@ def load_model() -> dict[str, Any]:
         return json.load(f)
 
 
+def _extract_cookie_string(set_cookie_headers: list[str]) -> str:
+    cookie_pairs: list[str] = []
+    for header in set_cookie_headers:
+        first_part = header.split(";", 1)[0].strip()
+        if "=" not in first_part:
+            continue
+        cookie_pairs.append(first_part)
+    return "; ".join(cookie_pairs)
+
+
+def _bilibili_qr_generate() -> dict[str, Any]:
+    req = urllib.request.Request(
+        BILIBILI_QR_GENERATE_URL,
+        headers={
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://www.bilibili.com/",
+            "Origin": "https://www.bilibili.com",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+    return payload
+
+
+def _bilibili_qr_poll(qrcode_key: str) -> tuple[dict[str, Any], str]:
+    query = urllib.parse.urlencode({"qrcode_key": qrcode_key})
+    req = urllib.request.Request(
+        f"{BILIBILI_QR_POLL_URL}?{query}",
+        headers={
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://www.bilibili.com/",
+            "Origin": "https://www.bilibili.com",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+        raw_cookie_headers = resp.headers.get_all("Set-Cookie") or []
+    return payload, _extract_cookie_string(raw_cookie_headers)
+
+
 def _safe_static_path(request_path: str) -> Path | None:
     parsed = urlparse(request_path)
     path = parsed.path
     if path in {"/", ""}:
+        path = "/config"
+    if path == "/config":
         path = "/index.html"
+    if path == "/index":
+        path = "/index.html"
+    if path == "/cookie-login":
+        path = "/cookie_login.html"
 
     target = (TOGUI_DIR / path.lstrip("/")).resolve()
     try:
@@ -472,7 +523,7 @@ class ApiHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/":
             self.send_response(HTTPStatus.FOUND)
-            self.send_header("Location", "/index.html")
+            self.send_header("Location", "/config")
             self.end_headers()
             return
 
@@ -492,6 +543,25 @@ class ApiHandler(BaseHTTPRequestHandler):
                     "ui": cfg.get("ui", {}),
                 }
             )
+            return
+
+        if parsed.path == "/api/bili/qr/start":
+            try:
+                payload = _bilibili_qr_generate()
+            except urllib.error.URLError as exc:
+                self._write_json(
+                    {"status": "error", "message": f"Bilibili 接口访问失败: {exc}"},
+                    status=HTTPStatus.BAD_GATEWAY,
+                )
+                return
+            except json.JSONDecodeError:
+                self._write_json(
+                    {"status": "error", "message": "Bilibili 返回了无效 JSON"},
+                    status=HTTPStatus.BAD_GATEWAY,
+                )
+                return
+
+            self._write_json(payload)
             return
 
         self._write_json(
@@ -537,6 +607,55 @@ class ApiHandler(BaseHTTPRequestHandler):
                     "uid": uid,
                 }
             )
+            return
+
+        if parsed.path == "/api/bili/qr/poll":
+            length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0:
+                self._write_json(
+                    {"status": "error", "message": "Empty request body"},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+
+            raw = self.rfile.read(length).decode("utf-8", errors="replace")
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                self._write_json(
+                    {"status": "error", "message": "Body must be valid JSON"},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+
+            qrcode_key = str(payload.get("qrcode_key", "")).strip()
+            if not qrcode_key:
+                self._write_json(
+                    {"status": "error", "message": "qrcode_key is required"},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+
+            try:
+                bilibili_payload, cookie_text = _bilibili_qr_poll(qrcode_key)
+            except urllib.error.URLError as exc:
+                self._write_json(
+                    {"status": "error", "message": f"Bilibili 接口访问失败: {exc}"},
+                    status=HTTPStatus.BAD_GATEWAY,
+                )
+                return
+            except json.JSONDecodeError:
+                self._write_json(
+                    {"status": "error", "message": "Bilibili 返回了无效 JSON"},
+                    status=HTTPStatus.BAD_GATEWAY,
+                )
+                return
+
+            data = bilibili_payload.get("data", {})
+            if isinstance(data, dict):
+                data["cookie"] = cookie_text
+                bilibili_payload["data"] = data
+            self._write_json(bilibili_payload)
             return
 
         if parsed.path != "/api/queue/log":
@@ -603,7 +722,8 @@ def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
     )
 
     logger.info("Danmuji backend started on http://%s:%s", host, port)
-    logger.info("Index page: http://127.0.0.1:%s/index.html", port)
+    logger.info("Backend config page: http://127.0.0.1:%s/config", port)
+    logger.info("Index page: http://127.0.0.1:%s/index", port)
     logger.info("WebSocket: ws://127.0.0.1:%s/ws (alias: /danmu/sub)", port)
     httpd.serve_forever()
 

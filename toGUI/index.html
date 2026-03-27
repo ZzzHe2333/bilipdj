@@ -4,15 +4,6 @@
     <title>排队姬控制台</title>
 </head>
 <body>
-    <div id="startup-splash" class="startup-splash" aria-live="polite">
-        <div class="splash-grid"></div>
-        <div class="splash-card">
-            <p class="splash-title">系统启动提示</p>
-            <p class="splash-message">该软件是免费软件，如果收费购买（亲手帮安装除外），请立刻退款！</p>
-            <p id="startup-countdown" class="splash-countdown">即将进入控制台...</p>
-        </div>
-    </div>
-
     <p id="status" hidden></p>
     <p id="popularity" hidden></p>
 
@@ -33,6 +24,7 @@
         <div class="actions">
             <button @click="saveConfig">保存配置</button>
             <button @click="readLocalCookie">读取当前页面 Cookie</button>
+            <button @click="openCookieLogin">扫码自动获取 Cookie</button>
             <span class="hint">{{ statusText }}</span>
         </div>
     </div>
@@ -45,13 +37,11 @@
             data() {
                 return {
                     form: { roomid: '', uid: '', cookie: '' },
-                    statusText: '等待初始化...',
-                    splashSeconds: 5
+                    statusText: '等待初始化...'
                 }
             },
             async mounted() {
                 await this.loadConfig();
-                this.playStartupSplash();
                 window.addEventListener('pdj:status', (e) => {
                     const d = e.detail || {};
                     this.statusText = `状态: ${d.status || 'unknown'}${d.roomid ? ' / 房间 ' + d.roomid : ''}`;
@@ -65,41 +55,10 @@
                         this.form.roomid = cfg.roomid || '';
                         this.form.uid = cfg.uid || '';
                         this.form.cookie = cfg.cookie || '';
-                        const cfgSeconds = Number(cfg?.ui?.startup_splash_seconds);
-                        this.splashSeconds = Number.isFinite(cfgSeconds) ? Math.max(0, cfgSeconds) : 5;
                         this.statusText = '配置已加载';
                     } catch (e) {
                         this.statusText = '加载失败: ' + e;
                     }
-                },
-                playStartupSplash() {
-                    const splash = document.getElementById('startup-splash');
-                    const countdown = document.getElementById('startup-countdown');
-                    if (!splash) return;
-                    let remain = Math.ceil(this.splashSeconds);
-                    const updateText = () => {
-                        if (countdown) {
-                            countdown.textContent = remain > 0 ? `${remain}s 后进入控制台...` : '正在进入控制台...';
-                        }
-                    };
-                    updateText();
-                    if (remain <= 0) {
-                        splash.classList.add('hide');
-                        setTimeout(() => splash.remove(), 500);
-                        return;
-                    }
-                    const timer = setInterval(() => {
-                        remain -= 1;
-                        updateText();
-                        if (remain <= 0) {
-                            clearInterval(timer);
-                        }
-                    }, 1000);
-                    setTimeout(() => {
-                        clearInterval(timer);
-                        splash.classList.add('hide');
-                        setTimeout(() => splash.remove(), 500);
-                    }, this.splashSeconds * 1000);
                 },
                 async saveConfig() {
                     try {
@@ -122,6 +81,23 @@
                 readLocalCookie() {
                     this.form.cookie = document.cookie || '';
                     this.statusText = this.form.cookie ? '已读取当前域 Cookie（若为空请在 B 站页面手动复制）' : '当前域没有 Cookie，请手动粘贴';
+                },
+                openCookieLogin() {
+                    const popup = window.open('/cookie-login', 'pdj-cookie-login', 'width=560,height=760');
+                    if (!popup) {
+                        this.statusText = '弹窗被浏览器拦截，请允许弹窗后重试';
+                        return;
+                    }
+                    this.statusText = '已打开扫码页面，请完成扫码后自动回填 Cookie';
+                    const onMessage = (event) => {
+                        if (!event || !event.data || event.data.type !== 'pdj-cookie-ready') return;
+                        if (typeof event.data.cookie === 'string' && event.data.cookie.trim()) {
+                            this.form.cookie = event.data.cookie.trim();
+                            this.statusText = '扫码成功，Cookie 已自动回填，请点击保存配置';
+                        }
+                        window.removeEventListener('message', onMessage);
+                    };
+                    window.addEventListener('message', onMessage);
                 }
             }
         }).mount('#app');
@@ -141,65 +117,6 @@
 
     <style type="text/css">
         body { margin: 0; background: radial-gradient(circle at 20% 20%, #0e2036 0%, #060b14 42%, #020409 100%); color: #eaf6ff; }
-
-        .startup-splash {
-            position: fixed;
-            inset: 0;
-            z-index: 9999;
-            background: rgba(1, 8, 22, 0.94);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            overflow: hidden;
-            transition: opacity 0.45s ease;
-        }
-        .startup-splash.hide { opacity: 0; pointer-events: none; }
-        .splash-grid {
-            position: absolute;
-            inset: 0;
-            background-image:
-                linear-gradient(rgba(73, 190, 255, 0.16) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(73, 190, 255, 0.16) 1px, transparent 1px);
-            background-size: 38px 38px;
-            mask-image: radial-gradient(circle at center, black 30%, transparent 90%);
-            animation: pdjGridMove 10s linear infinite;
-        }
-        @keyframes pdjGridMove {
-            from { transform: translateY(0); }
-            to { transform: translateY(38px); }
-        }
-        .splash-card {
-            position: relative;
-            width: min(860px, calc(100% - 48px));
-            border: 1px solid rgba(79, 212, 255, 0.7);
-            border-radius: 14px;
-            padding: 28px 24px;
-            background: linear-gradient(135deg, rgba(7, 31, 56, 0.85), rgba(3, 14, 27, 0.92));
-            box-shadow: 0 0 30px rgba(50, 188, 255, 0.25), inset 0 0 30px rgba(24, 111, 152, 0.2);
-            text-align: center;
-        }
-        .splash-title {
-            margin: 0 0 14px;
-            font-size: 32px;
-            letter-spacing: 0.12em;
-            font-weight: 700;
-            color: #8de6ff;
-            text-shadow: 0 0 12px rgba(86, 208, 255, 0.7);
-        }
-        .splash-message {
-            margin: 0;
-            font-size: clamp(20px, 2.2vw, 36px);
-            font-weight: 700;
-            line-height: 1.55;
-            color: #ebf8ff;
-            text-shadow: 0 0 14px rgba(86, 208, 255, 0.4);
-        }
-        .splash-countdown {
-            margin: 16px 0 0;
-            font-size: 16px;
-            color: #95c7de;
-            letter-spacing: 0.08em;
-        }
 
         .panel { margin: 12px 0; padding: 12px; border: 1px solid #ddd; border-radius: 8px; max-width: 900px; }
         .panel .row { display: flex; align-items: center; margin: 8px 0; gap: 8px; }
