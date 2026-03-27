@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import tkinter as tk
+import urllib.error
+import urllib.request
 import webbrowser
 from pathlib import Path
 from tkinter import messagebox, ttk
@@ -123,10 +126,13 @@ class ControlPanelApp:
         self.retention_days_var = tk.StringVar(value="15")
         self.queue_enabled_var = tk.BooleanVar(value=True)
         self.queue_slots_var = tk.StringVar(value="3")
+        self.ws_light_var = tk.StringVar(value="●")
+        self.ws_text_var = tk.StringVar(value="直播间链接状态：未连接")
 
         self._build_ui()
         self.load_from_file()
         self.root.after(200, self.start_server)
+        self.root.after(1000, self.refresh_runtime_status)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def _build_ui(self) -> None:
@@ -162,12 +168,20 @@ class ControlPanelApp:
         button_bar = ttk.Frame(main)
         button_bar.grid(row=row, column=0, columnspan=2, sticky="w", pady=(8, 4))
         ttk.Button(button_bar, text="保存配置", command=self.save_to_file).grid(row=0, column=0, padx=(0, 8))
-        ttk.Button(button_bar, text="启动后端", command=self.start_server).grid(row=0, column=1, padx=(0, 8))
-        ttk.Button(button_bar, text="停止后端", command=self.stop_server).grid(row=0, column=2, padx=(0, 8))
-        ttk.Button(button_bar, text="打开Web界面", command=self.open_web).grid(row=0, column=3)
+        ttk.Button(button_bar, text="刷新配置", command=self.load_from_file).grid(row=0, column=1, padx=(0, 8))
+        ttk.Button(button_bar, text="启动后端", command=self.start_server).grid(row=0, column=2, padx=(0, 8))
+        ttk.Button(button_bar, text="停止后端", command=self.stop_server).grid(row=0, column=3, padx=(0, 8))
+        ttk.Button(button_bar, text="打开Web界面", command=self.open_web).grid(row=0, column=4)
+
+        status_bar = ttk.Frame(main)
+        status_bar.grid(row=row + 1, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Label(status_bar, textvariable=self.ws_light_var, foreground="#0b5", font=("Arial", 14, "bold")).grid(
+            row=0, column=0, sticky="w"
+        )
+        ttk.Label(status_bar, textvariable=self.ws_text_var).grid(row=0, column=1, sticky="w", padx=(8, 0))
 
         ttk.Label(main, textvariable=self.status_var, foreground="#0b5").grid(
-            row=row + 1, column=0, columnspan=2, sticky="w", pady=(8, 0)
+            row=row + 2, column=0, columnspan=2, sticky="w", pady=(8, 0)
         )
         main.columnconfigure(1, weight=1)
 
@@ -188,6 +202,26 @@ class ControlPanelApp:
         self.queue_enabled_var.set(bool(queue_archive.get("enabled", True)))
         self.queue_slots_var.set(str(queue_archive.get("slots", 3)))
         self.status_var.set("已加载配置")
+
+    def refresh_runtime_status(self) -> None:
+        port = self.port_var.get().strip() or "9816"
+        url = f"http://127.0.0.1:{port}/api/runtime-status"
+        try:
+            with urllib.request.urlopen(url, timeout=1.5) as resp:
+                payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+            active = bool(payload.get("danmu_stream_active"))
+            ws_clients = int(payload.get("ws_clients", 0))
+            if active:
+                self.ws_light_var.set("🟢")
+                self.ws_text_var.set(f"直播间链接状态：已连接（WS 客户端 {ws_clients}）")
+            else:
+                self.ws_light_var.set("🔴")
+                self.ws_text_var.set(f"直播间链接状态：等待弹幕流（WS 客户端 {ws_clients}）")
+        except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError):
+            self.ws_light_var.set("🔴")
+            self.ws_text_var.set("直播间链接状态：后端未响应")
+        finally:
+            self.root.after(2000, self.refresh_runtime_status)
 
     def gather_config(self) -> dict:
         return {
