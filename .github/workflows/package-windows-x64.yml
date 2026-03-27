@@ -38,6 +38,8 @@ jobs:
           fi
 
           echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "exe_name=bilibili-danmuji-$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "zip_name=bilibili-danmuji-windows-x64-$TAG_NAME.zip" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -52,7 +54,7 @@ jobs:
       - name: Build Windows executable (x64)
         shell: pwsh
         run: |
-          pyinstaller --noconfirm --clean --onefile --windowed --name bilibili-danmuji `
+          pyinstaller --noconfirm --clean --onefile --windowed --name "${{ steps.resolve_tag.outputs.exe_name }}" `
             --add-data "backend;backend" `
             --add-data "models;models" `
             --add-data "toGUI;toGUI" `
@@ -63,15 +65,15 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path package -Force | Out-Null
-          Copy-Item dist/bilibili-danmuji.exe package/
+          Copy-Item "dist/${{ steps.resolve_tag.outputs.exe_name }}.exe" package/
           if (Test-Path README.md) { Copy-Item README.md package/ }
-          Compress-Archive -Path package/* -DestinationPath bilibili-danmuji-windows-x64.zip -Force
+          Compress-Archive -Path package/* -DestinationPath "${{ steps.resolve_tag.outputs.zip_name }}" -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bilibili-danmuji-windows-x64
-          path: bilibili-danmuji-windows-x64.zip
+          name: bilibili-danmuji-windows-x64-${{ steps.resolve_tag.outputs.tag_name }}
+          path: ${{ steps.resolve_tag.outputs.zip_name }}
 
       - name: Create GitHub Release
         uses: ncipollo/release-action@v1
@@ -79,7 +81,7 @@ jobs:
           tag: ${{ steps.resolve_tag.outputs.tag_name }}
           commit: ${{ github.sha }}
           name: ${{ steps.resolve_tag.outputs.tag_name }}
-          artifacts: bilibili-danmuji-windows-x64.zip
+          artifacts: ${{ steps.resolve_tag.outputs.zip_name }}
           artifactErrorsFailBuild: true
           allowUpdates: true
           replacesArtifacts: true
