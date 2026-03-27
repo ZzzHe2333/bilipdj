@@ -1,0 +1,23 @@
+# Danmuji 全局配置
+server:
+  host: 0.0.0.0
+  port: 9816
+
+api:
+  roomid: 0
+  uid: 0
+  cookie: ""
+
+# 前端 myjs.js 可覆盖配置（如需扩展可继续加键值）
+myjs:
+
+logging:
+  # 支持 DEBUG / INFO / WARNING / ERROR / CRITICAL
+  level: INFO
+  # 每次启动默认清理多少天前日志
+  retention_days: 15
+
+queue_archive:
+  enabled: true
+  # 三个存档位（像游戏存档）
+  slots: 3
