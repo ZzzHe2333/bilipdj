@@ -26,3 +26,9 @@ queue_archive:
   enabled: true
   # 三个存档位（像游戏存档）
   slots: 3
+
+callback:
+  enabled: false
+  url: ""
+  auth_token: ""
+  timeout_seconds: 5

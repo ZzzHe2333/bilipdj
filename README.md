@@ -74,6 +74,24 @@ GUI 支持：
   - 展示入口：`/index`
   - 配置接口：`GET /api/config`、`POST /api/config`
   - Bilibili 扫码登录：`GET /api/bili/qr/start`、`POST /api/bili/qr/poll`
+    - `GET /api/bili/qr/start` 会在后端使用 Python `qrcode` 库生成二维码 PNG（base64）并返回给前端渲染。
+    - `POST /api/bili/qr/poll` 扫码成功后，除自动写入 Cookie，还会按 `config.yaml -> callback` 配置回调你的后端程序。
   - 队列日志接口：`POST /api/queue/log`
   - WebSocket：`/ws`（兼容别名 `/danmu/sub`）
 - 因此前端始终走同源地址，不需要手动再配额外反向代理。
+
+## 扫码成功回调配置
+
+在 `config.yaml` 中增加了 `callback` 配置：
+
+```yaml
+callback:
+  enabled: false
+  url: ""
+  auth_token: ""
+  timeout_seconds: 5
+```
+
+- `enabled=true` 且 `url` 非空时，扫码成功会向该地址发送 `POST` JSON 回调。
+- `auth_token` 非空时会自动带 `Authorization: Bearer <token>`。
+- 回调内容包含事件名、时间戳、Cookie 以及 Bilibili 原始轮询数据。
