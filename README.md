@@ -45,7 +45,12 @@ DANMUJI_BACKEND_HOST=0.0.0.0 DANMUJI_BACKEND_PORT=9816 python backend/server.py
 - 默认日志等级是 `INFO`（可在 `config.yaml -> logging.level` 修改）。
 - 新增 `POST /api/queue/log`：
   - 前端每次处理排队消息都会调用该接口记录一次快照。
-  - 排队快照按“游戏存档”思路以 CSV 写入 `log/queue_archive_slot_1.csv` ~ `log/queue_archive_slot_3.csv` 三个槽位循环覆盖。
+  - 排队快照按“游戏存档”思路以 CSV 写入 `pd/queue_archive_slot_1.csv` ~ `pd/queue_archive_slot_3.csv` 三个槽位循环覆盖。
+- 配置、日志、存档目录规则：
+  - 启动时会以“脚本目录（开发模式）或 EXE 所在目录（打包后）”作为运行目录。
+  - 若运行目录不存在 `config.yaml` 会自动创建。
+  - 若不存在 `log/` 或 `pd/` 目录会自动创建。
+  - 若 `pd/` 下没有存档文件会初始化 3 个默认存档槽位文件。
 
 
 ### 3) 启动桌面 GUI 控制台
