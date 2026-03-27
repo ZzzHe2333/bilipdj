@@ -1,110 +1,11 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>排队姬控制台</title>
+    <title>排队姬队列看板</title>
 </head>
 <body>
     <p id="status" hidden></p>
     <p id="popularity" hidden></p>
-
-    <div id="app" class="panel">
-        <h3>PDJ 配置面板</h3>
-        <div class="row">
-            <label>直播间号</label>
-            <input v-model.trim="form.roomid" type="number" placeholder="例如：26714219" />
-        </div>
-        <div class="row">
-            <label>UID</label>
-            <input v-model.trim="form.uid" type="number" placeholder="例如：18461303" />
-        </div>
-        <div class="row">
-            <label>Cookie</label>
-            <textarea v-model.trim="form.cookie" rows="3" placeholder="粘贴 Bilibili Cookie（至少包含 SESSDATA）"></textarea>
-        </div>
-        <div class="actions">
-            <button @click="saveConfig">保存配置</button>
-            <button @click="readLocalCookie">读取当前页面 Cookie</button>
-            <button @click="openCookieLogin">扫码自动获取 Cookie</button>
-            <span class="hint">{{ statusText }}</span>
-        </div>
-    </div>
-
-    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-    <script>
-        const { createApp } = Vue;
-
-        createApp({
-            data() {
-                return {
-                    form: { roomid: '', uid: '', cookie: '' },
-                    statusText: '等待初始化...'
-                }
-            },
-            async mounted() {
-                await this.loadConfig();
-                window.addEventListener('pdj:status', (e) => {
-                    const d = e.detail || {};
-                    this.statusText = `状态: ${d.status || 'unknown'}${d.roomid ? ' / 房间 ' + d.roomid : ''}`;
-                });
-            },
-            methods: {
-                async loadConfig() {
-                    try {
-                        const res = await fetch('/api/config');
-                        const cfg = await res.json();
-                        this.form.roomid = cfg.roomid || '';
-                        this.form.uid = cfg.uid || '';
-                        this.form.cookie = cfg.cookie || '';
-                        this.statusText = '配置已加载';
-                    } catch (e) {
-                        this.statusText = '加载失败: ' + e;
-                    }
-                },
-                async saveConfig() {
-                    try {
-                        const body = {
-                            roomid: Number(this.form.roomid || 0),
-                            uid: Number(this.form.uid || 0),
-                            cookie: this.form.cookie || ''
-                        };
-                        const res = await fetch('/api/config', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(body)
-                        });
-                        if (!res.ok) throw new Error('HTTP ' + res.status);
-                        this.statusText = '保存成功，弹幕连接会自动重连';
-                    } catch (e) {
-                        this.statusText = '保存失败: ' + e;
-                    }
-                },
-                readLocalCookie() {
-                    this.form.cookie = document.cookie || '';
-                    this.statusText = this.form.cookie ? '已读取当前域 Cookie（若为空请在 B 站页面手动复制）' : '当前域没有 Cookie，请手动粘贴';
-                },
-                openCookieLogin() {
-                    const popup = window.open('/cookie-login', 'pdj-cookie-login', 'width=560,height=760');
-                    if (!popup) {
-                        this.statusText = '弹窗被浏览器拦截，请允许弹窗后重试';
-                        return;
-                    }
-                    this.statusText = '已打开扫码页面，请完成扫码后自动回填 Cookie';
-                    const onMessage = (event) => {
-                        if (!event || !event.data || event.data.type !== 'pdj-cookie-ready') return;
-                        if (typeof event.data.cookie === 'string' && event.data.cookie.trim()) {
-                            this.form.cookie = event.data.cookie.trim();
-                            this.statusText = '扫码成功，Cookie 已自动回填，请点击保存配置';
-                        }
-                        window.removeEventListener('message', onMessage);
-                    };
-                    window.addEventListener('message', onMessage);
-                }
-            }
-        }).mount('#app');
-    </script>
-
-    <script src="pako.min.js"></script>
-    <script src="myjs.js"></script>
 
     <div class="wk">
         <div class="vText">
@@ -115,15 +16,11 @@
         <div id='danmu' class="div"></div>
     </div>
 
+    <script src="pako.min.js"></script>
+    <script src="myjs.js"></script>
+
     <style type="text/css">
         body { margin: 0; background: radial-gradient(circle at 20% 20%, #0e2036 0%, #060b14 42%, #020409 100%); color: #eaf6ff; }
-
-        .panel { margin: 12px 0; padding: 12px; border: 1px solid #ddd; border-radius: 8px; max-width: 900px; }
-        .panel .row { display: flex; align-items: center; margin: 8px 0; gap: 8px; }
-        .panel label { width: 90px; font-weight: 600; }
-        .panel input, .panel textarea { flex: 1; padding: 6px; }
-        .panel .actions { display: flex; align-items: center; gap: 8px; }
-        .panel .hint { color: #c8d6e4; }
 
         .wk{ width: 100%; height: 80%; text-overflow:ellipsis; white-space: nowrap; }
         .div { width: 60%; height: 90%; line-height:1.3; font-size: 50px; font-weight:700; font-style:oblique; float: left; margin-top: 5%; text-align:left; overflow: hidden; text-decoration:underline(to right, rgb(64, 211, 15), rgb(201, 61, 61)); }
