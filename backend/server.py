@@ -655,6 +655,20 @@ class ApiHandler(BaseHTTPRequestHandler):
             if isinstance(data, dict):
                 data["cookie"] = cookie_text
                 bilibili_payload["data"] = data
+
+                try:
+                    poll_code = int(data.get("code", -1))
+                except (TypeError, ValueError):
+                    poll_code = -1
+
+                if poll_code == 0 and cookie_text:
+                    updated = _merge_config(
+                        self.server.runtime_config,
+                        {"api": {"cookie": cookie_text}},
+                    )
+                    save_config(updated)
+                    self.server.runtime_config = updated
+                    self.server.logger.info("Bilibili 扫码成功，Cookie 已自动写入 config.yaml")
             self._write_json(bilibili_payload)
             return
 
