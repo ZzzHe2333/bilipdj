@@ -27,7 +27,9 @@ python backend/server.py
 
 服务启动后可访问：
 
-- `GET /`：基础欢迎信息。
+- `GET /`：自动跳转到后台管理页 `/config`。
+- `GET /config`：后台管理页面（配置与扫码登录入口）。
+- `GET /index`：直播展示页面。
 - `GET /health`：健康检查。
 - `GET /model`：读取 `models/danmuji_initial_model.json` 并返回。
 
@@ -68,8 +70,10 @@ GUI 支持：
 ## 前后端合并与自动反代说明
 
 - 后端会同时提供 API、WebSocket 和前端静态页面：
-  - 页面入口：`/`（自动跳转到 `/index.html`）
+  - 后台管理入口：`/config`
+  - 展示入口：`/index`
   - 配置接口：`GET /api/config`、`POST /api/config`
+  - Bilibili 扫码登录：`GET /api/bili/qr/start`、`POST /api/bili/qr/poll`
   - 队列日志接口：`POST /api/queue/log`
   - WebSocket：`/ws`（兼容别名 `/danmu/sub`）
 - 因此前端始终走同源地址，不需要手动再配额外反向代理。

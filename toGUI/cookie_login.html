@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <title>扫码登录获取 Cookie</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { margin: 0; font-family: "Microsoft YaHei", sans-serif; background: #0c1629; color: #eaf6ff; }
+        .wrap { max-width: 520px; margin: 0 auto; padding: 18px; }
+        .card { border: 1px solid #2e597f; border-radius: 12px; background: #10213c; padding: 16px; }
+        .title { font-size: 20px; margin: 0 0 12px; }
+        #qrcode { display: flex; justify-content: center; background: #fff; border-radius: 8px; padding: 10px; min-height: 280px; }
+        .status { margin-top: 12px; font-size: 14px; color: #9fd7ff; white-space: pre-wrap; }
+        .hint { margin-top: 10px; font-size: 13px; color: #b8d8ee; line-height: 1.5; }
+        button { margin-top: 14px; background: #33a3ff; border: 0; color: #fff; border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <div class="card">
+            <h1 class="title">Bilibili 扫码登录（自动获取 Cookie）</h1>
+            <div id="qrcode"></div>
+            <div id="status" class="status">正在初始化二维码...</div>
+            <button id="refresh">刷新二维码</button>
+            <div class="hint">用 Bilibili App 扫码并确认后，本窗口会自动把 Cookie 回填到主页面。</div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+    <script>
+        const statusEl = document.getElementById('status');
+        const qrContainer = document.getElementById('qrcode');
+        const refreshBtn = document.getElementById('refresh');
+        let pollingTimer = null;
+
+        function setStatus(text) {
+            statusEl.textContent = text;
+        }
+
+        function stopPolling() {
+            if (pollingTimer) {
+                clearInterval(pollingTimer);
+                pollingTimer = null;
+            }
+        }
+
+        async function renderQr(text) {
+            qrContainer.innerHTML = '';
+            const canvas = document.createElement('canvas');
+            qrContainer.appendChild(canvas);
+            await QRCode.toCanvas(canvas, text, {
+                width: 280,
+                margin: 1,
+                color: { dark: '#000000', light: '#ffffff' }
+            });
+        }
+
+        async function startLoginFlow() {
+            stopPolling();
+            setStatus('正在请求二维码...');
+            try {
+                const res = await fetch('/api/bili/qr/start');
+                const data = await res.json();
+                const qrUrl = data?.data?.url;
+                const qrcodeKey = data?.data?.qrcode_key;
+                if (!qrUrl || !qrcodeKey) {
+                    throw new Error('二维码数据为空');
+                }
+                await renderQr(qrUrl);
+                setStatus('请使用 Bilibili App 扫码，然后在手机确认登录。');
+
+                pollingTimer = setInterval(async () => {
+                    try {
+                        const pollRes = await fetch('/api/bili/qr/poll', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ qrcode_key: qrcodeKey })
+                        });
+                        const pollData = await pollRes.json();
+                        const code = Number(pollData?.data?.code);
+                        const message = pollData?.data?.message || '';
+                        if (code === 0) {
+                            const cookie = String(pollData?.data?.cookie || '').trim();
+                            if (!cookie) {
+                                setStatus('扫码成功，但未拿到 Cookie，请重试。');
+                                stopPolling();
+                                return;
+                            }
+                            setStatus('扫码成功，正在回填 Cookie...');
+                            if (window.opener) {
+                                window.opener.postMessage({ type: 'pdj-cookie-ready', cookie }, window.location.origin);
+                            }
+                            stopPolling();
+                            setTimeout(() => window.close(), 600);
+                            return;
+                        }
+                        if (code === 86101) {
+                            setStatus('二维码已生成，请扫码。');
+                            return;
+                        }
+                        if (code === 86090) {
+                            setStatus('已扫码，请在手机确认登录。');
+                            return;
+                        }
+                        if (code === 86038) {
+                            setStatus('二维码已失效，请点击“刷新二维码”。');
+                            stopPolling();
+                            return;
+                        }
+                        setStatus('等待登录: ' + message + '（code=' + code + '）');
+                    } catch (err) {
+                        setStatus('轮询失败: ' + err);
+                    }
+                }, 2000);
+            } catch (err) {
+                setStatus('初始化失败: ' + err);
+            }
+        }
+
+        refreshBtn.addEventListener('click', startLoginFlow);
+        startLoginFlow();
+    </script>
+</body>
+</html>

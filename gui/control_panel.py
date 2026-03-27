@@ -257,7 +257,14 @@ class ControlPanelApp:
 
     def open_web(self) -> None:
         port = self.port_var.get().strip() or "9816"
-        webbrowser.open(f"http://127.0.0.1:{port}/")
+        confirmed = messagebox.askokcancel(
+            "免费软件提示",
+            "该软件是免费软件，如果收费购买（亲手帮安装除外），请立刻退款！\n\n点击“确定”后打开后台管理页面。",
+        )
+        if not confirmed:
+            self.status_var.set("已取消打开网页")
+            return
+        webbrowser.open(f"http://127.0.0.1:{port}/config")
 
     def on_close(self) -> None:
         if self.server_proc and self.server_proc.poll() is None:
