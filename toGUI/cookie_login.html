@@ -26,7 +26,6 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
     <script>
         const statusEl = document.getElementById('status');
         const qrContainer = document.getElementById('qrcode');
@@ -44,11 +43,56 @@
             }
         }
 
+        function sleep(ms) {
+            return new Promise((resolve) => setTimeout(resolve, ms));
+        }
+
+        async function ensureQrCodeLib() {
+            if (window.QRCode && typeof window.QRCode.toCanvas === 'function') {
+                return true;
+            }
+            const candidates = [
+                'https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js',
+                'https://unpkg.com/qrcode@1.5.4/build/qrcode.min.js'
+            ];
+            for (const src of candidates) {
+                try {
+                    await new Promise((resolve, reject) => {
+                        const script = document.createElement('script');
+                        script.src = src;
+                        script.async = true;
+                        script.onload = resolve;
+                        script.onerror = () => reject(new Error('加载失败: ' + src));
+                        document.head.appendChild(script);
+                    });
+                    if (window.QRCode && typeof window.QRCode.toCanvas === 'function') {
+                        return true;
+                    }
+                } catch (_err) {
+                    await sleep(80);
+                }
+            }
+            return false;
+        }
+
         async function renderQr(text) {
             qrContainer.innerHTML = '';
+            const loaded = await ensureQrCodeLib();
+            if (!loaded) {
+                const box = document.createElement('div');
+                box.style.padding = '14px';
+                box.style.color = '#0c1629';
+                box.style.wordBreak = 'break-all';
+                box.innerHTML = '<div style="font-weight:700;margin-bottom:8px;">二维码组件加载失败</div>' +
+                    '<div style="font-size:13px;line-height:1.5;">请点击下面链接在新页面打开二维码后扫码：</div>' +
+                    '<a href="' + text + '" target="_blank" rel="noopener" style="font-size:12px;">' + text + '</a>';
+                qrContainer.appendChild(box);
+                throw new Error('二维码库加载失败（QRCode is not defined）');
+            }
+
             const canvas = document.createElement('canvas');
             qrContainer.appendChild(canvas);
-            await QRCode.toCanvas(canvas, text, {
+            await window.QRCode.toCanvas(canvas, text, {
                 width: 280,
                 margin: 1,
                 color: { dark: '#000000', light: '#ffffff' }

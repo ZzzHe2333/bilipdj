@@ -53,7 +53,8 @@
                         this.statusText = '加载失败: ' + e;
                     }
                 },
-                async saveConfig() {
+                async saveConfig(options = {}) {
+                    const { silent = false } = options;
                     try {
                         const body = {
                             roomid: Number(this.form.roomid || 0),
@@ -66,9 +67,11 @@
                             body: JSON.stringify(body)
                         });
                         if (!res.ok) throw new Error('HTTP ' + res.status);
-                        this.statusText = '保存成功，弹幕连接会自动重连';
+                        this.statusText = silent ? 'Cookie 已自动保存到 config' : '保存成功，弹幕连接会自动重连';
+                        return true;
                     } catch (e) {
                         this.statusText = '保存失败: ' + e;
+                        return false;
                     }
                 },
                 readLocalCookie() {
@@ -86,7 +89,8 @@
                         if (!event || !event.data || event.data.type !== 'pdj-cookie-ready') return;
                         if (typeof event.data.cookie === 'string' && event.data.cookie.trim()) {
                             this.form.cookie = event.data.cookie.trim();
-                            this.statusText = '扫码成功，Cookie 已自动回填，请点击保存配置';
+                            this.statusText = '扫码成功，Cookie 已自动回填，正在写入配置...';
+                            this.saveConfig({ silent: true });
                         }
                         window.removeEventListener('message', onMessage);
                     };
