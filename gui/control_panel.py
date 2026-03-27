@@ -7,9 +7,12 @@ import webbrowser
 from pathlib import Path
 from tkinter import messagebox, ttk
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-CONFIG_PATH = ROOT_DIR / "config.yaml"
-SERVER_PATH = ROOT_DIR / "backend" / "server.py"
+REPO_DIR = Path(__file__).resolve().parent.parent
+BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", REPO_DIR))
+APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else REPO_DIR
+CONFIG_PATH = APP_DIR / "config.yaml"
+SERVER_PATH = BUNDLE_DIR / "backend" / "server.py"
+APP_VERSION = "0.4.0"
 
 
 def parse_scalar(value: str):
@@ -107,7 +110,7 @@ queue_archive:
 class ControlPanelApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("Danmuji 控制台")
+        self.root.title(f"Danmuji 控制台 v{APP_VERSION}")
         self.server_proc: subprocess.Popen[str] | None = None
 
         self.status_var = tk.StringVar(value="服务未启动")
@@ -225,10 +228,13 @@ class ControlPanelApp:
 
         try:
             self.save_to_file()
-            command = [sys.executable, str(SERVER_PATH)]
+            if getattr(sys, "frozen", False):
+                command = [sys.executable, "--backend"]
+            else:
+                command = [sys.executable, str(SERVER_PATH)]
             self.server_proc = subprocess.Popen(
                 command,
-                cwd=str(ROOT_DIR),
+                cwd=str(APP_DIR),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 text=True,
@@ -260,6 +266,15 @@ class ControlPanelApp:
 
 
 def main() -> None:
+    if "--backend" in sys.argv[1:]:
+        from backend import server as backend_server
+
+        config = backend_server.load_config()
+        host = str(config.get("server", {}).get("host", "0.0.0.0"))
+        port = int(config.get("server", {}).get("port", 9816))
+        backend_server.run_server(host=host, port=port)
+        return
+
     root = tk.Tk()
     app = ControlPanelApp(root)
     root.minsize(640, 420)

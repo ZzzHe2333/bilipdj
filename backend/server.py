@@ -9,6 +9,7 @@ import logging
 import os
 import socket
 import struct
+import sys
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -18,12 +19,16 @@ from urllib.parse import urlparse
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 9816
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-MODEL_JSON_PATH = ROOT_DIR / "models" / "danmuji_initial_model.json"
-TOGUI_DIR = ROOT_DIR / "toGUI"
-CONFIG_PATH = ROOT_DIR / "config.yaml"
-LOG_DIR = ROOT_DIR / "log"
-QUEUE_STATE_PATH = LOG_DIR / "queue_archive_state.json"
+REPO_DIR = Path(__file__).resolve().parent.parent
+BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", REPO_DIR))
+APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else REPO_DIR
+
+MODEL_JSON_PATH = BUNDLE_DIR / "models" / "danmuji_initial_model.json"
+TOGUI_DIR = BUNDLE_DIR / "toGUI"
+CONFIG_PATH = APP_DIR / "config.yaml"
+LOG_DIR = APP_DIR / "log"
+PD_DIR = APP_DIR / "pd"
+QUEUE_STATE_PATH = PD_DIR / "queue_archive_state.json"
 
 WS_MAGIC_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
@@ -112,7 +117,21 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
+def ensure_runtime_layout(config_slots: int = 3) -> None:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    PD_DIR.mkdir(parents=True, exist_ok=True)
+    if not CONFIG_PATH.exists():
+        save_config(DEFAULT_CONFIG)
+
+    slots = max(1, int(config_slots))
+    for slot in range(1, slots + 1):
+        slot_file = PD_DIR / f"queue_archive_slot_{slot}.csv"
+        if not slot_file.exists():
+            slot_file.write_text("position,queue_item\n", encoding="utf-8-sig")
+
+
 def load_config() -> dict[str, Any]:
+    ensure_runtime_layout(int(DEFAULT_CONFIG.get("queue_archive", {}).get("slots", 3)))
     return _merge_config(DEFAULT_CONFIG, load_simple_yaml(CONFIG_PATH))
 
 
@@ -209,7 +228,7 @@ class QueueArchiveManager:
     def __init__(self, slots: int = 3, enabled: bool = True) -> None:
         self.slots = max(1, int(slots))
         self.enabled = enabled
-        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        PD_DIR.mkdir(parents=True, exist_ok=True)
 
     def _read_state(self) -> dict[str, int]:
         if not QUEUE_STATE_PATH.exists():
@@ -225,7 +244,7 @@ class QueueArchiveManager:
         )
 
     def _slot_file(self, slot: int) -> Path:
-        return LOG_DIR / f"queue_archive_slot_{slot}.csv"
+        return PD_DIR / f"queue_archive_slot_{slot}.csv"
 
     def write_snapshot(self, actor: str, message: str, queue_items: list[str]) -> Path | None:
         if not self.enabled:
@@ -571,6 +590,7 @@ class ApiHandler(BaseHTTPRequestHandler):
 
 def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
     runtime_config = load_config()
+    ensure_runtime_layout(int(runtime_config.get("queue_archive", {}).get("slots", 3)))
     logger = setup_logging(runtime_config)
     archive_cfg = runtime_config.get("queue_archive", {})
 
