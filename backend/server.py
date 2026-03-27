@@ -8,13 +8,17 @@ import io
 import json
 import logging
 import os
+import random
 import socket
+import ssl
 import struct
 import sys
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -43,6 +47,12 @@ QUEUE_STATE_PATH = PD_DIR / "queue_archive_state.json"
 WS_MAGIC_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 BILIBILI_QR_GENERATE_URL = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
 BILIBILI_QR_POLL_URL = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
+BILIBILI_DANMU_INFO_URL = "https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo"
+
+try:
+    import brotli
+except ImportError:  # pragma: no cover - 可选依赖
+    brotli = None
 
 
 class BackendServer(ThreadingHTTPServer):
@@ -51,6 +61,7 @@ class BackendServer(ThreadingHTTPServer):
     logger: logging.Logger
     queue_archive: "QueueArchiveManager"
     ws_hub: "WebSocketHub"
+    danmu_relay: "BilibiliDanmuRelay"
 
 
 class WebSocketHub:
@@ -118,6 +129,19 @@ def _ws_send_text(conn: socket.socket, text: str, opcode: int = 0x1) -> None:
         header.extend(struct.pack("!Q", length))
 
     conn.sendall(bytes(header) + payload)
+
+
+def _ws_recv_exact(conn: socket.socket, size: int) -> bytes | None:
+    chunks = bytearray()
+    while len(chunks) < size:
+        try:
+            chunk = conn.recv(size - len(chunks))
+        except (TimeoutError, socket.timeout):
+            raise TimeoutError("socket recv timeout")
+        if not chunk:
+            return None
+        chunks.extend(chunk)
+    return bytes(chunks)
 
 
 def _parse_scalar(value: str) -> Any:
@@ -443,6 +467,194 @@ def _build_qr_png_base64(text: str) -> tuple[str, str]:
     img.save(buf, format="PNG")
     encoded = base64.b64encode(buf.getvalue()).decode("ascii")
     return encoded, ""
+
+
+def _bilibili_get_danmu_info(roomid: int, cookie: str = "") -> dict[str, Any]:
+    query = urllib.parse.urlencode({"id": roomid, "type": 0})
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Referer": "https://live.bilibili.com/",
+        "Origin": "https://live.bilibili.com",
+    }
+    if cookie:
+        headers["Cookie"] = cookie
+    req = urllib.request.Request(f"{BILIBILI_DANMU_INFO_URL}?{query}", headers=headers)
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return json.loads(resp.read().decode("utf-8", errors="replace"))
+
+
+class BilibiliDanmuRelay(threading.Thread):
+    def __init__(self, server: BackendServer) -> None:
+        super().__init__(name="bilibili-danmu-relay", daemon=True)
+        self.server = server
+        self.logger = server.logger
+        self._stop_event = threading.Event()
+        self._reconnect_event = threading.Event()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        self._reconnect_event.set()
+
+    def request_reconnect(self) -> None:
+        self._reconnect_event.set()
+
+    def _emit_status(self, status: str, **extra: Any) -> None:
+        payload = {"type": "PDJ_STATUS", "status": status}
+        payload.update(extra)
+        self.server.ws_hub.broadcast_json(None, payload)
+
+    def _pack_packet(self, body: bytes, operation: int, version: int = 1) -> bytes:
+        header_len = 16
+        packet_len = header_len + len(body)
+        return struct.pack("!IHHII", packet_len, header_len, version, operation, 1) + body
+
+    def _send_auth(self, conn: socket.socket, roomid: int, uid: int, token: str) -> None:
+        auth_payload = {
+            "uid": uid,
+            "roomid": roomid,
+            "protover": 3,
+            "platform": "web",
+            "type": 2,
+            "key": token,
+        }
+        body = json.dumps(auth_payload, ensure_ascii=False).encode("utf-8")
+        conn.sendall(self._pack_packet(body, operation=7, version=1))
+
+    def _send_heartbeat(self, conn: socket.socket) -> None:
+        conn.sendall(self._pack_packet(b"[object Object]", operation=2, version=1))
+
+    def _iter_business_messages(self, packet_data: bytes) -> list[str]:
+        messages: list[str] = []
+        offset = 0
+        total = len(packet_data)
+        while offset + 16 <= total:
+            packet_len, header_len, version, operation, _ = struct.unpack(
+                "!IHHII", packet_data[offset : offset + 16]
+            )
+            if packet_len <= 0 or offset + packet_len > total:
+                break
+            body = packet_data[offset + header_len : offset + packet_len]
+            offset += packet_len
+
+            if operation != 5:
+                continue
+            if version == 0 or version == 1:
+                text = body.decode("utf-8", errors="replace").strip()
+                if text:
+                    messages.append(text)
+            elif version == 2:
+                try:
+                    messages.extend(self._iter_business_messages(zlib.decompress(body)))
+                except zlib.error:
+                    self.logger.debug("弹幕包 zlib 解压失败")
+            elif version == 3:
+                if brotli is None:
+                    self.logger.debug("收到 brotli 包，但环境未安装 brotli")
+                    continue
+                try:
+                    messages.extend(self._iter_business_messages(brotli.decompress(body)))
+                except Exception:
+                    self.logger.debug("弹幕包 brotli 解压失败")
+        return messages
+
+    def _recv_and_handle(self, conn: socket.socket) -> bool:
+        try:
+            header = _ws_recv_exact(conn, 16)
+        except TimeoutError:
+            return True
+        if not header:
+            return False
+        packet_len, header_len, _, operation, _ = struct.unpack("!IHHII", header)
+        if packet_len < header_len or header_len < 16:
+            return False
+        try:
+            body = _ws_recv_exact(conn, packet_len - 16)
+        except TimeoutError:
+            return True
+        if body is None:
+            return False
+        packet_data = header + body
+
+        if operation == 8:
+            self.logger.info("直播间弹幕鉴权成功")
+            self._emit_status("danmu_auth_ok")
+            return True
+        if operation == 3 and len(body) >= 4:
+            popularity = struct.unpack("!I", body[:4])[0]
+            self.logger.info("实时人气值：%s", popularity)
+            self._emit_status("popularity", popularity=popularity)
+            return True
+
+        for text in self._iter_business_messages(packet_data):
+            self.server.ws_hub.mark_message()
+            self.server.ws_hub.broadcast_text(None, text)
+        return True
+
+    def _connect_and_stream(self) -> None:
+        cfg = self.server.runtime_config.get("api", {})
+        roomid = int(cfg.get("roomid", 0))
+        uid = int(cfg.get("uid", 0))
+        cookie = str(cfg.get("cookie", "")).strip()
+        if roomid <= 0:
+            self.logger.info("直播间未配置（roomid=0），跳过弹幕连接")
+            self._emit_status("danmu_waiting_config", message="roomid 未配置")
+            time.sleep(3)
+            return
+
+        self.logger.info("开始获取直播间弹幕 ws 地址，roomid=%s", roomid)
+        payload = _bilibili_get_danmu_info(roomid, cookie)
+        data = payload.get("data", {}) if isinstance(payload, dict) else {}
+        token = str(data.get("token", ""))
+        host_list = data.get("host_list", [])
+        real_room_id = int(data.get("room_id", roomid))
+        if not token or not isinstance(host_list, list) or not host_list:
+            raise RuntimeError(f"getDanmuInfo 返回异常: {payload}")
+
+        candidate = random.choice(host_list)
+        host = str(candidate.get("host", "")).strip()
+        wss_port = int(candidate.get("wss_port", 443) or 443)
+        if not host:
+            raise RuntimeError(f"getDanmuInfo host 为空: {payload}")
+
+        self.logger.info("直播间弹幕服务地址：wss://%s:%s/sub", host, wss_port)
+        self._emit_status("danmu_connecting", roomid=real_room_id, host=host, port=wss_port)
+
+        raw_conn = socket.create_connection((host, wss_port), timeout=10)
+        context = ssl.create_default_context()
+        conn = context.wrap_socket(raw_conn, server_hostname=host)
+        conn.settimeout(1.0)
+        try:
+            self._send_auth(conn, real_room_id, uid, token)
+            self._send_heartbeat(conn)
+            self._emit_status("danmu_connected", roomid=real_room_id, host=host)
+            self.logger.info("已连接直播间弹幕流，roomid=%s", real_room_id)
+            next_heartbeat = time.time() + 30
+
+            while not self._stop_event.is_set():
+                if self._reconnect_event.is_set():
+                    self._reconnect_event.clear()
+                    self.logger.info("收到重连信号，准备重新连接直播间弹幕流")
+                    break
+                if time.time() >= next_heartbeat:
+                    self._send_heartbeat(conn)
+                    next_heartbeat = time.time() + 30
+                ok = self._recv_and_handle(conn)
+                if not ok:
+                    raise ConnectionError("直播间弹幕连接中断")
+        finally:
+            try:
+                conn.close()
+            except OSError:
+                pass
+
+    def run(self) -> None:
+        while not self._stop_event.is_set():
+            try:
+                self._connect_and_stream()
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning("直播间弹幕连接异常：%s", exc)
+                self._emit_status("danmu_disconnected", error=str(exc))
+                time.sleep(2)
 
 
 def _dispatch_login_callback(
@@ -791,6 +1003,9 @@ class ApiHandler(BaseHTTPRequestHandler):
             )
             save_config(updated)
             self.server.runtime_config = updated
+            if hasattr(self.server, "danmu_relay"):
+                self.server.danmu_relay.request_reconnect()
+            self.server.logger.info("配置已更新，触发直播间弹幕重连 roomid=%s uid=%s", roomid, uid)
             self._write_json(
                 {
                     "status": "ok",
@@ -947,12 +1162,17 @@ def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
         enabled=bool(archive_cfg.get("enabled", True)),
     )
     httpd.ws_hub = WebSocketHub(logger)
+    httpd.danmu_relay = BilibiliDanmuRelay(httpd)
+    httpd.danmu_relay.start()
 
     logger.info("Danmuji backend started on http://%s:%s", host, port)
     logger.info("Backend config page: http://127.0.0.1:%s/config", port)
     logger.info("Index page: http://127.0.0.1:%s/index", port)
     logger.info("WebSocket: ws://127.0.0.1:%s/ws (alias: /danmu/sub)", port)
-    httpd.serve_forever()
+    try:
+        httpd.serve_forever()
+    finally:
+        httpd.danmu_relay.stop()
 
 
 if __name__ == "__main__":

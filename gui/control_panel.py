@@ -143,14 +143,14 @@ class ControlPanelApp:
 
         row = 0
         for label, var in [
-            ("Host", self.host_var),
-            ("Port", self.port_var),
-            ("Room ID", self.roomid_var),
+            ("监听地址", self.host_var),
+            ("监听端口", self.port_var),
+            ("直播间号", self.roomid_var),
             ("UID", self.uid_var),
             ("Cookie", self.cookie_var),
-            ("Log Level", self.log_level_var),
-            ("Retention Days", self.retention_days_var),
-            ("Queue Slots", self.queue_slots_var),
+            ("日志等级", self.log_level_var),
+            ("日志保留天数", self.retention_days_var),
+            ("排队存档槽位", self.queue_slots_var),
         ]:
             ttk.Label(main, text=label).grid(row=row, column=0, sticky="w", pady=4)
             if label == "Cookie":
@@ -251,7 +251,7 @@ class ControlPanelApp:
             save_config(CONFIG_PATH, config)
             self.status_var.set("配置保存成功")
         except ValueError:
-            messagebox.showerror("输入错误", "请检查数字字段（Port/Room ID/UID/Retention/Slots）")
+            messagebox.showerror("输入错误", "请检查数字字段（端口/直播间号/UID/保留天数/槽位）")
         except OSError as exc:
             messagebox.showerror("保存失败", str(exc))
 
