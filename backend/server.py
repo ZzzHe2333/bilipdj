@@ -250,6 +250,12 @@ def save_config(config: dict[str, Any]) -> None:
     myjs_block = "\n".join(myjs_lines) if myjs_lines else "  # 可在此覆盖前端 myjs.js 配置"
 
     cookie_text = str(api.get("cookie", "")).replace('"', '\\"')
+    qr_last_success_at = str(qr_login.get("last_success_at", "")).replace('"', '\\"')
+    qr_qrcode_key = str(qr_login.get("qrcode_key", "")).replace('"', '\\"')
+    qr_message = str(qr_login.get("message", "")).replace('"', '\\"')
+    qr_cookie = str(qr_login.get("cookie", "")).replace('"', '\\"')
+    callback_url = str(callback_cfg.get("url", "")).replace('"', '\\"')
+    callback_auth_token = str(callback_cfg.get("auth_token", "")).replace('"', '\\"')
 
     content = f"""# Danmuji 全局配置
 server:
@@ -263,11 +269,11 @@ api:
 
 qr_login:
   # 最近一次扫码成功信息（由 /api/bili/qr/poll 自动写入）
-  last_success_at: "{str(qr_login.get('last_success_at', '')).replace('\\"', '\\\\"')}"
-  qrcode_key: "{str(qr_login.get('qrcode_key', '')).replace('\\"', '\\\\"')}"
+  last_success_at: "{qr_last_success_at}"
+  qrcode_key: "{qr_qrcode_key}"
   poll_code: {int(qr_login.get('poll_code', -1))}
-  message: "{str(qr_login.get('message', '')).replace('\\"', '\\\\"')}"
-  cookie: "{str(qr_login.get('cookie', '')).replace('\\"', '\\\\"')}"
+  message: "{qr_message}"
+  cookie: "{qr_cookie}"
 
 # 前端 myjs.js 可覆盖配置（如需扩展可继续加键值）
 myjs:
@@ -290,8 +296,8 @@ queue_archive:
 
 callback:
   enabled: {'true' if bool(callback_cfg.get('enabled', False)) else 'false'}
-  url: "{str(callback_cfg.get('url', '')).replace('\\"', '\\\\"')}"
-  auth_token: "{str(callback_cfg.get('auth_token', '')).replace('\\"', '\\\\"')}"
+  url: "{callback_url}"
+  auth_token: "{callback_auth_token}"
   timeout_seconds: {max(1, int(callback_cfg.get('timeout_seconds', 5)))}
 """
     CONFIG_PATH.write_text(content, encoding="utf-8")
