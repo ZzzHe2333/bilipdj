@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -20,6 +21,16 @@ SERVER_PATH = BUNDLE_DIR / "backend" / "server.py"
 APP_VERSION = "0.4.0"
 LOG_LEVEL_OPTIONS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 MAX_QUEUE_ARCHIVE_SLOTS = 5
+SENSITIVE_LOG_PATTERNS = [
+    re.compile(r"(?i)\b(cookie|auth_token|SESSDATA|bili_jct|buvid3|DedeUserID(?:__ckMd5)?)\s*[:=]\s*([^\s,;]+)"),
+]
+
+
+def sanitize_log_message(message: str) -> str:
+    sanitized = str(message)
+    for pattern in SENSITIVE_LOG_PATTERNS:
+        sanitized = pattern.sub(lambda match: f"{match.group(1)}=<hidden>", sanitized)
+    return sanitized
 
 
 def parse_scalar(value: str):
@@ -45,39 +56,82 @@ def parse_scalar(value: str):
         return value
 
 
+def next_meaningful_line(lines: list[str], start_index: int):
+    for idx in range(start_index, len(lines)):
+        stripped = lines[idx].strip()
+        if stripped and not stripped.startswith("#"):
+            return idx, lines[idx]
+    return None
+
+
 def load_simple_yaml(path: Path) -> dict:
     if not path.exists():
         return {}
 
     root: dict = {}
-    stack: list[tuple[int, dict]] = [(-1, root)]
+    stack: list[tuple[int, dict | list]] = [(-1, root)]
+    lines = path.read_text(encoding="utf-8").splitlines()
 
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
+    for index, raw_line in enumerate(lines):
         line = raw_line.rstrip()
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
 
         indent = len(line) - len(line.lstrip(" "))
-        if ":" not in stripped:
+        while stack and indent <= stack[-1][0]:
+            stack.pop()
+
+        current = stack[-1][1] if stack else root
+        if stripped.startswith("- "):
+            if not isinstance(current, list):
+                continue
+            item_value = stripped[2:].strip()
+            if item_value == "":
+                child = {}
+                current.append(child)
+                stack.append((indent, child))
+            else:
+                current.append(parse_scalar(item_value))
+            continue
+
+        if ":" not in stripped or not isinstance(current, dict):
             continue
 
         key, value = stripped.split(":", 1)
         key = key.strip()
         value = value.strip()
 
-        while stack and indent <= stack[-1][0]:
-            stack.pop()
-
-        current = stack[-1][1] if stack else root
         if value == "":
-            child: dict = {}
+            next_line = next_meaningful_line(lines, index + 1)
+            if next_line is not None:
+                next_raw = next_line[1]
+                next_indent = len(next_raw) - len(next_raw.lstrip(" "))
+                next_stripped = next_raw.strip()
+                child = [] if next_indent > indent and next_stripped.startswith("- ") else {}
+            else:
+                child = {}
             current[key] = child
             stack.append((indent, child))
         else:
             current[key] = parse_scalar(value)
 
     return root
+
+
+def merge_config(defaults: dict, custom: dict) -> dict:
+    merged = dict(defaults)
+    for key, value in custom.items():
+        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+            merged[key] = merge_config(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def yaml_quote_string(value) -> str:
+    text = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{text}"'
 
 
 def save_config(path: Path, config: dict) -> None:
@@ -300,7 +354,7 @@ class ControlPanelApp:
         self.log_text.configure(state="disabled")
 
     def _enqueue_log(self, message: str) -> None:
-        self.log_queue.put(message)
+        self.log_queue.put(sanitize_log_message(message))
 
     def _schedule_log_pump(self) -> None:
         if self.log_pump_running:
@@ -319,7 +373,14 @@ class ControlPanelApp:
 
     def _read_stream_lines(self, stream, tag: str) -> None:
         try:
-            for line in iter(stream.readline, ""):
+            while True:
+                try:
+                    line = stream.readline()
+                except UnicodeDecodeError as exc:
+                    self._enqueue_log(f"[{tag}] <decode error: {exc}>")
+                    continue
+                if line == "":
+                    break
                 text = line.rstrip()
                 if text:
                     self._enqueue_log(f"[{tag}] {text}")
@@ -349,8 +410,13 @@ class ControlPanelApp:
 
     def save_to_file(self) -> None:
         try:
-            config = self.gather_config()
-            save_config(CONFIG_PATH, config)
+            from backend import server as backend_server
+
+            config = backend_server._merge_config(  # type: ignore[attr-defined]
+                backend_server.load_config(),
+                self.gather_config(),
+            )
+            backend_server.save_config(config)
             self.status_var.set("配置保存成功")
             self._append_log("[GUI] 配置保存成功")
         except ValueError:
@@ -376,6 +442,8 @@ class ControlPanelApp:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 bufsize=1,
             )
             self.status_var.set("后端已启动")
@@ -407,7 +475,7 @@ class ControlPanelApp:
         if not confirmed:
             self.status_var.set("已取消打开网页")
             return
-        webbrowser.open(f"http://127.0.0.1:{port}/config")
+        webbrowser.open(f"http://127.0.0.1:{port}/index")
 
     def on_close(self) -> None:
         if self.server_proc and self.server_proc.poll() is None:
