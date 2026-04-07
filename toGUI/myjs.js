@@ -125,6 +125,60 @@ function applyMyJSConfig(mycfg) {
     console.log("[配置覆盖]", { admins, ban_admins, jianzhang, paidui_list_length_max });
 }
 
+function PDJ_IsProtoWrappedEvent(data) {
+    return !!(
+        data &&
+        typeof data === "object" &&
+        data.data &&
+        typeof data.data === "object" &&
+        typeof data.data.pb === "string"
+    );
+}
+
+function PDJ_IsNativeDanmuMessage(data) {
+    return !!(
+        data &&
+        typeof data === "object" &&
+        typeof data.cmd === "string" &&
+        data.cmd.indexOf("DANMU_MSG") === 0 &&
+        Array.isArray(data.info)
+    );
+}
+
+function PDJ_NormalizeIncomingEvent(data) {
+    if (!data || typeof data !== "object") {
+        return null;
+    }
+
+    if (data.result && typeof data.result === "object" && typeof data.cmd === "string") {
+        return data;
+    }
+
+    if (!PDJ_IsNativeDanmuMessage(data)) {
+        return data;
+    }
+
+    var info = Array.isArray(data.info) ? data.info : [];
+    var userInfo = Array.isArray(info[2]) ? info[2] : [];
+    var senderUid = Number(userInfo[0] || 0);
+    var adminFlag = Number(userInfo[2] || 0);
+    var message = typeof info[1] === "string" ? info[1] : "";
+    var uname = typeof userInfo[1] === "string" ? userInfo[1] : "";
+    var manager = senderUid && zuid && senderUid === zuid ? 2 : (adminFlag === 1 ? 1 : 0);
+
+    return {
+        cmd: "danmu",
+        result: {
+            msg: message,
+            uname: uname,
+            svip: 0,
+            manager: manager,
+            uid: senderUid
+        },
+        raw: data
+    };
+}
+
 async function PDJ_Connect() {
     await PDJ_LoadConfig();
 
@@ -150,9 +204,6 @@ async function PDJ_Connect() {
     };
 
     ws.onmessage = async function (msgEvent) {
-        console.log("[弹幕Json信息]")
-        console.log(msgEvent.data)
-
         if (typeof msgEvent.data !== 'string') {
             return;
         }
@@ -165,9 +216,24 @@ async function PDJ_Connect() {
         }
 
         if (maybeJson && maybeJson.type === 'PDJ_STATUS') {
+            console.log("[弹幕Json信息]");
+            console.log(maybeJson);
             PDJ_EmitStatus(maybeJson.status || 'server', maybeJson);
             return;
         }
+
+        if (PDJ_IsProtoWrappedEvent(maybeJson)) {
+            console.log("[PDJ] 忽略 protobuf 事件:", maybeJson.cmd || "unknown");
+            return;
+        }
+
+        maybeJson = PDJ_NormalizeIncomingEvent(maybeJson);
+        if (!maybeJson) {
+            return;
+        }
+
+        console.log("[弹幕Json信息]");
+        console.log(maybeJson);
 
         shujubaobao = msgEvent.data;
         jsontoprint(maybeJson);//调用下面的函数
@@ -804,6 +870,11 @@ function consolelogprint(kind = 1,person = "",message = ""){
 }
 //main 函数
 function jsontoprint(data) {  
+    data = PDJ_NormalizeIncomingEvent(data);
+    if (!data || typeof data.cmd !== "string") {
+        return;
+    }
+
     var indexBool_danmu = data.cmd.indexOf('danmu'); 
     var indexBool_DANMU_MSG = data.cmd.indexOf('DANMU_MSG');
     var indexBool_SUPER_CHAT_MESSAGE = data.cmd.indexOf('SUPER_CHAT_MESSAGE');
