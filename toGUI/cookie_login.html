@@ -2,17 +2,66 @@
 <html lang="zh-CN">
 <head>
     <meta charset="utf-8">
-    <title>扫码登录获取 Cookie</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Bilibili 扫码登录获取 Cookie</title>
     <style>
-        body { margin: 0; font-family: "Microsoft YaHei", sans-serif; background: #0c1629; color: #eaf6ff; }
-        .wrap { max-width: 520px; margin: 0 auto; padding: 18px; }
-        .card { border: 1px solid #2e597f; border-radius: 12px; background: #10213c; padding: 16px; }
-        .title { font-size: 20px; margin: 0 0 12px; }
-        #qrcode { display: flex; justify-content: center; background: #fff; border-radius: 8px; padding: 10px; min-height: 280px; }
-        .status { margin-top: 12px; font-size: 14px; color: #9fd7ff; white-space: pre-wrap; }
-        .hint { margin-top: 10px; font-size: 13px; color: #b8d8ee; line-height: 1.5; }
-        button { margin-top: 14px; background: #33a3ff; border: 0; color: #fff; border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+        body {
+            margin: 0;
+            font-family: "Microsoft YaHei", sans-serif;
+            background: #0c1629;
+            color: #eaf6ff;
+        }
+
+        .wrap {
+            max-width: 520px;
+            margin: 0 auto;
+            padding: 18px;
+        }
+
+        .card {
+            border: 1px solid #2e597f;
+            border-radius: 12px;
+            background: #10213c;
+            padding: 16px;
+        }
+
+        .title {
+            font-size: 20px;
+            margin: 0 0 12px;
+        }
+
+        #qrcode {
+            display: flex;
+            justify-content: center;
+            background: #fff;
+            border-radius: 8px;
+            padding: 10px;
+            min-height: 280px;
+        }
+
+        .status {
+            margin-top: 12px;
+            font-size: 14px;
+            color: #9fd7ff;
+            white-space: pre-wrap;
+        }
+
+        .hint {
+            margin-top: 10px;
+            font-size: 13px;
+            color: #b8d8ee;
+            line-height: 1.5;
+        }
+
+        button {
+            margin-top: 14px;
+            background: #33a3ff;
+            border: 0;
+            color: #fff;
+            border-radius: 8px;
+            padding: 8px 14px;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -22,7 +71,7 @@
             <div id="qrcode"></div>
             <div id="status" class="status">正在初始化二维码...</div>
             <button id="refresh">刷新二维码</button>
-            <div class="hint">用 Bilibili App 扫码并确认后，本窗口会自动把 Cookie 回填到主页面。</div>
+            <div class="hint">请使用 Bilibili App 扫码并确认登录，本窗口会自动把 Cookie 和 UID 回填到主页面。</div>
         </div>
     </div>
 
@@ -78,11 +127,12 @@
                 if (!qrUrl || !qrcodeKey) {
                     throw new Error('二维码数据为空');
                 }
+
                 renderQr(qrImageBase64, qrUrl);
                 if (qrImageError) {
-                    setStatus('二维码降级展示：' + qrImageError + '。可扫码，或点击链接后在新页面确认登录。');
+                    setStatus('二维码已降级展示：' + qrImageError + '。你仍然可以扫码，或点击链接在新页面确认登录。');
                 } else {
-                    setStatus('请使用 Bilibili App 扫码，然后在手机确认登录。');
+                    setStatus('请使用 Bilibili App 扫码，然后在手机上确认登录。');
                 }
 
                 pollingTimer = setInterval(async () => {
@@ -97,14 +147,21 @@
                         const message = pollData?.data?.message || '';
                         if (code === 0) {
                             const cookie = String(pollData?.data?.cookie || '').trim();
+                            const uid = Number(pollData?.data?.uid || 0);
+                            const uname = String(pollData?.data?.uname || '').trim();
                             if (!cookie) {
-                                setStatus('扫码成功，但未拿到 Cookie，请重试。');
+                                setStatus('扫码成功，但没有拿到 Cookie，请重试。');
                                 stopPolling();
                                 return;
                             }
-                            setStatus('扫码成功，正在回填 Cookie...');
+                            setStatus(uid > 0 && uname
+                                ? `扫码成功，正在回填 ${uname}(${uid}) 的登录态...`
+                                : '扫码成功，正在回填 Cookie...');
                             if (window.opener) {
-                                window.opener.postMessage({ type: 'pdj-cookie-ready', cookie }, window.location.origin);
+                                window.opener.postMessage(
+                                    { type: 'pdj-cookie-ready', cookie, uid, uname },
+                                    window.location.origin
+                                );
                             }
                             stopPolling();
                             setTimeout(() => window.close(), 600);
@@ -115,7 +172,7 @@
                             return;
                         }
                         if (code === 86090) {
-                            setStatus('已扫码，请在手机确认登录。');
+                            setStatus('已扫码，请在手机上确认登录。');
                             return;
                         }
                         if (code === 86038) {
@@ -123,7 +180,7 @@
                             stopPolling();
                             return;
                         }
-                        setStatus('等待登录: ' + message + '（code=' + code + '）');
+                        setStatus('等待登录: ' + message + ' (code=' + code + ')');
                     } catch (err) {
                         setStatus('轮询失败: ' + err);
                     }

@@ -1,32 +1,136 @@
-<html>
+<!doctype html>
+<html lang="zh-CN">
 <head>
     <meta charset="utf-8">
-    <title>排队姬配置面板</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PDJ 配置面板</title>
+    <style>
+        body {
+            margin: 0;
+            background: radial-gradient(circle at 20% 20%, #0e2036 0%, #060b14 42%, #020409 100%);
+            color: #eaf6ff;
+            font-family: "Microsoft YaHei", sans-serif;
+        }
+
+        .panel {
+            margin: 12px;
+            padding: 12px;
+            border: 1px solid #3a5872;
+            border-radius: 8px;
+            max-width: 980px;
+            background: rgba(14, 32, 54, 0.78);
+        }
+
+        .row {
+            display: flex;
+            align-items: center;
+            margin: 8px 0;
+            gap: 8px;
+        }
+
+        label {
+            width: 120px;
+            flex: 0 0 120px;
+            font-weight: 600;
+        }
+
+        input,
+        textarea {
+            flex: 1;
+            padding: 6px 8px;
+            border-radius: 6px;
+            border: 1px solid #5c7f9a;
+            background: #0b1829;
+            color: #eaf6ff;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 90px;
+        }
+
+        .actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 12px;
+        }
+
+        button {
+            border: 0;
+            border-radius: 8px;
+            padding: 8px 12px;
+            background: #33a3ff;
+            color: #fff;
+            cursor: pointer;
+        }
+
+        .hint {
+            color: #c8d6e4;
+            font-size: 14px;
+        }
+
+        .section {
+            margin-top: 18px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(92, 127, 154, 0.35);
+        }
+    </style>
 </head>
 <body>
     <div id="app" class="panel">
         <h3>PDJ 配置面板</h3>
+
         <div class="row">
             <label>直播间号</label>
-            <input v-model.trim="form.roomid" type="number" placeholder="例如：26714219" />
+            <input v-model.trim="form.roomid" type="number" placeholder="例如：26714219">
         </div>
+
         <div class="row">
             <label>UID</label>
-            <input v-model.trim="form.uid" type="number" placeholder="例如：18461303" />
+            <input v-model.trim="form.uid" type="number" placeholder="扫码登录后可自动识别">
         </div>
+
         <div class="row">
             <label>Cookie</label>
-            <textarea v-model.trim="form.cookie" rows="3" placeholder="粘贴 Bilibili Cookie（至少包含 SESSDATA）"></textarea>
+            <textarea v-model.trim="form.cookie" rows="3" placeholder="粘贴 Bilibili Cookie，至少包含 SESSDATA"></textarea>
         </div>
-        <div class="row">
-            <label>回调地址</label>
-            <input v-model.trim="form.callback.url" type="text" placeholder="扫码成功后 POST 到该地址（可留空）" />
+
+        <div class="section">
+            <h4>权限用户</h4>
+
+            <div class="row">
+                <label>管理员</label>
+                <textarea v-model="form.myjs.admins_text" placeholder="一行一个用户名，对应 myjs.js 的 admins"></textarea>
+            </div>
+
+            <div class="row">
+                <label>黑名单</label>
+                <textarea v-model="form.myjs.ban_admins_text" placeholder="一行一个用户名，对应 myjs.js 的 ban_admins"></textarea>
+            </div>
+
+            <div class="row">
+                <label>舰长名单</label>
+                <textarea v-model="form.myjs.jianzhang_text" placeholder="一行一个用户名，对应 myjs.js 的 jianzhang"></textarea>
+            </div>
         </div>
-        <div class="row">
-            <label>回调开关</label>
-            <input v-model="form.callback.enabled" type="checkbox" />
-            <span class="hint">开启后，扫码成功会回调后端程序</span>
+
+        <div class="section">
+            <h4>扫码回调</h4>
+
+            <div class="row">
+                <label>回调地址</label>
+                <input v-model.trim="form.callback.url" type="text" placeholder="扫码成功后会 POST 到该地址，可留空">
+            </div>
+
+            <div class="row">
+                <label>启用回调</label>
+                <input v-model="form.callback.enabled" type="checkbox" style="width:auto;flex:0 0 auto;">
+                <span class="hint">开启后，扫码成功时会回调你的后端程序</span>
+            </div>
         </div>
+
         <div class="actions">
             <button @click="saveConfig">保存配置</button>
             <button @click="readLocalCookie">读取当前页面 Cookie</button>
@@ -42,28 +146,56 @@
         createApp({
             data() {
                 return {
-                    form: { roomid: '', uid: '', cookie: '', callback: { enabled: false, url: '', auth_token: '', timeout_seconds: 5 } },
-                    statusText: '等待初始化...'
-                }
+                    form: {
+                        roomid: "",
+                        uid: "",
+                        cookie: "",
+                        myjs: {
+                            admins_text: "",
+                            ban_admins_text: "",
+                            jianzhang_text: ""
+                        },
+                        callback: { enabled: false, url: "", auth_token: "", timeout_seconds: 5 }
+                    },
+                    statusText: "等待初始化..."
+                };
             },
             async mounted() {
                 await this.loadConfig();
             },
             methods: {
+                formatUserList(value) {
+                    if (Array.isArray(value)) {
+                        return value.join("\n");
+                    }
+                    if (typeof value === "string") {
+                        return value;
+                    }
+                    return "";
+                },
+                parseUserList(text) {
+                    return String(text || "")
+                        .split(/\r?\n/)
+                        .map((item) => item.trim())
+                        .filter(Boolean);
+                },
                 async loadConfig() {
                     try {
-                        const res = await fetch('/api/config');
+                        const res = await fetch("/api/config");
                         const cfg = await res.json();
-                        this.form.roomid = cfg.roomid || '';
-                        this.form.uid = cfg.uid || '';
-                        this.form.cookie = cfg.cookie || '';
+                        this.form.roomid = cfg.roomid || "";
+                        this.form.uid = cfg.uid || "";
+                        this.form.cookie = cfg.cookie || "";
+                        this.form.myjs.admins_text = this.formatUserList(cfg?.myjs?.admins);
+                        this.form.myjs.ban_admins_text = this.formatUserList(cfg?.myjs?.ban_admins);
+                        this.form.myjs.jianzhang_text = this.formatUserList(cfg?.myjs?.jianzhang);
                         this.form.callback = Object.assign(
-                            { enabled: false, url: '', auth_token: '', timeout_seconds: 5 },
+                            { enabled: false, url: "", auth_token: "", timeout_seconds: 5 },
                             cfg.callback || {}
                         );
-                        this.statusText = '配置已加载';
+                        this.statusText = "配置已加载";
                     } catch (e) {
-                        this.statusText = '加载失败: ' + e;
+                        this.statusText = "加载失败: " + e;
                     }
                 },
                 async saveConfig(options = {}) {
@@ -72,62 +204,86 @@
                         const body = {
                             roomid: Number(this.form.roomid || 0),
                             uid: Number(this.form.uid || 0),
-                            cookie: this.form.cookie || '',
+                            cookie: this.form.cookie || "",
+                            myjs: {
+                                admins: this.parseUserList(this.form.myjs.admins_text),
+                                ban_admins: this.parseUserList(this.form.myjs.ban_admins_text),
+                                jianzhang: this.parseUserList(this.form.myjs.jianzhang_text)
+                            },
                             callback: {
                                 enabled: Boolean(this.form.callback.enabled),
-                                url: this.form.callback.url || '',
-                                auth_token: this.form.callback.auth_token || '',
+                                url: this.form.callback.url || "",
+                                auth_token: this.form.callback.auth_token || "",
                                 timeout_seconds: Number(this.form.callback.timeout_seconds || 5)
                             }
                         };
-                        const res = await fetch('/api/config', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                        const res = await fetch("/api/config", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
                             body: JSON.stringify(body)
                         });
-                        if (!res.ok) throw new Error('HTTP ' + res.status);
-                        this.statusText = silent ? 'Cookie 已自动保存到 config' : '保存成功，弹幕连接会自动重连';
+                        if (!res.ok) {
+                            throw new Error("HTTP " + res.status);
+                        }
+
+                        const result = await res.json();
+                        const resolvedUid = Number(result?.uid || 0);
+                        if (Number.isFinite(resolvedUid) && resolvedUid > 0) {
+                            this.form.uid = String(resolvedUid);
+                        }
+                        if (result?.myjs) {
+                            this.form.myjs.admins_text = this.formatUserList(result.myjs.admins);
+                            this.form.myjs.ban_admins_text = this.formatUserList(result.myjs.ban_admins);
+                            this.form.myjs.jianzhang_text = this.formatUserList(result.myjs.jianzhang);
+                        }
+
+                        const resolvedName = typeof result?.uname === "string" ? result.uname.trim() : "";
+                        this.statusText = silent ? "登录态已写入配置" : "保存成功，弹幕连接会自动重连";
+                        if (resolvedName && resolvedUid > 0) {
+                            this.statusText += ` (${resolvedName}/${resolvedUid})`;
+                        }
                         return true;
                     } catch (e) {
-                        this.statusText = '保存失败: ' + e;
+                        this.statusText = "保存失败: " + e;
                         return false;
                     }
                 },
                 readLocalCookie() {
-                    this.form.cookie = document.cookie || '';
-                    this.statusText = this.form.cookie ? '已读取当前域 Cookie（若为空请在 B 站页面手动复制）' : '当前域没有 Cookie，请手动粘贴';
+                    this.form.cookie = document.cookie || "";
+                    this.statusText = this.form.cookie
+                        ? "已读取当前页面 Cookie，若为空请在 B 站页面手动复制"
+                        : "当前域没有 Cookie，请手动粘贴";
                 },
                 openCookieLogin() {
-                    const popup = window.open('/cookie-login', 'pdj-cookie-login', 'width=560,height=760');
+                    const popup = window.open("/cookie-login", "pdj-cookie-login", "width=560,height=760");
                     if (!popup) {
-                        this.statusText = '弹窗被浏览器拦截，请允许弹窗后重试';
+                        this.statusText = "弹窗被浏览器拦截，请允许弹窗后重试";
                         return;
                     }
-                    this.statusText = '已打开扫码页面，请完成扫码后自动回填 Cookie';
+
+                    this.statusText = "已打开扫码页面，请完成扫码后自动回填登录态";
                     const onMessage = (event) => {
-                        if (!event || !event.data || event.data.type !== 'pdj-cookie-ready') return;
-                        if (typeof event.data.cookie === 'string' && event.data.cookie.trim()) {
+                        if (!event || !event.data || event.data.type !== "pdj-cookie-ready") {
+                            return;
+                        }
+                        if (typeof event.data.cookie === "string" && event.data.cookie.trim()) {
                             this.form.cookie = event.data.cookie.trim();
-                            this.statusText = '扫码成功，Cookie 已自动回填，正在写入配置...';
+                            const loginUid = Number(event.data.uid || 0);
+                            if (Number.isFinite(loginUid) && loginUid > 0) {
+                                this.form.uid = String(loginUid);
+                            }
+                            const loginName = typeof event.data.uname === "string" ? event.data.uname.trim() : "";
+                            this.statusText = loginName && loginUid > 0
+                                ? `扫码成功，已识别账号 ${loginName}(${loginUid})，正在写入配置...`
+                                : "扫码成功，Cookie 已自动回填，正在写入配置...";
                             this.saveConfig({ silent: true });
                         }
-                        window.removeEventListener('message', onMessage);
+                        window.removeEventListener("message", onMessage);
                     };
-                    window.addEventListener('message', onMessage);
+                    window.addEventListener("message", onMessage);
                 }
             }
-        }).mount('#app');
+        }).mount("#app");
     </script>
-
-    <style type="text/css">
-        body { margin: 0; background: radial-gradient(circle at 20% 20%, #0e2036 0%, #060b14 42%, #020409 100%); color: #eaf6ff; }
-
-        .panel { margin: 12px; padding: 12px; border: 1px solid #ddd; border-radius: 8px; max-width: 900px; }
-        .panel .row { display: flex; align-items: center; margin: 8px 0; gap: 8px; }
-        .panel label { width: 90px; font-weight: 600; }
-        .panel input, .panel textarea { flex: 1; padding: 6px; }
-        .panel .actions { display: flex; align-items: center; gap: 8px; }
-        .panel .hint { color: #c8d6e4; }
-    </style>
 </body>
 </html>
