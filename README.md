@@ -10,7 +10,7 @@
 ### 1) 打印模型 JSON
 
 ```bash
-python models/danmuji_initial_model.py
+python core/models/danmuji_initial_model.py
 ```
 
 执行后会打印模型 JSON，可用于：
@@ -22,7 +22,7 @@ python models/danmuji_initial_model.py
 ### 2) 启动 Python 后端（默认端口 9816）
 
 ```bash
-python backend/server.py
+python core/backend/server.py
 ```
 
 服务启动后可访问：
@@ -31,12 +31,12 @@ python backend/server.py
 - `GET /config`：后台管理页面（配置与扫码登录入口）。
 - `GET /index`：直播展示页面。
 - `GET /health`：健康检查。
-- `GET /model`：读取 `models/danmuji_initial_model.json` 并返回。
+- `GET /model`：读取 `core/models/danmuji_initial_model.json` 并返回。
 
 如需修改监听地址/端口，可使用环境变量：
 
 ```bash
-DANMUJI_BACKEND_HOST=0.0.0.0 DANMUJI_BACKEND_PORT=9816 python backend/server.py
+DANMUJI_BACKEND_HOST=0.0.0.0 DANMUJI_BACKEND_PORT=9816 python core/backend/server.py
 ```
 
 ## 新增配置与日志说明
@@ -47,18 +47,18 @@ DANMUJI_BACKEND_HOST=0.0.0.0 DANMUJI_BACKEND_PORT=9816 python backend/server.py
 - 默认日志等级是 `INFO`（可在 `config.yaml -> logging.level` 修改）。
 - 新增 `POST /api/queue/log`：
   - 前端每次处理排队消息都会调用该接口记录一次快照。
-  - 排队快照按“游戏存档”思路以 CSV 写入 `pd/queue_archive_slot_1.csv` ~ `pd/queue_archive_slot_5.csv`，按配置槽位数循环覆盖（最多 5 个槽位）。
+  - 排队快照按“游戏存档”思路以 CSV 写入 `core/cd/queue_archive_slot_1.csv` ~ `core/cd/queue_archive_slot_5.csv`，按配置槽位数循环覆盖（最多 5 个槽位）。
 - 配置、日志、存档目录规则：
   - 启动时会以“脚本目录（开发模式）或 EXE 所在目录（打包后）”作为运行目录。
   - 若运行目录不存在 `config.yaml` 会自动创建。
-  - 若不存在 `log/` 或 `pd/` 目录会自动创建。
-  - 若 `pd/` 下没有存档文件会按配置初始化默认存档槽位文件（最多 5 个）。
+  - 若不存在 `log/` 或 `core/cd/` 目录会自动创建。
+  - 若 `core/cd/` 下没有存档文件会按配置初始化默认存档槽位文件（最多 5 个）。
 
 
 ### 3) 启动桌面 GUI 控制台
 
 ```bash
-python gui/control_panel.py
+python core/gui/control_panel.py
 ```
 
 GUI 支持：
@@ -82,10 +82,10 @@ python -m PyInstaller --clean --noconfirm bilipdj_onedir.spec
 
 - `dist/bilipdj/`
   - `bilipdj(.exe)` 主程序
-  - `backend/` 后端代码
-  - `toGUI/` 前端静态资源
-  - `models/` 模型文件
-  - `pd/` 初始排队归档
+  - `core/backend/` 后端代码
+  - `core/ui/` 前端静态资源
+  - `core/models/` 模型文件
+  - `core/cd/` 初始排队归档
 
 建议直接把整个 `dist/bilipdj` 目录拷走运行，不要只拿单个 exe。
 
