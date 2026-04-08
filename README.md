@@ -69,6 +69,26 @@ GUI 支持：
 - GUI 下方提供实时日志框，可查看后端启动与运行日志。
 - 一键打开 Web 控制页（由后端统一托管前端静态资源）。
 
+## EXE 打包（目录模式，包含所有依赖与资源）
+
+你反馈的“打包后提示找不到 `http.server` / 后端文件”，本质是动态导入导致的漏收集问题。  
+项目已提供 `bilipdj_onedir.spec`，按下面命令打包会把运行需要的后端与静态资源一并带上（**非单文件**）：
+
+```bash
+python -m PyInstaller --clean --noconfirm bilipdj_onedir.spec
+```
+
+产物目录：
+
+- `dist/bilipdj/`
+  - `bilipdj(.exe)` 主程序
+  - `backend/` 后端代码
+  - `toGUI/` 前端静态资源
+  - `models/` 模型文件
+  - `pd/` 初始排队归档
+
+建议直接把整个 `dist/bilipdj` 目录拷走运行，不要只拿单个 exe。
+
 ## 前后端合并与自动反代说明
 
 - 后端会同时提供 API、WebSocket 和前端静态页面：
