@@ -18,9 +18,15 @@ if cd_dir.exists():
 hiddenimports = [
     "core.server",
     "qrcode",
+    "qrcode.main",
+    "qrcode.constants",
+    "qrcode.util",
+    "qrcode.image.base",
     "qrcode.image.pil",
+    "qrcode.image.pure",
     "PIL",
     "PIL.Image",
+    "PIL.PngImagePlugin",
     "brotli",
     "psutil",
 ]
