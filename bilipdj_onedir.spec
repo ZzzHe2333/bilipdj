@@ -1,25 +1,31 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+project_root = Path(SPECPATH).resolve()
 
-project_root = Path(__file__).resolve().parent
+datas = [
+    # 前端 UI 页面
+    (str(project_root / "core" / "ui"), "core/ui"),
+    # 初始模型数据（JSON）
+    (str(project_root / "core" / "danmuji_initial_model.json"), "core"),
+]
 
-datas = []
-datas += collect_data_files("backend", include_py_files=True)
-datas += collect_data_files("models", include_py_files=True)
-datas += collect_data_files("toGUI", include_py_files=True)
+# 排队存档目录（存档初始内容）
+cd_dir = project_root / "core" / "cd"
+if cd_dir.exists():
+    datas.append((str(cd_dir), "core/cd"))
 
-# 运行时会读写 pd/ 下的归档，打包时放一份初始内容进 dist。
-pd_dir = project_root / "pd"
-if pd_dir.exists():
-    datas.append((str(pd_dir), "pd"))
-
-hiddenimports = []
-hiddenimports += collect_submodules("backend")
+hiddenimports = [
+    "core.server",
+    "qrcode",
+    "qrcode.image.pil",
+    "PIL",
+    "PIL.Image",
+    "brotli",
+]
 
 a = Analysis(
-    ["gui/control_panel.py"],
+    ["core/control_panel.py"],
     pathex=[str(project_root)],
     binaries=[],
     datas=datas,

@@ -72,25 +72,18 @@ jobs:
       - name: Build Windows executable (x64)
         shell: pwsh
         run: |
-          pyinstaller --noconfirm --clean --onefile --windowed `
-            --name "${{ steps.resolve_tag.outputs.exe_name }}" `
-            --add-data "backend;backend" `
-            --add-data "models;models" `
-            --add-data "toGUI;toGUI" `
-            --hidden-import backend.server `
-            --collect-submodules qrcode `
-            --collect-submodules PIL `
-            gui/control_panel.py
+          pyinstaller --noconfirm --clean bilipdj_onedir.spec
+          Rename-Item "dist\bilipdj\bilipdj.exe" "${{ steps.resolve_tag.outputs.exe_name }}.exe"
 
       - name: Create release zip
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path package -Force | Out-Null
-          Copy-Item "dist/${{ steps.resolve_tag.outputs.exe_name }}.exe" package/
-          if (Test-Path README.md)      { Copy-Item README.md      package/ }
-          if (Test-Path quanxian.yaml)  { Copy-Item quanxian.yaml  package/ }
-          if (Test-Path kaiguan.yaml)   { Copy-Item kaiguan.yaml   package/ }
-          Compress-Archive -Path package/* -DestinationPath "${{ steps.resolve_tag.outputs.zip_name }}" -Force
+          Copy-Item -Recurse "dist\bilipdj\*" package\
+          if (Test-Path README.md)      { Copy-Item README.md      package\ }
+          if (Test-Path quanxian.yaml)  { Copy-Item quanxian.yaml  package\ }
+          if (Test-Path kaiguan.yaml)   { Copy-Item kaiguan.yaml   package\ }
+          Compress-Archive -Path package\* -DestinationPath "${{ steps.resolve_tag.outputs.zip_name }}" -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
