@@ -22,6 +22,7 @@ hiddenimports = [
     "PIL",
     "PIL.Image",
     "brotli",
+    "psutil",
 ]
 
 a = Analysis(

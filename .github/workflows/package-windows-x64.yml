@@ -67,7 +67,7 @@ jobs:
             pip install -r requirements.txt
           }
           pip uninstall -y http || echo "http not installed, skip uninstall"
-          pip install pyinstaller qrcode[pil] brotli
+          pip install pyinstaller qrcode[pil] brotli psutil
 
       - name: Build Windows executable (x64)
         shell: pwsh
@@ -80,9 +80,9 @@ jobs:
         run: |
           New-Item -ItemType Directory -Path package -Force | Out-Null
           Copy-Item -Recurse "dist\bilipdj\*" package\
-          if (Test-Path README.md)      { Copy-Item README.md      package\ }
-          if (Test-Path quanxian.yaml)  { Copy-Item quanxian.yaml  package\ }
-          if (Test-Path kaiguan.yaml)   { Copy-Item kaiguan.yaml   package\ }
+          if (Test-Path README.md)           { Copy-Item README.md           package\ }
+          if (Test-Path core\quanxian.yaml)  { Copy-Item core\quanxian.yaml  package\ }
+          if (Test-Path core\kaiguan.yaml)   { Copy-Item core\kaiguan.yaml   package\ }
           Compress-Archive -Path package\* -DestinationPath "${{ steps.resolve_tag.outputs.zip_name }}" -Force
 
       - name: Upload artifact
