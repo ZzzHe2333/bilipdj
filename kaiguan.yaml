@@ -1,0 +1,10 @@
+# 功能开关（true=启用，false=禁用）
+paidui: true              # 普通排队（排队 / 排队 xxx）
+guanfu_paidui: true       # 官服排队
+bfu_paidui: true          # B服排队
+chaoji_paidui: true       # 超级排队
+mifu_paidui: true         # 米服排队
+quxiao_paidui: true       # 取消排队
+xiugai_paidui: true       # 修改/替换排队内容
+jianzhang_chadui: false   # 舰长插队
+fangguan_op: false        # 允许B站房管执行管理员命令
