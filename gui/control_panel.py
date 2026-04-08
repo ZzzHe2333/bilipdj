@@ -17,6 +17,12 @@ from tkinter import messagebox, ttk
 from typing import Any
 
 REPO_DIR = Path(__file__).resolve().parent.parent
+if str(REPO_DIR) not in sys.path:
+    sys.path.insert(0, str(REPO_DIR))
+
+# 打包提示：显式导入 backend.server，确保 PyInstaller 能追踪到其依赖（如 http.server）。
+import backend.server as _backend_server_hint  # noqa: F401
+
 BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", REPO_DIR))
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else REPO_DIR
 CONFIG_PATH = APP_DIR / "config.yaml"
