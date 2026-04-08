@@ -37,11 +37,11 @@ MAX_QUEUE_ARCHIVE_SLOTS = 5
 DANMU_HEARTBEAT_INTERVAL_SECONDS = 30
 DANMU_IDLE_RECONNECT_SECONDS = 90
 
-REPO_DIR = Path(__file__).resolve().parents[2]
+REPO_DIR = Path(__file__).resolve().parents[1]
 BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", REPO_DIR))
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else REPO_DIR
 
-MODEL_JSON_PATH = BUNDLE_DIR / "core" / "models" / "danmuji_initial_model.json"
+MODEL_JSON_PATH = BUNDLE_DIR / "core" / "danmuji_initial_model.json"
 UI_DIR = BUNDLE_DIR / "core" / "ui"
 CONFIG_PATH = APP_DIR / "config.yaml"
 LOG_DIR = APP_DIR / "log"
