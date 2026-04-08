@@ -49,16 +49,19 @@ jobs:
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller
+          pip install pyinstaller qrcode[pil] brotli
 
       - name: Build Windows executable (x64)
         shell: pwsh
         run: |
-          pyinstaller --noconfirm --clean --onefile --windowed --name "${{ steps.resolve_tag.outputs.exe_name }}" `
+          pyinstaller --noconfirm --clean --onefile --windowed `
+            --name "${{ steps.resolve_tag.outputs.exe_name }}" `
             --add-data "backend;backend" `
             --add-data "models;models" `
             --add-data "toGUI;toGUI" `
-            --add-data "config.yaml;." `
+            --hidden-import backend.server `
+            --collect-submodules qrcode `
+            --collect-submodules PIL `
             gui/control_panel.py
 
       - name: Create release zip
@@ -66,7 +69,9 @@ jobs:
         run: |
           New-Item -ItemType Directory -Path package -Force | Out-Null
           Copy-Item "dist/${{ steps.resolve_tag.outputs.exe_name }}.exe" package/
-          if (Test-Path README.md) { Copy-Item README.md package/ }
+          if (Test-Path README.md)      { Copy-Item README.md      package/ }
+          if (Test-Path quanxian.yaml)  { Copy-Item quanxian.yaml  package/ }
+          if (Test-Path kaiguan.yaml)   { Copy-Item kaiguan.yaml   package/ }
           Compress-Archive -Path package/* -DestinationPath "${{ steps.resolve_tag.outputs.zip_name }}" -Force
 
       - name: Upload artifact
