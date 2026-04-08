@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import random
+import re
 import socket
 import ssl
 import struct
@@ -67,6 +68,7 @@ class BackendServer(ThreadingHTTPServer):
     runtime_config: dict[str, Any]
     logger: logging.Logger
     queue_archive: "QueueArchiveManager"
+    queue_manager: "QueueManager"
     ws_hub: "WebSocketHub"
     danmu_relay: "BilibiliDanmuRelay"
 
@@ -550,6 +552,9 @@ class QueueArchiveManager:
         snapshot["_sort_key"] = sort_key.isoformat()
         return snapshot
 
+    def read_snapshot_by_slot(self, slot: int) -> dict[str, Any] | None:
+        return self._read_snapshot(slot)
+
     def read_latest_snapshot(self) -> dict[str, Any]:
         if not self.enabled:
             return self._empty_snapshot()
@@ -565,6 +570,318 @@ class QueueArchiveManager:
         latest = dict(snapshots[0])
         latest.pop("_sort_key", None)
         return latest
+
+
+class QueueManager:
+    """Thread-safe server-side queue manager.
+
+    Receives parsed danmu events and processes queue commands,
+    then broadcasts ``QUEUE_UPDATE`` to all WebSocket clients.
+    """
+
+    def __init__(
+        self,
+        ws_hub: "WebSocketHub",
+        queue_archive: "QueueArchiveManager",
+        logger: logging.Logger,
+    ) -> None:
+        self._ws_hub = ws_hub
+        self._queue_archive = queue_archive
+        self._logger = logger
+        self._lock = threading.Lock()
+        self._persons: list[str] = []
+        self._admins: list[str] = []
+        self._ban_admins: list[str] = []
+        self._jianzhang: list[str] = []
+        self._anchor_uid: int = 0
+        self._max_length: int = 100
+        self._fangguan_can_doing: bool = False
+        self._jianzhangchadui: bool = False
+        self._all_disabled: bool = False
+
+    def load_config(self, myjs_cfg: dict[str, Any], anchor_uid: int = 0) -> None:
+        with self._lock:
+            if isinstance(myjs_cfg.get("admins"), list):
+                self._admins = [str(x) for x in myjs_cfg["admins"] if x]
+            if isinstance(myjs_cfg.get("ban_admins"), list):
+                self._ban_admins = [str(x) for x in myjs_cfg["ban_admins"] if x]
+            if isinstance(myjs_cfg.get("jianzhang"), list):
+                self._jianzhang = [str(x) for x in myjs_cfg["jianzhang"] if x]
+            if myjs_cfg.get("paidui_list_length_max") is not None:
+                self._max_length = max(1, _to_int(myjs_cfg["paidui_list_length_max"], 100))
+            if isinstance(myjs_cfg.get("fangguan_can_doing"), bool):
+                self._fangguan_can_doing = myjs_cfg["fangguan_can_doing"]
+            if isinstance(myjs_cfg.get("jianzhangchadui"), bool):
+                self._jianzhangchadui = myjs_cfg["jianzhangchadui"]
+            if anchor_uid > 0:
+                self._anchor_uid = anchor_uid
+
+    def restore_from_archive(self) -> None:
+        snapshot = self._queue_archive.read_latest_snapshot()
+        if not snapshot.get("queue"):
+            return
+        with self._lock:
+            self._persons = [self._strip_html(item) for item in snapshot["queue"] if item]
+        self._logger.info(
+            "[queue] Restored %s items from archive (slot=%s ts=%s)",
+            len(self._persons),
+            snapshot.get("slot", "?"),
+            snapshot.get("timestamp", "?"),
+        )
+
+    @staticmethod
+    def _strip_html(text: str) -> str:
+        cleaned = re.sub(r"<[^>]*>", "", str(text))
+        cleaned = re.sub(r"⏳待确认|等待确认", "", cleaned)
+        return cleaned.strip()
+
+    def get_queue(self) -> list[str]:
+        with self._lock:
+            return list(self._persons)
+
+    def send_current_to(self, conn: socket.socket) -> None:
+        try:
+            _ws_send_text(
+                conn,
+                json.dumps({"type": "QUEUE_UPDATE", "queue": self.get_queue()}, ensure_ascii=False),
+            )
+        except OSError:
+            pass
+
+    def switch_to_slot(self, slot: int) -> list[str]:
+        """Load queue from a specific archive slot, update in-memory queue, and broadcast."""
+        snapshot = self._queue_archive.read_snapshot_by_slot(slot)
+        if snapshot is None:
+            self._logger.info("[queue] switch_to_slot=%s: slot file not found, keeping current queue", slot)
+            return self.get_queue()
+        items = [self._strip_html(item) for item in snapshot.get("queue", []) if item]
+        with self._lock:
+            self._persons = items
+        self._logger.info(
+            "[queue] Switched to slot %s, loaded %s items (ts=%s)",
+            slot,
+            len(items),
+            snapshot.get("timestamp", "?"),
+        )
+        self._broadcast_and_archive("system", f"switch_slot_{slot}")
+        return list(items)
+
+    def _has_op_permission(self, uname: str, is_anchor: bool, is_admin: bool) -> bool:
+        return is_anchor or (uname in self._admins) or (is_admin and self._fangguan_can_doing)
+
+    def _find_index(self, uname: str) -> int:
+        for i, item in enumerate(self._persons):
+            if uname in item:
+                return i
+        return -1
+
+    def _broadcast_and_archive(self, actor: str, msg: str) -> None:
+        queue_snapshot = self.get_queue()
+        self._ws_hub.broadcast_json(None, {"type": "QUEUE_UPDATE", "queue": queue_snapshot})
+        self._queue_archive.write_snapshot(actor, msg, queue_snapshot)
+
+    def process_danmu_json(self, payload: dict[str, Any]) -> None:
+        cmd = str(payload.get("cmd", "") or "").strip()
+        if not cmd.startswith("DANMU_MSG"):
+            return
+
+        info = payload.get("info", [])
+        if not isinstance(info, list) or len(info) < 3:
+            return
+
+        msg = str(info[1]) if len(info) > 1 else ""
+        user_info = info[2] if len(info) > 2 and isinstance(info[2], list) else []
+        uid = _to_int(user_info[0]) if len(user_info) > 0 else 0
+        uname = str(user_info[1]) if len(user_info) > 1 else ""
+        is_admin_flag = _to_int(user_info[2]) == 1 if len(user_info) > 2 else False
+
+        with self._lock:
+            anchor_uid = self._anchor_uid
+        is_anchor = uid > 0 and anchor_uid > 0 and uid == anchor_uid
+
+        medal_info = info[3] if len(info) > 3 else None
+        guard_level = 0
+        if isinstance(medal_info, list):
+            for idx in (10, 11, 12):
+                if idx < len(medal_info):
+                    gl = _to_int(medal_info[idx])
+                    if 1 <= gl <= 3:
+                        guard_level = gl
+                        break
+        is_guard = guard_level > 0
+
+        if not uname or not msg:
+            return
+
+        self._logger.debug("[queue] 弹幕 uname=%r uid=%s msg=%r", uname, uid, msg)
+
+        modified = self._process(uname, msg, is_anchor, is_admin_flag, is_guard, guard_level)
+        if modified:
+            self._broadcast_and_archive(uname, msg)
+            self._logger.debug(
+                "[queue] Updated by %s (msg=%.20r), size=%s",
+                uname,
+                msg,
+                len(self._persons),
+            )
+
+    def _process(
+        self,
+        uname: str,
+        msg: str,
+        is_anchor: bool,
+        is_admin: bool,
+        is_guard: bool,
+        guard_level: int,
+    ) -> bool:
+        with self._lock:
+            has_op = self._has_op_permission(uname, is_anchor, is_admin)
+
+            if uname in self._ban_admins:
+                return False
+
+            if self._all_disabled and not has_op:
+                return False
+
+            if is_guard and guard_level > 0 and uname not in self._jianzhang:
+                self._jianzhang.append(uname)
+
+            index = self._find_index(uname)
+            is_jianzhang = uname in self._jianzhang
+            modified = False
+
+            # --- Join commands (not yet in queue) ---
+            if index < 0:
+                can_join = len(self._persons) < self._max_length or has_op
+                new_item: str | None = None
+
+                if msg == "排队":
+                    new_item = uname
+                elif msg in ("官服排", "排官服", "官服排队", "排队官服"):
+                    new_item = f"官|{uname}"
+                elif msg in ("B服排", "b服排", "排b服", "排B服", "B服排队", "排队B服", "b服排队", "排队b服"):
+                    new_item = f"B|{uname}"
+                elif msg in ("超级排", "超级排队"):
+                    new_item = f"<{uname}>"
+                elif msg in ("小米排", "排小米", "排米服"):
+                    new_item = f"米|{uname}"
+                elif msg.startswith("排队 "):
+                    extra = msg[3:].strip()
+                    new_item = f"{uname} {extra}" if extra else uname
+                elif re.match(r"^官服排队?\s", msg) or re.match(r"^官服排\s", msg):
+                    extra = msg.split(" ", 1)[1].strip() if " " in msg else ""
+                    new_item = f"官|{uname} {extra}".rstrip()
+                elif re.match(r"^[Bb]服排\s", msg):
+                    extra = msg.split(" ", 1)[1].strip() if " " in msg else ""
+                    new_item = f"B|{uname} {extra}".rstrip()
+                elif re.match(r"^超级排队?\s", msg):
+                    extra = msg.split(" ", 1)[1].strip() if " " in msg else ""
+                    new_item = f"<{uname}>{extra}" if extra else f"<{uname}>"
+                elif msg.startswith("米服排 "):
+                    extra = msg.split(" ", 1)[1].strip() if " " in msg else ""
+                    new_item = f"M|{uname} {extra}".rstrip()
+                elif msg == "插队" and is_jianzhang:
+                    if len(self._persons) == 0 or not self._jianzhangchadui:
+                        self._persons.append(uname)
+                    else:
+                        insert_pos = len(self._persons)
+                        while insert_pos > 0 and any(
+                            j in self._persons[insert_pos - 1] for j in self._jianzhang
+                        ):
+                            insert_pos -= 1
+                        self._persons.insert(insert_pos, uname)
+                    modified = True
+
+                if new_item is not None and can_join:
+                    self._persons.append(new_item)
+                    modified = True
+
+            # --- Self-service cancel/replace (already in queue) ---
+            if index >= 0:
+                if msg in ("取消排队", "排队取消", "我确认我取消排队"):
+                    self._persons.pop(index)
+                    modified = True
+                elif msg in ("替换", "修改", "内容洗白"):
+                    self._persons[index] = uname
+                    modified = True
+                elif msg.startswith("替换 ") or msg.startswith("修改 "):
+                    extra = msg.split(" ", 1)[1].strip() if " " in msg else ""
+                    self._persons[index] = f"{uname} {extra}".rstrip()
+                    modified = True
+
+            # --- Operator/admin commands ---
+            if has_op:
+                for kw in ("del", "删除", "完成"):
+                    if kw in msg:
+                        nums = re.sub(r"[^0-9]", "", msg)
+                        kw_only = re.sub(r"[\d\s]+", "", msg)
+                        if kw_only == kw and nums:
+                            n = int(nums)
+                            if 1 <= n <= len(self._persons):
+                                self._persons.pop(n - 1)
+                                modified = True
+                        break
+
+                for prefix in ("add ", "新增 ", "添加 "):
+                    if msg.startswith(prefix):
+                        text = msg[len(prefix):].strip()
+                        if text:
+                            self._persons.append(text)
+                            modified = True
+                        break
+
+                m = re.match(r"^无影插\s+(\d+)\s+(.+)", msg)
+                if m:
+                    pos, text = int(m.group(1)), m.group(2).strip()
+                    if text and 1 <= pos <= 20:
+                        self._persons.insert(pos - 1, text)
+                        modified = True
+
+                m2 = re.match(r"^插队\s+(\d+)\s+(.+)", msg)
+                if m2:
+                    pos, text = int(m2.group(1)), m2.group(2).strip()
+                    if text and 1 <= pos <= 30:
+                        self._persons.insert(pos - 1, f"@{text}")
+                        modified = True
+
+                if msg == "暂停排队功能" or msg == "关闭自助排队":
+                    self._all_disabled = True
+                elif msg == "恢复排队功能" or msg == "恢复自助排队":
+                    self._all_disabled = False
+                elif msg == "开启舰长插队":
+                    self._jianzhangchadui = True
+                elif msg == "关闭舰长插队":
+                    self._jianzhangchadui = False
+                elif msg == "允许房管成为插件管理员":
+                    self._fangguan_can_doing = True
+                elif msg == "停止房管成为插件管理员":
+                    self._fangguan_can_doing = False
+
+                if any(kw in msg for kw in ("设置排队人数", "设置排队上限")):
+                    nums = re.sub(r"[^0-9]", "", msg)
+                    kw_only = re.sub(r"[\d\s]+", "", msg)
+                    if kw_only in ("设置排队人数", "设置排队上限", "设置排队人数上限") and nums:
+                        self._max_length = max(1, int(nums))
+
+                if msg.startswith("拉黑 "):
+                    target = msg[3:].strip()
+                    if target and target not in self._ban_admins:
+                        self._ban_admins.append(target)
+                elif msg.startswith("取消拉黑 "):
+                    target = msg[5:].strip()
+                    if target in self._ban_admins:
+                        self._ban_admins.remove(target)
+
+                if msg.startswith("添加管理员 "):
+                    target = msg[6:].strip()
+                    if target and target not in self._admins:
+                        self._admins.append(target)
+                elif msg.startswith("取消管理员 "):
+                    target = msg[6:].strip()
+                    if target in self._admins:
+                        self._admins.remove(target)
+
+            return modified
 
 
 def load_model() -> dict[str, Any]:
@@ -945,11 +1262,11 @@ class BilibiliDanmuRelay(threading.Thread):
                     if len(user_info) > 1 and isinstance(user_info[1], str):
                         uname = user_info[1]
             self.logger.debug(
-                "Danmu message received cmd=%s user_present=%s uid_present=%s msg_chars=%s",
+                "Danmu received cmd=%s uname=%r uid=%s msg=%r",
                 cmd,
-                bool(uname),
-                uid > 0,
-                len(message),
+                uname,
+                uid,
+                message,
             )
             return
 
@@ -1304,7 +1621,18 @@ class BilibiliDanmuRelay(threading.Thread):
         for text in self._iter_business_messages(packet_data):
             self._log_business_message(text)
             self.server.ws_hub.mark_message()
-            self.server.ws_hub.broadcast_text(None, text)
+            try:
+                parsed_msg = json.loads(text)
+            except json.JSONDecodeError:
+                self.server.ws_hub.broadcast_text(None, text)
+                continue
+            cmd = str(parsed_msg.get("cmd", "") or "").strip() if isinstance(parsed_msg, dict) else ""
+            if cmd.startswith("DANMU_MSG"):
+                # Route through queue manager; QUEUE_UPDATE is broadcast on change
+                if hasattr(self.server, "queue_manager"):
+                    self.server.queue_manager.process_danmu_json(parsed_msg)
+            else:
+                self.server.ws_hub.broadcast_text(None, text)
         return True
 
     def _connect_and_stream(self) -> None:
@@ -1569,6 +1897,8 @@ class ApiHandler(BaseHTTPRequestHandler):
                 "message": "ws://127.0.0.1:9816/ws is ready",
             },
         )
+        if hasattr(self.server, "queue_manager"):
+            self.server.queue_manager.send_current_to(client)
 
         try:
             while True:
@@ -1723,6 +2053,11 @@ class ApiHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if parsed.path == "/api/queue/state":
+            current = self.server.queue_manager.get_queue() if hasattr(self.server, "queue_manager") else []
+            self._write_json({"status": "ok", "queue": current, "size": len(current)})
+            return
+
         if parsed.path == "/api/queue/archive":
             snapshot = self.server.queue_archive.read_latest_snapshot()
             self._write_json(
@@ -1832,6 +2167,11 @@ class ApiHandler(BaseHTTPRequestHandler):
             self.server.runtime_config = updated
             if hasattr(self.server, "danmu_relay"):
                 self.server.danmu_relay.request_reconnect()
+            if hasattr(self.server, "queue_manager"):
+                self.server.queue_manager.load_config(
+                    updated.get("myjs", {}),
+                    anchor_uid=_to_int(updated.get("api", {}).get("uid", 0)),
+                )
             self.server.logger.info("配置已更新，触发直播间弹幕重连 roomid=%s uid=%s", roomid, uid)
             self._write_json(
                 {
@@ -1844,6 +2184,22 @@ class ApiHandler(BaseHTTPRequestHandler):
                     "myjs": updated.get("myjs", {}),
                 }
             )
+            return
+
+        if parsed.path == "/api/queue/switch":
+            length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(length).decode("utf-8", errors="replace") if length > 0 else "{}"
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                payload = {}
+            slot = _to_int(payload.get("slot", 1), 1)
+            slot = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, slot))
+            if hasattr(self.server, "queue_manager"):
+                current = self.server.queue_manager.switch_to_slot(slot)
+            else:
+                current = []
+            self._write_json({"status": "ok", "slot": slot, "queue": current, "size": len(current)})
             return
 
         if parsed.path == "/api/bili/qr/poll":
@@ -2016,6 +2372,16 @@ def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
         enabled=bool(archive_cfg.get("enabled", True)),
     )
     httpd.ws_hub = WebSocketHub(logger)
+    httpd.queue_manager = QueueManager(
+        ws_hub=httpd.ws_hub,
+        queue_archive=httpd.queue_archive,
+        logger=logger,
+    )
+    httpd.queue_manager.load_config(
+        runtime_config.get("myjs", {}),
+        anchor_uid=_to_int(runtime_config.get("api", {}).get("uid", 0)),
+    )
+    httpd.queue_manager.restore_from_archive()
     httpd.danmu_relay = BilibiliDanmuRelay(httpd)
     httpd.danmu_relay.start()
 
