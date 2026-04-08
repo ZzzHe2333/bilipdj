@@ -46,9 +46,27 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Debug Python env
+        shell: cmd
+        run: |
+          python -V
+          python -c "import sys; print(sys.executable)"
+          pip list | findstr /I "^http " || echo http package not found
+
+      - name: Check stdlib shadowing
+        shell: pwsh
+        run: |
+          if (Test-Path http.py) { throw "Found shadowing file: http.py" }
+          if (Test-Path http/__init__.py) { throw "Found shadowing file: http/__init__.py" }
+
       - name: Install build dependencies
+        shell: pwsh
         run: |
           python -m pip install --upgrade pip
+          if (Test-Path requirements.txt) {
+            pip install -r requirements.txt
+          }
+          pip uninstall -y http || echo "http not installed, skip uninstall"
           pip install pyinstaller qrcode[pil] brotli
 
       - name: Build Windows executable (x64)
