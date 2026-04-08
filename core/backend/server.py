@@ -37,15 +37,15 @@ MAX_QUEUE_ARCHIVE_SLOTS = 5
 DANMU_HEARTBEAT_INTERVAL_SECONDS = 30
 DANMU_IDLE_RECONNECT_SECONDS = 90
 
-REPO_DIR = Path(__file__).resolve().parent.parent
+REPO_DIR = Path(__file__).resolve().parents[2]
 BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", REPO_DIR))
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else REPO_DIR
 
-MODEL_JSON_PATH = BUNDLE_DIR / "models" / "danmuji_initial_model.json"
-TOGUI_DIR = BUNDLE_DIR / "toGUI"
+MODEL_JSON_PATH = BUNDLE_DIR / "core" / "models" / "danmuji_initial_model.json"
+UI_DIR = BUNDLE_DIR / "core" / "ui"
 CONFIG_PATH = APP_DIR / "config.yaml"
 LOG_DIR = APP_DIR / "log"
-PD_DIR = APP_DIR / "pd"
+PD_DIR = APP_DIR / "core" / "cd"
 QUEUE_STATE_PATH = PD_DIR / "queue_archive_state.json"
 QUANXIAN_PATH = APP_DIR / "quanxian.yaml"
 KAIGUAN_PATH = APP_DIR / "kaiguan.yaml"
@@ -1946,9 +1946,9 @@ def _safe_static_path(request_path: str) -> Path | None:
     if path == "/cookie-login":
         path = "/cookie_login.html"
 
-    target = (TOGUI_DIR / path.lstrip("/")).resolve()
+    target = (UI_DIR / path.lstrip("/")).resolve()
     try:
-        target.relative_to(TOGUI_DIR.resolve())
+        target.relative_to(UI_DIR.resolve())
     except ValueError:
         return None
 
