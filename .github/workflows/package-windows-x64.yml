@@ -47,11 +47,12 @@ jobs:
           python-version: '3.11'
 
       - name: Debug Python env
-        shell: cmd
+        shell: pwsh
         run: |
           python -V
           python -c "import sys; print(sys.executable)"
-          pip list | findstr /I "^http " || echo http package not found
+          $httpPkg = pip list | Select-String -Pattern "^http\s" -CaseSensitive:$false
+          if ($httpPkg) { Write-Host "WARNING: http package installed: $httpPkg" } else { Write-Host "http package not installed (OK)" }
 
       - name: Check stdlib shadowing
         shell: pwsh
@@ -66,7 +67,7 @@ jobs:
           if (Test-Path requirements.txt) {
             pip install -r requirements.txt
           }
-          pip uninstall -y http || echo "http not installed, skip uninstall"
+          pip uninstall -y http 2>$null; Write-Host "http uninstall done (or not installed)"
           pip install pyinstaller qrcode[pil] brotli psutil
 
       - name: Build Windows executable (x64)
