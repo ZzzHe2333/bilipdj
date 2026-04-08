@@ -47,6 +47,8 @@ CONFIG_PATH = APP_DIR / "config.yaml"
 LOG_DIR = APP_DIR / "log"
 PD_DIR = APP_DIR / "pd"
 QUEUE_STATE_PATH = PD_DIR / "queue_archive_state.json"
+QUANXIAN_PATH = APP_DIR / "quanxian.yaml"
+KAIGUAN_PATH = APP_DIR / "kaiguan.yaml"
 
 WS_MAGIC_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 MAX_SAFE_INTEGER = (1 << 53) - 1
@@ -483,13 +485,21 @@ class QueueArchiveManager:
     def _empty_snapshot(self) -> dict[str, Any]:
         return {"slot": 0, "path": "", "timestamp": "", "actor": "", "message": "", "queue": []}
 
+    def get_active_slot(self) -> int:
+        state = self._read_state()
+        slot = int(state.get("active_slot", 1))
+        return max(1, min(self.slots, slot))
+
+    def set_active_slot(self, slot: int) -> None:
+        state = self._read_state()
+        state["active_slot"] = max(1, min(self.slots, slot))
+        self._write_state(state)
+
     def write_snapshot(self, actor: str, message: str, queue_items: list[str]) -> Path | None:
         if not self.enabled:
             return None
 
-        state = self._read_state()
-        slot = int(state.get("next_slot", 1))
-        slot = ((slot - 1) % self.slots) + 1
+        slot = self.get_active_slot()
         out = self._slot_file(slot)
 
         now = dt.datetime.now().isoformat(timespec="seconds")
@@ -503,8 +513,6 @@ class QueueArchiveManager:
             for idx, item in enumerate(queue_items, start=1):
                 writer.writerow([idx, item])
 
-        state["next_slot"] = (slot % self.slots) + 1
-        self._write_state(state)
         return out
 
     def _read_snapshot(self, slot: int) -> dict[str, Any] | None:
@@ -598,6 +606,8 @@ class QueueManager:
         self._fangguan_can_doing: bool = False
         self._jianzhangchadui: bool = False
         self._all_disabled: bool = False
+        self._super_admins: list[str] = []
+        self._kaiguan: dict[str, bool] = dict(DEFAULT_KAIGUAN)
 
     def load_config(self, myjs_cfg: dict[str, Any], anchor_uid: int = 0) -> None:
         with self._lock:
@@ -616,9 +626,22 @@ class QueueManager:
             if anchor_uid > 0:
                 self._anchor_uid = anchor_uid
 
+    def load_quanxian(self, quanxian: dict[str, Any]) -> None:
+        with self._lock:
+            self._super_admins = [str(x) for x in quanxian.get("super_admin", []) if x]
+            self._admins = [str(x) for x in quanxian.get("admin", []) if x]
+            self._jianzhang = [str(x) for x in quanxian.get("jianzhang", []) if x]
+
+    def load_kaiguan(self, kaiguan: dict[str, bool]) -> None:
+        with self._lock:
+            self._kaiguan = {**DEFAULT_KAIGUAN, **{k: v for k, v in kaiguan.items() if isinstance(v, bool)}}
+            self._jianzhangchadui = self._kaiguan.get("jianzhang_chadui", False)
+            self._fangguan_can_doing = self._kaiguan.get("fangguan_op", False)
+
     def restore_from_archive(self) -> None:
-        snapshot = self._queue_archive.read_latest_snapshot()
-        if not snapshot.get("queue"):
+        slot = self._queue_archive.get_active_slot()
+        snapshot = self._queue_archive.read_snapshot_by_slot(slot)
+        if not snapshot or not snapshot.get("queue"):
             return
         with self._lock:
             self._persons = [self._strip_html(item) for item in snapshot["queue"] if item]
@@ -650,6 +673,7 @@ class QueueManager:
 
     def switch_to_slot(self, slot: int) -> list[str]:
         """Load queue from a specific archive slot, update in-memory queue, and broadcast."""
+        self._queue_archive.set_active_slot(slot)
         snapshot = self._queue_archive.read_snapshot_by_slot(slot)
         if snapshot is None:
             self._logger.info("[queue] switch_to_slot=%s: slot file not found, keeping current queue", slot)
@@ -666,8 +690,13 @@ class QueueManager:
         self._broadcast_and_archive("system", f"switch_slot_{slot}")
         return list(items)
 
+    def _has_super_admin(self, uname: str, is_anchor: bool) -> bool:
+        return is_anchor or uname in self._super_admins
+
     def _has_op_permission(self, uname: str, is_anchor: bool, is_admin: bool) -> bool:
-        return is_anchor or (uname in self._admins) or (is_admin and self._fangguan_can_doing)
+        if self._has_super_admin(uname, is_anchor):
+            return True
+        return (uname in self._admins) or (is_admin and self._fangguan_can_doing)
 
     def _find_index(self, uname: str) -> int:
         for i, item in enumerate(self._persons):
@@ -755,32 +784,33 @@ class QueueManager:
                 can_join = len(self._persons) < self._max_length or has_op
                 new_item: str | None = None
 
-                if msg == "排队":
+                kg = self._kaiguan
+                if msg == "排队" and kg.get("paidui", True):
                     new_item = uname
-                elif msg in ("官服排", "排官服", "官服排队", "排队官服"):
+                elif msg in ("官服排", "排官服", "官服排队", "排队官服") and kg.get("guanfu_paidui", True):
                     new_item = f"官|{uname}"
-                elif msg in ("B服排", "b服排", "排b服", "排B服", "B服排队", "排队B服", "b服排队", "排队b服"):
+                elif msg in ("B服排", "b服排", "排b服", "排B服", "B服排队", "排队B服", "b服排队", "排队b服") and kg.get("bfu_paidui", True):
                     new_item = f"B|{uname}"
-                elif msg in ("超级排", "超级排队"):
+                elif msg in ("超级排", "超级排队") and kg.get("chaoji_paidui", True):
                     new_item = f"<{uname}>"
-                elif msg in ("小米排", "排小米", "排米服"):
+                elif msg in ("小米排", "排小米", "排米服") and kg.get("mifu_paidui", True):
                     new_item = f"米|{uname}"
-                elif msg.startswith("排队 "):
+                elif msg.startswith("排队 ") and kg.get("paidui", True):
                     extra = msg[3:].strip()
                     new_item = f"{uname} {extra}" if extra else uname
-                elif re.match(r"^官服排队?\s", msg) or re.match(r"^官服排\s", msg):
+                elif (re.match(r"^官服排队?\s", msg) or re.match(r"^官服排\s", msg)) and kg.get("guanfu_paidui", True):
                     extra = msg.split(" ", 1)[1].strip() if " " in msg else ""
                     new_item = f"官|{uname} {extra}".rstrip()
-                elif re.match(r"^[Bb]服排\s", msg):
+                elif re.match(r"^[Bb]服排\s", msg) and kg.get("bfu_paidui", True):
                     extra = msg.split(" ", 1)[1].strip() if " " in msg else ""
                     new_item = f"B|{uname} {extra}".rstrip()
-                elif re.match(r"^超级排队?\s", msg):
+                elif re.match(r"^超级排队?\s", msg) and kg.get("chaoji_paidui", True):
                     extra = msg.split(" ", 1)[1].strip() if " " in msg else ""
                     new_item = f"<{uname}>{extra}" if extra else f"<{uname}>"
-                elif msg.startswith("米服排 "):
+                elif msg.startswith("米服排 ") and kg.get("mifu_paidui", True):
                     extra = msg.split(" ", 1)[1].strip() if " " in msg else ""
                     new_item = f"M|{uname} {extra}".rstrip()
-                elif msg == "插队" and is_jianzhang:
+                elif msg == "插队" and is_jianzhang and kg.get("jianzhang_chadui", False):
                     if len(self._persons) == 0 or not self._jianzhangchadui:
                         self._persons.append(uname)
                     else:
@@ -798,13 +828,13 @@ class QueueManager:
 
             # --- Self-service cancel/replace (already in queue) ---
             if index >= 0:
-                if msg in ("取消排队", "排队取消", "我确认我取消排队"):
+                if msg in ("取消排队", "排队取消", "我确认我取消排队") and self._kaiguan.get("quxiao_paidui", True):
                     self._persons.pop(index)
                     modified = True
-                elif msg in ("替换", "修改", "内容洗白"):
+                elif msg in ("替换", "修改", "内容洗白") and self._kaiguan.get("xiugai_paidui", True):
                     self._persons[index] = uname
                     modified = True
-                elif msg.startswith("替换 ") or msg.startswith("修改 "):
+                elif (msg.startswith("替换 ") or msg.startswith("修改 ")) and self._kaiguan.get("xiugai_paidui", True):
                     extra = msg.split(" ", 1)[1].strip() if " " in msg else ""
                     self._persons[index] = f"{uname} {extra}".rstrip()
                     modified = True
@@ -872,16 +902,93 @@ class QueueManager:
                     if target in self._ban_admins:
                         self._ban_admins.remove(target)
 
-                if msg.startswith("添加管理员 "):
-                    target = msg[6:].strip()
-                    if target and target not in self._admins:
-                        self._admins.append(target)
-                elif msg.startswith("取消管理员 "):
-                    target = msg[6:].strip()
-                    if target in self._admins:
-                        self._admins.remove(target)
+                if self._has_super_admin(uname, is_anchor):
+                    if msg.startswith("添加管理员 "):
+                        target = msg[6:].strip()
+                        if target and target not in self._admins:
+                            self._admins.append(target)
+                    elif msg.startswith("取消管理员 "):
+                        target = msg[6:].strip()
+                        if target in self._admins:
+                            self._admins.remove(target)
 
             return modified
+
+
+DEFAULT_QUANXIAN: dict[str, Any] = {
+    "super_admin": [],
+    "admin": [],
+    "jianzhang": [],
+    "member": [],
+}
+
+DEFAULT_KAIGUAN: dict[str, bool] = {
+    "paidui": True,
+    "guanfu_paidui": True,
+    "bfu_paidui": True,
+    "chaoji_paidui": True,
+    "mifu_paidui": True,
+    "quxiao_paidui": True,
+    "xiugai_paidui": True,
+    "jianzhang_chadui": False,
+    "fangguan_op": False,
+}
+
+
+def load_quanxian() -> dict[str, Any]:
+    raw = load_simple_yaml(QUANXIAN_PATH)
+    result: dict[str, Any] = {k: list(v) for k, v in DEFAULT_QUANXIAN.items()}
+    for key in DEFAULT_QUANXIAN:
+        if isinstance(raw.get(key), list):
+            result[key] = [str(x) for x in raw[key] if x]
+    return result
+
+
+def save_quanxian(config: dict[str, Any]) -> None:
+    labels = {
+        "super_admin": "最高管理员：拥有所有权限，包括新增/删除管理员",
+        "admin": "管理员：拥有除新增/删除管理员以外的所有操作权限",
+        "jianzhang": "舰长：仅拥有「插队」命令权限",
+        "member": "成员：普通观众",
+    }
+    lines: list[str] = ["# 权限配置\n"]
+    for key in ("super_admin", "admin", "jianzhang", "member"):
+        lines.append(f"# {labels[key]}\n{key}:\n")
+        for item in config.get(key, []):
+            escaped = str(item).replace('"', '\\"')
+            lines.append(f'  - "{escaped}"\n')
+        lines.append("\n")
+    QUANXIAN_PATH.write_text("".join(lines), encoding="utf-8")
+
+
+def load_kaiguan() -> dict[str, bool]:
+    raw = load_simple_yaml(KAIGUAN_PATH)
+    result: dict[str, bool] = dict(DEFAULT_KAIGUAN)
+    for key in DEFAULT_KAIGUAN:
+        if isinstance(raw.get(key), bool):
+            result[key] = raw[key]
+    return result
+
+
+def save_kaiguan(config: dict[str, bool]) -> None:
+    comments = {
+        "paidui": "普通排队（排队 / 排队 xxx）",
+        "guanfu_paidui": "官服排队",
+        "bfu_paidui": "B服排队",
+        "chaoji_paidui": "超级排队",
+        "mifu_paidui": "米服排队",
+        "quxiao_paidui": "取消排队",
+        "xiugai_paidui": "修改/替换排队内容",
+        "jianzhang_chadui": "舰长插队",
+        "fangguan_op": "允许B站房管执行管理员命令",
+    }
+    lines: list[str] = ["# 功能开关（true=启用，false=禁用）\n"]
+    for key, default in DEFAULT_KAIGUAN.items():
+        value = config.get(key, default)
+        value_str = "true" if value else "false"
+        comment = comments.get(key, key)
+        lines.append(f"{key}: {value_str}              # {comment}\n")
+    KAIGUAN_PATH.write_text("".join(lines), encoding="utf-8")
 
 
 def load_model() -> dict[str, Any]:
@@ -2074,6 +2181,16 @@ class ApiHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if parsed.path == "/api/quanxian":
+            quanxian = load_quanxian()
+            self._write_json({"status": "ok", **quanxian})
+            return
+
+        if parsed.path == "/api/kaiguan":
+            kaiguan = load_kaiguan()
+            self._write_json({"status": "ok", **kaiguan})
+            return
+
         if parsed.path == "/api/bili/qr/start":
             try:
                 payload = _bilibili_qr_generate()
@@ -2200,6 +2317,34 @@ class ApiHandler(BaseHTTPRequestHandler):
             else:
                 current = []
             self._write_json({"status": "ok", "slot": slot, "queue": current, "size": len(current)})
+            return
+
+        if parsed.path == "/api/quanxian":
+            length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(length).decode("utf-8", errors="replace") if length > 0 else "{}"
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                self._write_json({"status": "error", "message": "Body must be valid JSON"}, status=HTTPStatus.BAD_REQUEST)
+                return
+            save_quanxian(payload)
+            if hasattr(self.server, "queue_manager"):
+                self.server.queue_manager.load_quanxian(payload)
+            self._write_json({"status": "ok"})
+            return
+
+        if parsed.path == "/api/kaiguan":
+            length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(length).decode("utf-8", errors="replace") if length > 0 else "{}"
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                self._write_json({"status": "error", "message": "Body must be valid JSON"}, status=HTTPStatus.BAD_REQUEST)
+                return
+            save_kaiguan(payload)
+            if hasattr(self.server, "queue_manager"):
+                self.server.queue_manager.load_kaiguan(payload)
+            self._write_json({"status": "ok"})
             return
 
         if parsed.path == "/api/bili/qr/poll":
@@ -2381,6 +2526,8 @@ def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
         runtime_config.get("myjs", {}),
         anchor_uid=_to_int(runtime_config.get("api", {}).get("uid", 0)),
     )
+    httpd.queue_manager.load_quanxian(load_quanxian())
+    httpd.queue_manager.load_kaiguan(load_kaiguan())
     httpd.queue_manager.restore_from_archive()
     httpd.danmu_relay = BilibiliDanmuRelay(httpd)
     httpd.danmu_relay.start()

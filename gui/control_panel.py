@@ -20,10 +20,24 @@ REPO_DIR = Path(__file__).resolve().parent.parent
 BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", REPO_DIR))
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else REPO_DIR
 CONFIG_PATH = APP_DIR / "config.yaml"
+QUANXIAN_PATH = APP_DIR / "quanxian.yaml"
+KAIGUAN_PATH = APP_DIR / "kaiguan.yaml"
 SERVER_PATH = BUNDLE_DIR / "backend" / "server.py"
 APP_VERSION = "0.4.0"
 LOG_LEVEL_OPTIONS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 MAX_QUEUE_ARCHIVE_SLOTS = 5
+KAIGUAN_LABELS = [
+    ("paidui",           "普通排队"),
+    ("guanfu_paidui",    "官服排队"),
+    ("bfu_paidui",       "B服排队"),
+    ("chaoji_paidui",    "超级排队"),
+    ("mifu_paidui",      "米服排队"),
+    ("quxiao_paidui",    "取消排队"),
+    ("xiugai_paidui",    "修改排队内容"),
+    ("jianzhang_chadui", "舰长插队"),
+    ("fangguan_op",      "允许房管执行管理命令"),
+]
+DEFAULT_KAIGUAN_GUI = {k: True if i < 7 else False for i, (k, _) in enumerate(KAIGUAN_LABELS)}
 SENSITIVE_LOG_PATTERNS = [
     re.compile(r"(?i)\b(cookie|auth_token|SESSDATA|bili_jct|buvid3|DedeUserID(?:__ckMd5)?)\s*[:=]\s*([^\s,;]+)"),
 ]
@@ -263,7 +277,17 @@ class ControlPanelApp:
         notebook.add(settings_tab, text="设置")
         self._build_settings_tab(settings_tab)
 
-        # Tab 2: 关于
+        # Tab 2: 权限
+        quanxian_tab = ttk.Frame(notebook, padding=8)
+        notebook.add(quanxian_tab, text="权限")
+        self._build_quanxian_tab(quanxian_tab)
+
+        # Tab 3: 开关
+        kaiguan_tab = ttk.Frame(notebook, padding=8)
+        notebook.add(kaiguan_tab, text="开关")
+        self._build_kaiguan_tab(kaiguan_tab)
+
+        # Tab 4: 关于
         about_tab = ttk.Frame(notebook, padding=8)
         notebook.add(about_tab, text="关于")
         self._build_about_tab(about_tab)
@@ -357,6 +381,154 @@ class ControlPanelApp:
             text="该软件是免费软件，如果收费购买（亲手帮安装除外），请立刻退款！",
             foreground="#c00",
         ).pack()
+
+    def _build_quanxian_tab(self, frame: ttk.Frame) -> None:
+        frame.columnconfigure(0, weight=1)
+        self._quanxian_text: dict[str, tk.Text] = {}
+        levels = [
+            ("super_admin", "最高管理员（可新增/删除管理员，拥有全部权限）"),
+            ("admin",       "管理员（拥有除新增/删除管理员以外的所有权限）"),
+            ("jianzhang",   "舰长（仅拥有插队命令权限）"),
+            ("member",      "成员（普通观众，仅自助排队/取消/修改）"),
+        ]
+        for row_idx, (key, label) in enumerate(levels):
+            ttk.Label(frame, text=label).grid(row=row_idx * 2, column=0, sticky="w", pady=(8, 2))
+            container = ttk.Frame(frame)
+            container.grid(row=row_idx * 2 + 1, column=0, sticky="ew", pady=(0, 2))
+            container.columnconfigure(0, weight=1)
+            t = tk.Text(container, height=3, wrap="word")
+            t.grid(row=0, column=0, sticky="ew")
+            sb = ttk.Scrollbar(container, orient="vertical", command=t.yview)
+            sb.grid(row=0, column=1, sticky="ns")
+            t.configure(yscrollcommand=sb.set)
+            self._quanxian_text[key] = t
+
+        btn_row = len(levels) * 2
+        btn_bar = ttk.Frame(frame)
+        btn_bar.grid(row=btn_row, column=0, sticky="w", pady=(10, 0))
+        ttk.Button(btn_bar, text="保存权限", command=self._save_quanxian).pack(side="left", padx=(0, 8))
+        ttk.Button(btn_bar, text="刷新权限", command=self._load_quanxian).pack(side="left")
+        self._load_quanxian()
+
+    def _build_kaiguan_tab(self, frame: ttk.Frame) -> None:
+        self._kaiguan_vars: dict[str, tk.BooleanVar] = {}
+        for row_idx, (key, label) in enumerate(KAIGUAN_LABELS):
+            default = DEFAULT_KAIGUAN_GUI.get(key, True)
+            var = tk.BooleanVar(value=default)
+            self._kaiguan_vars[key] = var
+            ttk.Checkbutton(frame, text=label, variable=var).grid(row=row_idx, column=0, sticky="w", pady=2)
+
+        btn_bar = ttk.Frame(frame)
+        btn_bar.grid(row=len(KAIGUAN_LABELS), column=0, sticky="w", pady=(12, 0))
+        ttk.Button(btn_bar, text="保存开关", command=self._save_kaiguan).pack(side="left", padx=(0, 8))
+        ttk.Button(btn_bar, text="刷新开关", command=self._load_kaiguan).pack(side="left")
+        self._load_kaiguan()
+
+    def _load_quanxian(self) -> None:
+        port = self.port_var.get().strip() or "9816"
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/quanxian", timeout=2) as r:
+                data = json.loads(r.read().decode("utf-8", errors="replace"))
+            for key, widget in self._quanxian_text.items():
+                widget.delete("1.0", "end")
+                items = [x for x in data.get(key, []) if x]
+                widget.insert("end", "\n".join(items))
+        except Exception:
+            # 后端未运行时从本地文件读
+            raw = load_simple_yaml(QUANXIAN_PATH)
+            for key, widget in self._quanxian_text.items():
+                widget.delete("1.0", "end")
+                items = [x for x in raw.get(key, []) if x]
+                widget.insert("end", "\n".join(items))
+
+    def _save_quanxian(self) -> None:
+        payload: dict[str, list[str]] = {}
+        for key, widget in self._quanxian_text.items():
+            names = [line.strip() for line in widget.get("1.0", "end").splitlines() if line.strip()]
+            payload[key] = names
+        port = self.port_var.get().strip() or "9816"
+        body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/quanxian",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=2):
+                pass
+            self._append_log("[GUI] 权限配置已保存并生效")
+        except Exception:
+            # 后端未运行时直接写文件
+            self._write_quanxian_local(payload)
+            self._append_log("[GUI] 权限配置已保存到本地（后端未运行，下次启动生效）")
+
+    def _write_quanxian_local(self, payload: dict[str, list[str]]) -> None:
+        labels = {
+            "super_admin": "最高管理员：拥有所有权限，包括新增/删除管理员",
+            "admin": "管理员：拥有除新增/删除管理员以外的所有操作权限",
+            "jianzhang": "舰长：仅拥有「插队」命令权限",
+            "member": "成员：普通观众",
+        }
+        lines: list[str] = ["# 权限配置\n"]
+        for key in ("super_admin", "admin", "jianzhang", "member"):
+            lines.append(f"# {labels.get(key, key)}\n{key}:\n")
+            for item in payload.get(key, []):
+                escaped = str(item).replace('"', '\\"')
+                lines.append(f'  - "{escaped}"\n')
+            lines.append("\n")
+        QUANXIAN_PATH.write_text("".join(lines), encoding="utf-8")
+
+    def _load_kaiguan(self) -> None:
+        port = self.port_var.get().strip() or "9816"
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/kaiguan", timeout=2) as r:
+                data = json.loads(r.read().decode("utf-8", errors="replace"))
+            for key, var in self._kaiguan_vars.items():
+                var.set(bool(data.get(key, DEFAULT_KAIGUAN_GUI.get(key, True))))
+        except Exception:
+            raw = load_simple_yaml(KAIGUAN_PATH)
+            for key, var in self._kaiguan_vars.items():
+                default = DEFAULT_KAIGUAN_GUI.get(key, True)
+                val = raw.get(key, default)
+                var.set(bool(val) if isinstance(val, bool) else default)
+
+    def _save_kaiguan(self) -> None:
+        payload = {key: var.get() for key, var in self._kaiguan_vars.items()}
+        port = self.port_var.get().strip() or "9816"
+        body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/kaiguan",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=2):
+                pass
+            self._append_log("[GUI] 功能开关已保存并生效")
+        except Exception:
+            self._write_kaiguan_local(payload)
+            self._append_log("[GUI] 功能开关已保存到本地（后端未运行，下次启动生效）")
+
+    def _write_kaiguan_local(self, payload: dict[str, bool]) -> None:
+        comments = {
+            "paidui": "普通排队（排队 / 排队 xxx）",
+            "guanfu_paidui": "官服排队",
+            "bfu_paidui": "B服排队",
+            "chaoji_paidui": "超级排队",
+            "mifu_paidui": "米服排队",
+            "quxiao_paidui": "取消排队",
+            "xiugai_paidui": "修改/替换排队内容",
+            "jianzhang_chadui": "舰长插队",
+            "fangguan_op": "允许B站房管执行管理员命令",
+        }
+        lines: list[str] = ["# 功能开关（true=启用，false=禁用）\n"]
+        for key, _ in KAIGUAN_LABELS:
+            value = payload.get(key, DEFAULT_KAIGUAN_GUI.get(key, True))
+            value_str = "true" if value else "false"
+            lines.append(f"{key}: {value_str}              # {comments.get(key, key)}\n")
+        KAIGUAN_PATH.write_text("".join(lines), encoding="utf-8")
 
     def load_from_file(self) -> None:
         config = load_simple_yaml(CONFIG_PATH)
