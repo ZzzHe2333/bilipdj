@@ -333,7 +333,7 @@ def _yaml_quote_string(value: Any) -> str:
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "server": {"host": DEFAULT_HOST, "port": DEFAULT_PORT},
-    "api": {"roomid": 0, "uid": 0, "cookie": ""},
+    "api": {"roomid": 3049445, "uid": 0, "cookie": ""},
     "qr_login": {
         "last_success_at": "",
         "qrcode_key": "",
@@ -951,7 +951,7 @@ class QueueManager:
 
 
 DEFAULT_QUANXIAN: dict[str, Any] = {
-    "super_admin": [],
+    "super_admin": ["一纸轻予梦"],
     "admin": [],
     "jianzhang": [],
     "member": [],

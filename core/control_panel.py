@@ -272,7 +272,7 @@ class ControlPanelApp:
         self.status_var = tk.StringVar(value="服务未启动")
         self.host_var = tk.StringVar(value="0.0.0.0")
         self.port_var = tk.StringVar(value="9816")
-        self.roomid_var = tk.StringVar(value="0")
+        self.roomid_var = tk.StringVar(value="3049445")
         self.uid_var = tk.StringVar(value="0")
         self.cookie_var = tk.StringVar(value="")
         self.log_level_var = tk.StringVar(value="INFO")
@@ -307,7 +307,8 @@ class ControlPanelApp:
         btn_bar.pack(side="left")
         ttk.Button(btn_bar, text="启动后端", command=self.start_server).grid(row=0, column=0, padx=(0, 6))
         ttk.Button(btn_bar, text="停止后端", command=self.stop_server).grid(row=0, column=1, padx=(0, 6))
-        ttk.Button(btn_bar, text="打开Web界面", command=self.open_web).grid(row=0, column=2)
+        ttk.Button(btn_bar, text="配置页", command=self.open_config).grid(row=0, column=2, padx=(0, 6))
+        ttk.Button(btn_bar, text="排队展示页", command=self.open_web).grid(row=0, column=3)
 
         ttk.Label(top, textvariable=self.status_var, foreground="#0b5").pack(side="left", padx=(16, 0))
 
@@ -457,7 +458,9 @@ class ControlPanelApp:
         log_frame.grid(row=1, column=0, sticky="nsew")
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
-        self.log_text = tk.Text(log_frame, height=18, wrap="word", state="disabled")
+        _sys_font = ("Microsoft YaHei UI", 9) if sys.platform == "win32" else ("PingFang SC", 11) if sys.platform == "darwin" else ("Sans", 10)
+        self.log_text = tk.Text(log_frame, height=18, wrap="word", state="disabled", font=_sys_font)
+        self.log_text.tag_configure("warn", foreground="#c00")
         self.log_text.grid(row=0, column=0, sticky="nsew")
         log_scroll = ttk.Scrollbar(log_frame, orient="vertical", command=self.log_text.yview)
         log_scroll.grid(row=0, column=1, sticky="ns")
@@ -524,7 +527,8 @@ class ControlPanelApp:
         self._perf_vars: dict[str, tk.StringVar] = {}
         rows = [
             ("cpu",  "CPU 使用率"),
-            ("mem",  "内存"),
+            ("mem",  "本进程内存"),
+            ("sysmem", "系统内存"),
             ("disk", "磁盘"),
             ("gpu",  "GPU"),
         ]
@@ -547,10 +551,13 @@ class ControlPanelApp:
         try:
             import psutil  # type: ignore[import-untyped]
             cpu_text = f"{psutil.cpu_percent(interval=0.3):.1f}%"
-            mem = psutil.virtual_memory()
-            mem_text = (
-                f"{mem.used / 1024**3:.1f} GB / {mem.total / 1024**3:.1f} GB"
-                f"  ({mem.percent:.1f}%)"
+            proc = psutil.Process()
+            proc_mem = proc.memory_info().rss
+            mem_text = f"{proc_mem / 1024**2:.1f} MB"
+            sys_mem = psutil.virtual_memory()
+            sysmem_text = (
+                f"{sys_mem.used / 1024**3:.1f} GB / {sys_mem.total / 1024**3:.1f} GB"
+                f"  ({sys_mem.percent:.1f}%)"
             )
             disk = psutil.disk_usage(str(APP_DIR))
             disk_text = (
@@ -558,9 +565,9 @@ class ControlPanelApp:
                 f"  ({disk.percent:.1f}%)"
             )
         except ImportError:
-            cpu_text = mem_text = disk_text = "需安装 psutil"
+            cpu_text = mem_text = sysmem_text = disk_text = "需安装 psutil"
         except Exception as exc:  # noqa: BLE001
-            cpu_text = mem_text = disk_text = f"读取失败: {exc}"
+            cpu_text = mem_text = sysmem_text = disk_text = f"读取失败: {exc}"
 
         gpu_text = _query_gpu()
 
@@ -569,23 +576,30 @@ class ControlPanelApp:
             lambda: (
                 self._perf_vars["cpu"].set(cpu_text),
                 self._perf_vars["mem"].set(mem_text),
+                self._perf_vars["sysmem"].set(sysmem_text),
                 self._perf_vars["disk"].set(disk_text),
                 self._perf_vars["gpu"].set(gpu_text),
             ),
         )
 
     def _build_about_tab(self, frame: ttk.Frame) -> None:
-        ttk.Label(frame, text=f"Danmuji 弹幕排队控制台", font=("Arial", 15, "bold")).pack(pady=(20, 6))
+        ttk.Label(frame, text="Danmuji 弹幕排队控制台", font=("Microsoft YaHei UI", 15, "bold") if sys.platform == "win32" else ("", 15, "bold")).pack(pady=(20, 6))
         ttk.Label(frame, text=f"版本：v{APP_VERSION}").pack()
         ttk.Separator(frame, orient="horizontal").pack(fill="x", pady=12)
         ttk.Label(frame, text="Bilibili 直播弹幕排队管理工具").pack()
         ttk.Label(frame, text="排队逻辑由 Python 后端统一处理，前端仅负责显示。").pack(pady=(4, 0))
         ttk.Separator(frame, orient="horizontal").pack(fill="x", pady=12)
-        ttk.Label(
-            frame,
-            text="该软件是免费软件，如果收费购买（亲手帮安装除外），请立刻退款！",
-            foreground="#c00",
-        ).pack()
+        for line in [
+            "本软件完全免费，源码公开。",
+            "若有人向你收费获取此软件（亲手上门帮安装调试除外），请立刻退款并举报！",
+            "",
+            "【侵权/倒卖责任】",
+            "• 民事责任：侵权方须停止侵权、赔偿损失（含维权合理费用）。",
+            "• 刑事责任：以营利为目的的侵权行为，违法所得数额较大或",
+            "  情节严重的，依《著作权法》第53条及相关司法解释，",
+            "  可被追究刑事责任，最高判处3年有期徒刑并处罚金。",
+        ]:
+            ttk.Label(frame, text=line, foreground="#c00" if line.startswith("若") or line.startswith("【") or line.startswith("•") or line.startswith(" ") else "").pack(anchor="w", padx=20)
 
     def _build_quanxian_tab(self, frame: ttk.Frame) -> None:
         frame.columnconfigure(0, weight=1)
@@ -812,9 +826,12 @@ class ControlPanelApp:
             },
         }
 
-    def _append_log(self, message: str) -> None:
+    def _append_log(self, message: str, warn: bool = False) -> None:
         self.log_text.configure(state="normal")
+        start = self.log_text.index("end-1c")
         self.log_text.insert("end", f"{message}\n")
+        if warn:
+            self.log_text.tag_add("warn", start, self.log_text.index("end-1c"))
         self.log_text.see("end")
         self.log_text.configure(state="disabled")
 
@@ -922,6 +939,7 @@ class ControlPanelApp:
                 command = [sys.executable, "--backend"]
             else:
                 command = [sys.executable, str(SERVER_PATH)]
+            _cflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
             self.server_proc = subprocess.Popen(
                 command,
                 cwd=str(APP_DIR),
@@ -931,6 +949,7 @@ class ControlPanelApp:
                 encoding="utf-8",
                 errors="replace",
                 bufsize=1,
+                creationflags=_cflags,
             )
             self.status_var.set("后端已启动")
             self._append_log(f"[GUI] 后端已启动：{' '.join(command)}")
@@ -952,15 +971,20 @@ class ControlPanelApp:
         self.status_var.set("后端已停止")
         self._append_log("[GUI] 后端已停止")
 
+    _FREE_NOTICE = (
+        "【免费提示】本软件完全免费，源码公开。"
+        "若有人向你收费获取此软件（亲手上门帮安装调试除外），请立刻退款并举报！"
+        "侵权/倒卖者将承担民事赔偿责任，情节严重者依据《著作权法》可追究刑事责任（最高判处 3 年有期徒刑并处罚金）。"
+    )
+
+    def open_config(self) -> None:
+        port = self.port_var.get().strip() or "9816"
+        self._append_log(self._FREE_NOTICE, warn=True)
+        webbrowser.open(f"http://127.0.0.1:{port}/config")
+
     def open_web(self) -> None:
         port = self.port_var.get().strip() or "9816"
-        confirmed = messagebox.askokcancel(
-            "免费软件提示",
-            "该软件是免费软件，如果收费购买（亲手帮安装除外），请立刻退款！\n\n点击“确定”后打开后台管理页面。",
-        )
-        if not confirmed:
-            self.status_var.set("已取消打开网页")
-            return
+        self._append_log(self._FREE_NOTICE, warn=True)
         webbrowser.open(f"http://127.0.0.1:{port}/index")
 
     def on_close(self) -> None:
@@ -979,8 +1003,19 @@ def main() -> None:
         return
 
     root = tk.Tk()
+    root.withdraw()
+    try:
+        root.wm_attributes("-alpha", 0)
+    except tk.TclError:
+        pass
     app = ControlPanelApp(root)
     root.minsize(760, 560)
+    root.update_idletasks()
+    root.deiconify()
+    try:
+        root.wm_attributes("-alpha", 1)
+    except tk.TclError:
+        pass
     root.mainloop()
 
 
