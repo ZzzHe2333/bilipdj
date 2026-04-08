@@ -6,7 +6,7 @@
 
 ### 修复存档槽位切换 + 权限系统 + 功能开关
 
-**backend/server.py**
+**core/backend/server.py**
 - `QueueArchiveManager`：新增 `get_active_slot()` / `set_active_slot(slot)` 方法，以 `active_slot` 字段替代原有 `next_slot` 轮转写入，确保存档始终写入用户选择的槽位
 - `QueueArchiveManager.write_snapshot()`：不再轮转，改为写入当前 `active_slot`
 - `QueueManager.restore_from_archive()`：启动时从 `active_slot` 恢复，而非按时间戳取最新（**修复**重启后存档不生效的 bug）
@@ -21,7 +21,7 @@
 - 新增 `GET /api/kaiguan` / `POST /api/kaiguan` 接口
 - `run_server()`：启动时加载并注入 quanxian 和 kaiguan 配置
 
-**gui/control_panel.py**
+**core/gui/control_panel.py**
 - 新增 `权限` 标签页（`_build_quanxian_tab()`）：4 个 Text 区域分别对应 super_admin / admin / jianzhang / member，每行一个用户名，支持在线保存/刷新；后端未运行时写本地文件
 - 新增 `开关` 标签页（`_build_kaiguan_tab()`）：9 个 Checkbutton 对应各排队命令开关，支持在线保存/刷新；后端未运行时写本地文件
 
@@ -37,14 +37,14 @@
 
 ### Debug 弹幕日志 + 存档槽位切换联动
 
-**backend/server.py**
+**core/backend/server.py**
 - `_log_business_message`：DEBUG 日志由元数据摘要改为输出原始 `uname` + `msg` 内容
 - `QueueManager.process_danmu_json`：在处理前新增 DEBUG 日志，记录原始弹幕用户名和消息
 - `QueueArchiveManager.read_snapshot_by_slot(slot)`：新增公开方法，按指定槽位号读取存档
 - `QueueManager.switch_to_slot(slot)`：新增方法，从指定槽位加载队列到内存并广播 `QUEUE_UPDATE`
 - 新增 `POST /api/queue/switch` 接口（`{"slot": N}`），供 GUI 触发存档切换
 
-**gui/control_panel.py**
+**core/gui/control_panel.py**
 - `save_to_file()` 保存成功后自动调用 `_switch_queue_slot()`
 - 新增 `_switch_queue_slot()`：向 `/api/queue/switch` 发请求，切换后端内存队列并刷新前端显示；后端未运行时静默提示
 
@@ -54,7 +54,7 @@
 
 ### 排队逻辑后端化 + GUI 多标签页改版
 
-**backend/server.py**
+**core/backend/server.py**
 - 新增 `QueueManager` 类，将排队业务逻辑完整迁移至 Python 后端
 - 维护线程安全的纯文本队列 `_persons`，支持从 CSV 存档恢复并自动剥离旧 HTML 格式
 - `DANMU_MSG` 弹幕不再直接广播，改为路由进 `QueueManager` 处理队列命令
@@ -64,12 +64,12 @@
 - 新增 `GET /api/queue/state` 接口，返回当前内存队列（供调试使用）
 - 新增 `import re` 模块级导入
 
-**toGUI/myjs.js**
+**core/ui/myjs.js**
 - 大幅精简（1334 行 → 120 行），移除全部排队业务逻辑
 - 仅保留 WebSocket 连接、接收 `QUEUE_UPDATE` 渲染队列、接收 `PDJ_STATUS` 状态事件
 - 从 `/api/config` 加载 `roomid` / `uid` 用于状态显示
 
-**gui/control_panel.py**
+**core/gui/control_panel.py**
 - GUI 改为 `ttk.Notebook` 多标签页布局
   - **日志**：直播间连接状态指示 + 实时后端日志
   - **设置**：所有配置字段及保存/刷新按钮
