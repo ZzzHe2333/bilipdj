@@ -177,6 +177,34 @@ def _parse_scalar(value: str) -> Any:
         return value
 
 
+def _strip_inline_yaml_comment(value: str) -> str:
+    in_single = False
+    in_double = False
+    escaped = False
+    result_chars: list[str] = []
+    for ch in value:
+        if escaped:
+            result_chars.append(ch)
+            escaped = False
+            continue
+        if ch == "\\":
+            result_chars.append(ch)
+            escaped = True
+            continue
+        if ch == "'" and not in_double:
+            in_single = not in_single
+            result_chars.append(ch)
+            continue
+        if ch == '"' and not in_single:
+            in_double = not in_double
+            result_chars.append(ch)
+            continue
+        if ch == "#" and not in_single and not in_double:
+            break
+        result_chars.append(ch)
+    return "".join(result_chars).rstrip()
+
+
 def _next_meaningful_line(lines: list[str], start_index: int) -> tuple[int, str] | None:
     for idx in range(start_index, len(lines)):
         stripped = lines[idx].strip()
@@ -221,7 +249,7 @@ def load_simple_yaml(path: Path) -> dict[str, Any]:
 
         key, value = stripped.split(":", 1)
         key = key.strip()
-        value = value.strip()
+        value = _strip_inline_yaml_comment(value.strip())
 
         if value == "":
             next_line = _next_meaningful_line(lines, index + 1)
