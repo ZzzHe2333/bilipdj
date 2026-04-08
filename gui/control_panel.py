@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib
+import importlib.util
 import json
 import queue
 import re
@@ -12,6 +14,7 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 from tkinter import messagebox, ttk
+from typing import Any
 
 REPO_DIR = Path(__file__).resolve().parent.parent
 BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", REPO_DIR))
@@ -24,6 +27,7 @@ MAX_QUEUE_ARCHIVE_SLOTS = 5
 SENSITIVE_LOG_PATTERNS = [
     re.compile(r"(?i)\b(cookie|auth_token|SESSDATA|bili_jct|buvid3|DedeUserID(?:__ckMd5)?)\s*[:=]\s*([^\s,;]+)"),
 ]
+_BACKEND_SERVER_MODULE: Any | None = None
 
 
 def sanitize_log_message(message: str) -> str:
@@ -31,6 +35,32 @@ def sanitize_log_message(message: str) -> str:
     for pattern in SENSITIVE_LOG_PATTERNS:
         sanitized = pattern.sub(lambda match: f"{match.group(1)}=<hidden>", sanitized)
     return sanitized
+
+
+def load_backend_server_module() -> Any:
+    global _BACKEND_SERVER_MODULE
+    if _BACKEND_SERVER_MODULE is not None:
+        return _BACKEND_SERVER_MODULE
+
+    module_names = (
+        "bilipdj.backend.server",
+        "backend.server",
+    )
+    for module_name in module_names:
+        try:
+            _BACKEND_SERVER_MODULE = importlib.import_module(module_name)
+            return _BACKEND_SERVER_MODULE
+        except ModuleNotFoundError:
+            continue
+
+    spec = importlib.util.spec_from_file_location("pdj_backend_server", SERVER_PATH)
+    if spec is None or spec.loader is None:
+        raise ModuleNotFoundError(f"Unable to load backend server module from {SERVER_PATH}")
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    _BACKEND_SERVER_MODULE = module
+    return module
 
 
 def parse_scalar(value: str):
@@ -204,27 +234,87 @@ class ControlPanelApp:
         main.grid(sticky="nsew")
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
+        main.columnconfigure(0, weight=1)
+        main.rowconfigure(1, weight=1)
+
+        # --- 顶部：服务器控制按钮和状态 ---
+        top = ttk.Frame(main)
+        top.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+
+        btn_bar = ttk.Frame(top)
+        btn_bar.pack(side="left")
+        ttk.Button(btn_bar, text="启动后端", command=self.start_server).grid(row=0, column=0, padx=(0, 6))
+        ttk.Button(btn_bar, text="停止后端", command=self.stop_server).grid(row=0, column=1, padx=(0, 6))
+        ttk.Button(btn_bar, text="打开Web界面", command=self.open_web).grid(row=0, column=2)
+
+        ttk.Label(top, textvariable=self.status_var, foreground="#0b5").pack(side="left", padx=(16, 0))
+
+        # --- 标签页 ---
+        notebook = ttk.Notebook(main)
+        notebook.grid(row=1, column=0, sticky="nsew")
+
+        # Tab 0: 日志
+        log_tab = ttk.Frame(notebook, padding=8)
+        notebook.add(log_tab, text="日志")
+        self._build_log_tab(log_tab)
+
+        # Tab 1: 设置
+        settings_tab = ttk.Frame(notebook, padding=8)
+        notebook.add(settings_tab, text="设置")
+        self._build_settings_tab(settings_tab)
+
+        # Tab 2: 关于
+        about_tab = ttk.Frame(notebook, padding=8)
+        notebook.add(about_tab, text="关于")
+        self._build_about_tab(about_tab)
+
+    def _build_log_tab(self, frame: ttk.Frame) -> None:
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(1, weight=1)
+
+        # 连接状态指示
+        status_bar = ttk.Frame(frame)
+        status_bar.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        ttk.Label(
+            status_bar,
+            textvariable=self.ws_light_var,
+            foreground="#0b5",
+            font=("Arial", 14, "bold"),
+        ).pack(side="left")
+        ttk.Label(status_bar, textvariable=self.ws_text_var).pack(side="left", padx=(8, 0))
+
+        # 日志文本
+        log_frame = ttk.Frame(frame)
+        log_frame.grid(row=1, column=0, sticky="nsew")
+        log_frame.columnconfigure(0, weight=1)
+        log_frame.rowconfigure(0, weight=1)
+        self.log_text = tk.Text(log_frame, height=18, wrap="word", state="disabled")
+        self.log_text.grid(row=0, column=0, sticky="nsew")
+        log_scroll = ttk.Scrollbar(log_frame, orient="vertical", command=self.log_text.yview)
+        log_scroll.grid(row=0, column=1, sticky="ns")
+        self.log_text.configure(yscrollcommand=log_scroll.set)
+
+    def _build_settings_tab(self, frame: ttk.Frame) -> None:
+        frame.columnconfigure(1, weight=1)
 
         row = 0
-        for label, var in [
-            ("监听地址", self.host_var),
-            ("监听端口", self.port_var),
-            ("直播间号", self.roomid_var),
-            ("UID", self.uid_var),
-            ("Cookie", self.cookie_var),
-            ("日志保留天数", self.retention_days_var),
+        for label, var, wide in [
+            ("监听地址", self.host_var, False),
+            ("监听端口", self.port_var, False),
+            ("直播间号", self.roomid_var, False),
+            ("UID", self.uid_var, False),
+            ("Cookie", self.cookie_var, True),
+            ("日志保留天数", self.retention_days_var, False),
         ]:
-            ttk.Label(main, text=label).grid(row=row, column=0, sticky="w", pady=4)
-            if label == "Cookie":
-                entry = ttk.Entry(main, textvariable=var, width=60)
-            else:
-                entry = ttk.Entry(main, textvariable=var, width=30)
-            entry.grid(row=row, column=1, sticky="ew", pady=4)
+            ttk.Label(frame, text=label).grid(row=row, column=0, sticky="w", pady=4)
+            ttk.Entry(frame, textvariable=var, width=60 if wide else 30).grid(
+                row=row, column=1, sticky="ew", pady=4
+            )
             row += 1
 
-        ttk.Label(main, text="日志等级").grid(row=row, column=0, sticky="w", pady=4)
+        ttk.Label(frame, text="日志等级").grid(row=row, column=0, sticky="w", pady=4)
         self.log_level_combo = ttk.Combobox(
-            main,
+            frame,
             textvariable=self.log_level_var,
             values=LOG_LEVEL_OPTIONS,
             width=27,
@@ -233,8 +323,8 @@ class ControlPanelApp:
         self.log_level_combo.grid(row=row, column=1, sticky="w", pady=4)
         row += 1
 
-        ttk.Label(main, text="日志存档槽位").grid(row=row, column=0, sticky="w", pady=4)
-        slot_frame = ttk.Frame(main)
+        ttk.Label(frame, text="日志存档槽位").grid(row=row, column=0, sticky="w", pady=4)
+        slot_frame = ttk.Frame(frame)
         slot_frame.grid(row=row, column=1, sticky="w", pady=4)
         for slot in range(1, MAX_QUEUE_ARCHIVE_SLOTS + 1):
             ttk.Radiobutton(
@@ -245,43 +335,28 @@ class ControlPanelApp:
             ).grid(row=0, column=slot - 1, padx=(0, 8), sticky="w")
         row += 1
 
-        ttk.Checkbutton(main, text="启用排队存档", variable=self.queue_enabled_var).grid(
+        ttk.Checkbutton(frame, text="启用排队存档", variable=self.queue_enabled_var).grid(
             row=row, column=1, sticky="w", pady=4
         )
         row += 1
 
-        button_bar = ttk.Frame(main)
-        button_bar.grid(row=row, column=0, columnspan=2, sticky="w", pady=(8, 4))
-        ttk.Button(button_bar, text="保存配置", command=self.save_to_file).grid(row=0, column=0, padx=(0, 8))
-        ttk.Button(button_bar, text="刷新配置", command=self.load_from_file).grid(row=0, column=1, padx=(0, 8))
-        ttk.Button(button_bar, text="启动后端", command=self.start_server).grid(row=0, column=2, padx=(0, 8))
-        ttk.Button(button_bar, text="停止后端", command=self.stop_server).grid(row=0, column=3, padx=(0, 8))
-        ttk.Button(button_bar, text="打开Web界面", command=self.open_web).grid(row=0, column=4)
+        btn_bar = ttk.Frame(frame)
+        btn_bar.grid(row=row, column=0, columnspan=2, sticky="w", pady=(10, 4))
+        ttk.Button(btn_bar, text="保存配置", command=self.save_to_file).grid(row=0, column=0, padx=(0, 8))
+        ttk.Button(btn_bar, text="刷新配置", command=self.load_from_file).grid(row=0, column=1)
 
-        status_bar = ttk.Frame(main)
-        status_bar.grid(row=row + 1, column=0, columnspan=2, sticky="w", pady=(8, 0))
-        ttk.Label(status_bar, textvariable=self.ws_light_var, foreground="#0b5", font=("Arial", 14, "bold")).grid(
-            row=0, column=0, sticky="w"
-        )
-        ttk.Label(status_bar, textvariable=self.ws_text_var).grid(row=0, column=1, sticky="w", padx=(8, 0))
-
-        ttk.Label(main, textvariable=self.status_var, foreground="#0b5").grid(
-            row=row + 2, column=0, columnspan=2, sticky="w", pady=(8, 0)
-        )
-
-        ttk.Label(main, text="实时日志").grid(row=row + 3, column=0, sticky="nw", pady=(10, 4))
-        log_frame = ttk.Frame(main)
-        log_frame.grid(row=row + 3, column=1, sticky="nsew", pady=(10, 4))
-        self.log_text = tk.Text(log_frame, height=10, wrap="word", state="disabled")
-        self.log_text.grid(row=0, column=0, sticky="nsew")
-        log_scroll = ttk.Scrollbar(log_frame, orient="vertical", command=self.log_text.yview)
-        log_scroll.grid(row=0, column=1, sticky="ns")
-        self.log_text.configure(yscrollcommand=log_scroll.set)
-
-        log_frame.columnconfigure(0, weight=1)
-        log_frame.rowconfigure(0, weight=1)
-        main.columnconfigure(1, weight=1)
-        main.rowconfigure(row + 3, weight=1)
+    def _build_about_tab(self, frame: ttk.Frame) -> None:
+        ttk.Label(frame, text=f"Danmuji 弹幕排队控制台", font=("Arial", 15, "bold")).pack(pady=(20, 6))
+        ttk.Label(frame, text=f"版本：v{APP_VERSION}").pack()
+        ttk.Separator(frame, orient="horizontal").pack(fill="x", pady=12)
+        ttk.Label(frame, text="Bilibili 直播弹幕排队管理工具").pack()
+        ttk.Label(frame, text="排队逻辑由 Python 后端统一处理，前端仅负责显示。").pack(pady=(4, 0))
+        ttk.Separator(frame, orient="horizontal").pack(fill="x", pady=12)
+        ttk.Label(
+            frame,
+            text="该软件是免费软件，如果收费购买（亲手帮安装除外），请立刻退款！",
+            foreground="#c00",
+        ).pack()
 
     def load_from_file(self) -> None:
         config = load_simple_yaml(CONFIG_PATH)
@@ -410,8 +485,7 @@ class ControlPanelApp:
 
     def save_to_file(self) -> None:
         try:
-            from backend import server as backend_server
-
+            backend_server = load_backend_server_module()
             config = backend_server._merge_config(  # type: ignore[attr-defined]
                 backend_server.load_config(),
                 self.gather_config(),
@@ -423,6 +497,22 @@ class ControlPanelApp:
             messagebox.showerror("输入错误", "请检查数字字段（端口/直播间号/UID/保留天数/槽位）")
         except OSError as exc:
             messagebox.showerror("保存失败", str(exc))
+            return
+        self._switch_queue_slot()
+
+    def _switch_queue_slot(self) -> None:
+        slot = self.queue_slot_choice_var.get()
+        port = self.port_var.get().strip() or "9816"
+        url = f"http://127.0.0.1:{port}/api/queue/switch"
+        body = json.dumps({"slot": slot}).encode("utf-8")
+        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                result = json.loads(resp.read().decode("utf-8", errors="replace"))
+            size = result.get("size", 0)
+            self._append_log(f"[GUI] 已切换到存档槽位 {slot}，队列 {size} 人")
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+            self._append_log(f"[GUI] 存档槽位已选择 {slot}（后端未运行，下次启动生效）")
 
     def start_server(self) -> None:
         if self.server_proc and self.server_proc.poll() is None:
@@ -485,8 +575,7 @@ class ControlPanelApp:
 
 def main() -> None:
     if "--backend" in sys.argv[1:]:
-        from backend import server as backend_server
-
+        backend_server = load_backend_server_module()
         config = backend_server.load_config()
         host = str(config.get("server", {}).get("host", "0.0.0.0"))
         port = int(config.get("server", {}).get("port", 9816))
