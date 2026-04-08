@@ -4,9 +4,9 @@ server:
   port: 9816
 
 api:
-  roomid: 0
-  uid: 0
-  cookie: ""
+  roomid: 3049445
+  uid: 18461303
+  cookie: "SESSDATA=002ee9e4%2C1790154067%2C795c0%2A32CjCAWFyxMDTlNDenLGjP_22R2jRSqH4yTpGIrS9mjHzw0gGJFFsbhGmuC2IpspvI1DkSVkRxTDA2WGN6S0l0VXlKbTMzdUlCdG9wVmFEVFFvTG83bTJIajdBWFFpU2tfYkswdDBQVFNhR0tVTjlidUtKdk5kQ09uRTNabVMwcmZ5aVEzZUZXam9nIIEC; bili_jct=796eae105ddfd892c33d2f6f4afe6655; DedeUserID=3546560174492418; DedeUserID__ckMd5=61428bc1d5aa7c50; sid=fwyqlk7a"
 
 qr_login:
   # 最近一次扫码成功信息（由 /api/bili/qr/poll 自动写入）
@@ -26,14 +26,14 @@ ui:
 
 logging:
   # 支持 DEBUG / INFO / WARNING / ERROR / CRITICAL
-  level: INFO
+  level: DEBUG
   # 每次启动默认清理多少天前日志
   retention_days: 15
 
 queue_archive:
   enabled: true
-  # 三个存档位（像游戏存档）
-  slots: 3
+  # 存档位（1~5）
+  slots: 5
 
 callback:
   enabled: false
