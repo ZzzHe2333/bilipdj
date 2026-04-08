@@ -61,40 +61,6 @@ def sanitize_log_message(message: str) -> str:
     return sanitized
 
 
-def _query_gpu() -> str:
-    """尝试通过 nvidia-smi 或 GPUtil 读取 GPU 占用率，均失败则返回 N/A。"""
-    try:
-        result = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=utilization.gpu,memory.used,memory.total",
-                "--format=csv,noheader,nounits",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=3,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            parts = [p.strip() for p in result.stdout.strip().split(",")]
-            if len(parts) >= 3:
-                used_gb = int(parts[1]) / 1024
-                total_gb = int(parts[2]) / 1024
-                return f"{parts[0]}%  显存 {used_gb:.1f} GB / {total_gb:.1f} GB"
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        import GPUtil  # type: ignore[import-untyped]
-        gpus = GPUtil.getGPUs()
-        if gpus:
-            g = gpus[0]
-            return (
-                f"{g.load * 100:.1f}%  显存"
-                f" {g.memoryUsed / 1024:.1f} GB / {g.memoryTotal / 1024:.1f} GB"
-            )
-    except Exception:  # noqa: BLE001
-        pass
-    return "N/A（未检测到 GPU 或驱动不支持）"
-
 
 def load_backend_server_module() -> Any:
     global _BACKEND_SERVER_MODULE
@@ -529,8 +495,7 @@ class ControlPanelApp:
             ("cpu",  "CPU 使用率"),
             ("mem",  "本进程内存"),
             ("sysmem", "系统内存"),
-            ("disk", "磁盘"),
-            ("gpu",  "GPU"),
+            ("disk", "程序目录"),
         ]
         for row_idx, (key, label) in enumerate(rows):
             ttk.Label(frame, text=label, width=10, anchor="e").grid(
@@ -559,17 +524,19 @@ class ControlPanelApp:
                 f"{sys_mem.used / 1024**3:.1f} GB / {sys_mem.total / 1024**3:.1f} GB"
                 f"  ({sys_mem.percent:.1f}%)"
             )
-            disk = psutil.disk_usage(str(APP_DIR))
-            disk_text = (
-                f"{disk.used / 1024**3:.1f} GB / {disk.total / 1024**3:.1f} GB"
-                f"  ({disk.percent:.1f}%)"
+            dir_bytes = sum(
+                f.stat().st_size
+                for f in APP_DIR.rglob("*")
+                if f.is_file()
             )
+            disk = psutil.disk_usage(str(APP_DIR))
+            dir_mb = dir_bytes / 1024 ** 2
+            dir_pct = dir_bytes / disk.total * 100
+            disk_text = f"{dir_mb:.1f} MB，占硬盘的 {dir_pct:.2f}%"
         except ImportError:
             cpu_text = mem_text = sysmem_text = disk_text = "需安装 psutil"
         except Exception as exc:  # noqa: BLE001
             cpu_text = mem_text = sysmem_text = disk_text = f"读取失败: {exc}"
-
-        gpu_text = _query_gpu()
 
         self.root.after(
             0,
@@ -578,7 +545,6 @@ class ControlPanelApp:
                 self._perf_vars["mem"].set(mem_text),
                 self._perf_vars["sysmem"].set(sysmem_text),
                 self._perf_vars["disk"].set(disk_text),
-                self._perf_vars["gpu"].set(gpu_text),
             ),
         )
 
