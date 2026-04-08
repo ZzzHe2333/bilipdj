@@ -2,6 +2,43 @@
 
 ---
 
+## 2026-04-08 （二次修订）UTC+08:00
+
+### 性能优化、打包修复、体验改善
+
+**core/control_panel.py**
+- 修复：后端未启动时拖动窗口卡顿问题——`_auto_refresh_queue` / `refresh_runtime_status` 增加 `_backend_is_running()` 守卫，后端未运行时不发送任何 HTTP 请求
+- 修复：切换日志级别为 INFO 时 DEBUG 日志仍显示的 bug——新增 `_LEVEL_ORDER` 字典和 `_LOG_LEVEL_RE` 正则，在 `_enqueue_log` 中过滤低级别日志
+- 修复：打包后 GUI 日志栏中文乱码——日志 `Text` 控件改用 `font=("Microsoft YaHei UI", 9)`（Windows 专用系统中文字体）
+- 修复：启动 GUI 窗口时有隐藏窗口闪烁——`main()` 改为先 `withdraw()` + `wm_attributes("-alpha", 0)` 隐藏，布局完成后再 `deiconify()` + `alpha=1` 显示，避免打断输入法
+- 修复：启动子进程（后端）时出现命令行窗口闪烁——`subprocess.Popen` 增加 `creationflags=CREATE_NO_WINDOW`（Windows）
+- 新增：`性能` 标签页，显示 CPU 使用率、本进程内存（RSS）、系统内存占用、磁盘占用、GPU 占用（nvidia-smi / GPUtil 双路回退）
+- 新增：顶部按钮栏增加 `配置页` 按钮，打开 `/config` 页面
+- 修改：`open_config` / `open_web` 不再弹出对话框，改为在日志栏输出红字免费提醒 + 侵权法律后果说明
+- 修改：`关于` 标签页补充著作权侵权法律条款（民事赔偿 + 刑事追责，著作权法第五十三条，最高三年有期徒刑）
+- 修改：默认直播间号改为 `3049445`
+
+**core/server.py**
+- 将 `/api/runtime-status`、`/api/queue/state`、`/api/queue/switch`、`/api/queue/log`、`/favicon.ico`、`/.well-known/...` 的访问日志降至 DEBUG 级别，减少 INFO 日志噪声
+- 修复：切换存档槽位后重启丢失选择的 bug——`save_config` 将 `slots`（固定=5）与 `active_slot`（用户选择 1~5）分开写入，`run_server` 先创建 `QueueArchiveManager(slots=5)` 再调用 `set_active_slot(cfg_active_slot)`，彻底解耦
+- `ensure_runtime_layout()`：首次启动自动生成 `quanxian.yaml` / `kaiguan.yaml` / 5 个存档 CSV（若缺失）
+- 默认超级管理员改为 `一纸轻予梦`
+- YAML 配置路径统一：打包 exe 时使用 `APP_DIR`（exe 同级目录），开发模式使用 `CORE_DIR`（`core/` 目录）
+
+**bilipdj_onedir.spec**
+- `hiddenimports` 新增 `qrcode.*`（main/constants/util/image.base/image.pil/image.pure）、`PIL.*`（Image/PngImagePlugin）、`brotli`、`psutil`——修复打包后扫码获取 Cookie 功能失效的问题
+
+**配置文件迁移**
+- `config.yaml` / `quanxian.yaml` / `kaiguan.yaml` 从项目根目录移入 `core/` 目录，与 `control_panel.py` 同级
+
+**.github/workflows/package-windows-x64.yml**
+- "Debug Python env" 步骤从 `shell: cmd` 改为 `shell: pwsh`，`findstr` 改为 `Select-String`，修复 findstr 无匹配返回 exit code 1 导致 CI 失败的问题
+- "Install build dependencies"：`pip uninstall` 失败时使用 `2>$null; Write-Host` 替代 `||`，兼容 PowerShell 语义
+- "Create release zip"：打包路径改为 `core\quanxian.yaml` / `core\kaiguan.yaml`（适配迁移后路径）
+- `pip install` 新增 `psutil`
+
+---
+
 ## 2026-04-08 UTC+08:00
 
 ### 修复存档槽位切换 + 权限系统 + 功能开关
