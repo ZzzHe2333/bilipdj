@@ -16,19 +16,19 @@ from pathlib import Path
 from tkinter import messagebox, ttk
 from typing import Any
 
-REPO_DIR = Path(__file__).resolve().parents[2]
+REPO_DIR = Path(__file__).resolve().parents[1]
 if str(REPO_DIR) not in sys.path:
     sys.path.insert(0, str(REPO_DIR))
 
-# 打包提示：显式导入 core.backend.server，确保 PyInstaller 能追踪到其依赖（如 http.server）。
-import core.backend.server as _backend_server_hint  # noqa: F401
+# 打包提示：显式导入 core.server，确保 PyInstaller 能追踪到其依赖（如 http.server）。
+import core.server as _backend_server_hint  # noqa: F401
 
 BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", REPO_DIR))
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else REPO_DIR
 CONFIG_PATH = APP_DIR / "config.yaml"
 QUANXIAN_PATH = APP_DIR / "quanxian.yaml"
 KAIGUAN_PATH = APP_DIR / "kaiguan.yaml"
-SERVER_PATH = BUNDLE_DIR / "core" / "backend" / "server.py"
+SERVER_PATH = BUNDLE_DIR / "core" / "server.py"
 APP_VERSION = "0.4.0"
 LOG_LEVEL_OPTIONS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 MAX_QUEUE_ARCHIVE_SLOTS = 5
@@ -63,8 +63,8 @@ def load_backend_server_module() -> Any:
         return _BACKEND_SERVER_MODULE
 
     module_names = (
-        "bilipdj.core.backend.server",
-        "core.backend.server",
+        "bilipdj.core.server",
+        "core.server",
         "backend.server",
     )
     for module_name in module_names:
