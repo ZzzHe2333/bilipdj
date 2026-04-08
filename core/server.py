@@ -38,17 +38,19 @@ DANMU_HEARTBEAT_INTERVAL_SECONDS = 30
 DANMU_IDLE_RECONNECT_SECONDS = 90
 
 REPO_DIR = Path(__file__).resolve().parents[1]
+CORE_DIR = Path(__file__).resolve().parent  # bilipdj/core/
 BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", REPO_DIR))
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else REPO_DIR
+_YAML_DIR = APP_DIR if getattr(sys, "frozen", False) else CORE_DIR
 
 MODEL_JSON_PATH = BUNDLE_DIR / "core" / "danmuji_initial_model.json"
 UI_DIR = BUNDLE_DIR / "core" / "ui"
-CONFIG_PATH = APP_DIR / "config.yaml"
+CONFIG_PATH = _YAML_DIR / "config.yaml"
 LOG_DIR = APP_DIR / "log"
 PD_DIR = APP_DIR / "core" / "cd"
 QUEUE_STATE_PATH = PD_DIR / "queue_archive_state.json"
-QUANXIAN_PATH = APP_DIR / "quanxian.yaml"
-KAIGUAN_PATH = APP_DIR / "kaiguan.yaml"
+QUANXIAN_PATH = _YAML_DIR / "quanxian.yaml"
+KAIGUAN_PATH = _YAML_DIR / "kaiguan.yaml"
 
 WS_MAGIC_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 MAX_SAFE_INTEGER = (1 << 53) - 1
@@ -343,25 +345,28 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "myjs": {},
     "ui": {"startup_splash_seconds": 5},
     "logging": {"level": "INFO", "retention_days": 15},
-    "queue_archive": {"enabled": True, "slots": 3},
+    "queue_archive": {"enabled": True, "slots": MAX_QUEUE_ARCHIVE_SLOTS, "active_slot": 1},
 }
 
 
-def ensure_runtime_layout(config_slots: int = 3) -> None:
+def ensure_runtime_layout() -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     PD_DIR.mkdir(parents=True, exist_ok=True)
     if not CONFIG_PATH.exists():
         save_config(DEFAULT_CONFIG)
+    if not QUANXIAN_PATH.exists():
+        save_quanxian(DEFAULT_QUANXIAN)
+    if not KAIGUAN_PATH.exists():
+        save_kaiguan(DEFAULT_KAIGUAN)
 
-    slots = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(config_slots)))
-    for slot in range(1, slots + 1):
+    for slot in range(1, MAX_QUEUE_ARCHIVE_SLOTS + 1):
         slot_file = PD_DIR / f"queue_archive_slot_{slot}.csv"
         if not slot_file.exists():
             slot_file.write_text("position,queue_item\n", encoding="utf-8-sig")
 
 
 def load_config() -> dict[str, Any]:
-    ensure_runtime_layout(int(DEFAULT_CONFIG.get("queue_archive", {}).get("slots", 3)))
+    ensure_runtime_layout()
     merged = _merge_config(DEFAULT_CONFIG, load_simple_yaml(CONFIG_PATH))
     merged["myjs"] = _normalize_myjs_config(merged.get("myjs", {}))
     return merged
@@ -443,8 +448,10 @@ logging:
 
 queue_archive:
   enabled: {'true' if bool(queue_archive.get('enabled', True)) else 'false'}
-  # 存档位（1~5）
-  slots: {min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(queue_archive.get('slots', 3))))}
+  # 最大存档位数（固定为 {MAX_QUEUE_ARCHIVE_SLOTS}，勿修改）
+  slots: {MAX_QUEUE_ARCHIVE_SLOTS}
+  # 当前活动存档槽（1~{MAX_QUEUE_ARCHIVE_SLOTS}，由 GUI 写入）
+  active_slot: {min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(queue_archive.get('active_slot', 1))))}
 
 callback:
   enabled: {'true' if bool(callback_cfg.get('enabled', False)) else 'false'}
@@ -1978,6 +1985,9 @@ class ApiHandler(BaseHTTPRequestHandler):
         message = "%s - %s" % (self.address_string(), format % args)
         if path in {
             "/api/runtime-status",
+            "/api/queue/state",
+            "/api/queue/switch",
+            "/api/queue/log",
             "/favicon.ico",
             "/.well-known/appspecific/com.chrome.devtools.json",
         }:
@@ -2533,7 +2543,7 @@ class ApiHandler(BaseHTTPRequestHandler):
 
 def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
     runtime_config = load_config()
-    ensure_runtime_layout(int(runtime_config.get("queue_archive", {}).get("slots", 3)))
+    ensure_runtime_layout()
     logger = setup_logging(runtime_config)
     archive_cfg = runtime_config.get("queue_archive", {})
 
@@ -2541,9 +2551,11 @@ def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
     httpd.runtime_config = runtime_config
     httpd.logger = logger
     httpd.queue_archive = QueueArchiveManager(
-        slots=int(archive_cfg.get("slots", 3)),
+        slots=MAX_QUEUE_ARCHIVE_SLOTS,
         enabled=bool(archive_cfg.get("enabled", True)),
     )
+    cfg_active_slot = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(archive_cfg.get("active_slot", 1))))
+    httpd.queue_archive.set_active_slot(cfg_active_slot)
     httpd.ws_hub = WebSocketHub(logger)
     httpd.queue_manager = QueueManager(
         ws_hub=httpd.ws_hub,
