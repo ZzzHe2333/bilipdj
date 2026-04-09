@@ -23,7 +23,7 @@ import zlib
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 try:
@@ -49,6 +49,7 @@ CONFIG_PATH = _YAML_DIR / "config.yaml"
 LOG_DIR = APP_DIR / "log"
 PD_DIR = APP_DIR / "core" / "cd"
 QUEUE_STATE_PATH = PD_DIR / "queue_archive_state.json"
+BLACKLIST_PATH = PD_DIR / "blacklist.csv"
 QUANXIAN_PATH = _YAML_DIR / "quanxian.yaml"
 KAIGUAN_PATH = _YAML_DIR / "kaiguan.yaml"
 STYLE_PATH = _YAML_DIR / "style.json"
@@ -327,6 +328,17 @@ def _normalize_myjs_config(raw: Any) -> dict[str, Any]:
     return normalized
 
 
+def _dedupe_string_list(value: Any) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in _normalize_string_list(value):
+        if item in seen:
+            continue
+        seen.add(item)
+        result.append(item)
+    return result
+
+
 def _yaml_quote_string(value: Any) -> str:
     text = str(value).replace("\\", "\\\\").replace('"', '\\"')
     return f'"{text}"'
@@ -341,6 +353,18 @@ def _read_raw_config() -> dict[str, Any]:
 ARCHIVE_HEADER_SEQ = "序号"
 ARCHIVE_HEADER_ID = "id"
 ARCHIVE_HEADER_CONTENT = "内容"
+ARCHIVE_META_TIMESTAMP = "最后操作时间"
+ARCHIVE_META_ACTOR = "操作人"
+ARCHIVE_META_MESSAGE = "操作说明"
+
+
+def _format_archive_timestamp(value: dt.datetime | str | None = None) -> str:
+    if isinstance(value, dt.datetime):
+        return value.isoformat(sep=" ", timespec="seconds")
+    text = str(value or "").strip()
+    if text:
+        return text
+    return dt.datetime.now().isoformat(sep=" ", timespec="seconds")
 
 
 def _queue_labeled_content(label: str, extra: str) -> str:
@@ -420,6 +444,15 @@ def queue_entries_to_items(entries: list[dict[str, Any]]) -> list[str]:
 
 def parse_queue_archive_rows(rows: list[list[str]]) -> tuple[dict[str, str], list[dict[str, str]]]:
     meta = {"timestamp": "", "actor": "", "message": ""}
+    meta_aliases = {
+        "timestamp": "timestamp",
+        "last_operation_at": "timestamp",
+        ARCHIVE_META_TIMESTAMP: "timestamp",
+        "actor": "actor",
+        ARCHIVE_META_ACTOR: "actor",
+        "message": "message",
+        ARCHIVE_META_MESSAGE: "message",
+    }
     entries: list[dict[str, str]] = []
 
     for row in rows:
@@ -429,8 +462,9 @@ def parse_queue_archive_rows(rows: list[list[str]]) -> tuple[dict[str, str], lis
         first = str(row[0]).strip()
         lowered = first.lower()
 
-        if first in meta:
-            meta[first] = str(row[1]).strip() if len(row) > 1 else ""
+        alias = meta_aliases.get(first) or meta_aliases.get(lowered)
+        if alias in meta:
+            meta[alias] = str(row[1]).strip() if len(row) > 1 else ""
             continue
 
         if first == ARCHIVE_HEADER_SEQ or lowered in {"position", "seq"}:
@@ -460,10 +494,23 @@ def read_queue_archive_entries(path: Path) -> list[dict[str, str]]:
     return parse_queue_archive_rows(rows)[1]
 
 
-def write_queue_archive_entries(path: Path, entries: list[dict[str, Any]]) -> None:
+def write_queue_archive_entries(path: Path, entries: list[dict[str, Any]], meta: dict[str, Any] | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    merged_meta = {"timestamp": "", "actor": "", "message": ""}
+    if isinstance(meta, dict):
+        merged_meta["timestamp"] = _format_archive_timestamp(meta.get("timestamp", ""))
+        merged_meta["actor"] = str(meta.get("actor", "") or "").strip()
+        merged_meta["message"] = str(meta.get("message", "") or "").strip()
+    else:
+        merged_meta["timestamp"] = _format_archive_timestamp()
+
     with path.open("w", encoding="utf-8-sig", newline="") as f:
         writer = csv.writer(f)
+        writer.writerow([ARCHIVE_META_TIMESTAMP, merged_meta["timestamp"]])
+        if merged_meta["actor"]:
+            writer.writerow([ARCHIVE_META_ACTOR, merged_meta["actor"]])
+        if merged_meta["message"]:
+            writer.writerow([ARCHIVE_META_MESSAGE, merged_meta["message"]])
         writer.writerow([ARCHIVE_HEADER_SEQ, ARCHIVE_HEADER_ID, ARCHIVE_HEADER_CONTENT])
         for idx, entry in enumerate(entries, start=1):
             if not isinstance(entry, dict):
@@ -471,6 +518,57 @@ def write_queue_archive_entries(path: Path, entries: list[dict[str, Any]]) -> No
             item_id = str(entry.get("id", "")).strip()
             content = str(entry.get("content", "")).strip()
             writer.writerow([idx, item_id, content])
+
+
+def blacklist_names_to_entries(names: list[Any]) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for name in names:
+        text = str(name or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        entries.append({"id": text, "content": ""})
+    return entries
+
+
+def blacklist_entries_to_names(entries: list[dict[str, Any]]) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        text = str(entry.get("id", "") or entry.get("content", "")).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        names.append(text)
+    return names
+
+
+def read_blacklist_entries(path: Path = BLACKLIST_PATH) -> list[dict[str, str]]:
+    return blacklist_names_to_entries(blacklist_entries_to_names(read_queue_archive_entries(path)))
+
+
+def write_blacklist_entries(path: Path, entries: list[dict[str, Any]]) -> None:
+    write_queue_archive_entries(path, blacklist_names_to_entries(blacklist_entries_to_names(entries)))
+
+
+def ensure_queue_archive_metadata(path: Path) -> None:
+    if not path.exists():
+        return
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as f:
+            rows = list(csv.reader(f))
+    except OSError:
+        return
+
+    meta, entries = parse_queue_archive_rows(rows)
+    if str(meta.get("timestamp", "")).strip():
+        return
+
+    timestamp = _format_archive_timestamp(dt.datetime.fromtimestamp(path.stat().st_mtime))
+    write_queue_archive_entries(path, entries, meta={"timestamp": timestamp, "actor": meta.get("actor", ""), "message": meta.get("message", "")})
 
 
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -484,7 +582,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "cookie": "",
     },
     "callback": {"enabled": False, "url": "", "auth_token": "", "timeout_seconds": 5},
-    "myjs": {},
+    "myjs": {
+        "paidui_list_length_max": 100,
+        "all_suoyourenbukepaidui": False,
+        "fangguan_can_doing": False,
+        "jianzhangchadui": False,
+        "admins": [],
+        "ban_admins": [],
+        "jianzhang": [],
+    },
     "ui": {"startup_splash_seconds": 5, "auto_start_backend": False, "language": "中文"},
     "logging": {"level": "INFO", "retention_days": 7},
     "queue_archive": {"enabled": True, "slots": MAX_QUEUE_ARCHIVE_SLOTS, "active_slot": 1},
@@ -505,6 +611,10 @@ def ensure_runtime_layout() -> None:
         slot_file = PD_DIR / f"queue_archive_slot_{slot}.csv"
         if not slot_file.exists():
             write_queue_archive_entries(slot_file, [])
+        else:
+            ensure_queue_archive_metadata(slot_file)
+    if not BLACKLIST_PATH.exists():
+        write_blacklist_entries(BLACKLIST_PATH, blacklist_names_to_entries(load_quanxian().get("blacklist", [])))
 
 
 def load_config() -> dict[str, Any]:
@@ -712,6 +822,7 @@ class QueueArchiveManager:
             "slot": 0,
             "path": "",
             "timestamp": "",
+            "last_operation_at": "",
             "actor": "",
             "message": "",
             "queue": [],
@@ -734,7 +845,15 @@ class QueueArchiveManager:
 
         slot = self.get_active_slot()
         out = self._slot_file(slot)
-        write_queue_archive_entries(out, queue_items_to_entries(queue_items))
+        write_queue_archive_entries(
+            out,
+            queue_items_to_entries(queue_items),
+            meta={
+                "timestamp": _format_archive_timestamp(),
+                "actor": actor,
+                "message": message,
+            },
+        )
         return out
 
     def write_blank_snapshot(self, actor: str, message: str) -> Path | None:
@@ -742,7 +861,15 @@ class QueueArchiveManager:
             return None
         slot = self.get_active_slot()
         out = self._slot_file(slot)
-        write_queue_archive_entries(out, [])
+        write_queue_archive_entries(
+            out,
+            [],
+            meta={
+                "timestamp": _format_archive_timestamp(),
+                "actor": actor,
+                "message": message,
+            },
+        )
         return out
 
     def _read_snapshot(self, slot: int) -> dict[str, Any] | None:
@@ -754,6 +881,7 @@ class QueueArchiveManager:
             "slot": slot,
             "path": str(path),
             "timestamp": "",
+            "last_operation_at": "",
             "actor": "",
             "message": "",
             "queue": [],
@@ -776,6 +904,7 @@ class QueueArchiveManager:
         modified = dt.datetime.fromtimestamp(path.stat().st_mtime)
         if not snapshot["timestamp"]:
             snapshot["timestamp"] = modified.isoformat(timespec="seconds")
+        snapshot["last_operation_at"] = snapshot["timestamp"]
         try:
             sort_key = dt.datetime.fromisoformat(str(snapshot["timestamp"]))
         except ValueError:
@@ -815,14 +944,16 @@ class QueueManager:
         ws_hub: "WebSocketHub",
         queue_archive: "QueueArchiveManager",
         logger: logging.Logger,
+        runtime_reload_callback: Callable[[], None] | None = None,
     ) -> None:
         self._ws_hub = ws_hub
         self._queue_archive = queue_archive
         self._logger = logger
+        self._runtime_reload_callback = runtime_reload_callback
         self._lock = threading.Lock()
         self._persons: list[str] = []
         self._admins: list[str] = []
-        self._ban_admins: list[str] = []
+        self._blacklist: list[str] = []
         self._jianzhang: list[str] = []
         self._anchor_uid: int = 0
         self._max_length: int = 100
@@ -837,11 +968,13 @@ class QueueManager:
             if isinstance(myjs_cfg.get("admins"), list):
                 self._admins = [str(x) for x in myjs_cfg["admins"] if x]
             if isinstance(myjs_cfg.get("ban_admins"), list):
-                self._ban_admins = [str(x) for x in myjs_cfg["ban_admins"] if x]
+                self._blacklist = [str(x) for x in myjs_cfg["ban_admins"] if x]
             if isinstance(myjs_cfg.get("jianzhang"), list):
                 self._jianzhang = [str(x) for x in myjs_cfg["jianzhang"] if x]
             if myjs_cfg.get("paidui_list_length_max") is not None:
                 self._max_length = max(1, _to_int(myjs_cfg["paidui_list_length_max"], 100))
+            if isinstance(myjs_cfg.get("all_suoyourenbukepaidui"), bool):
+                self._all_disabled = myjs_cfg["all_suoyourenbukepaidui"]
             if isinstance(myjs_cfg.get("fangguan_can_doing"), bool):
                 self._fangguan_can_doing = myjs_cfg["fangguan_can_doing"]
             if isinstance(myjs_cfg.get("jianzhangchadui"), bool):
@@ -851,15 +984,69 @@ class QueueManager:
 
     def load_quanxian(self, quanxian: dict[str, Any]) -> None:
         with self._lock:
-            self._super_admins = [str(x) for x in quanxian.get("super_admin", []) if x]
-            self._admins = [str(x) for x in quanxian.get("admin", []) if x]
-            self._jianzhang = [str(x) for x in quanxian.get("jianzhang", []) if x]
+            normalized = _normalize_quanxian_config(quanxian)
+            self._super_admins = list(normalized.get("super_admin", []))
+            self._admins = list(normalized.get("admin", []))
+            self._jianzhang = list(normalized.get("jianzhang", []))
+            self._blacklist = list(normalized.get("blacklist", []))
 
     def load_kaiguan(self, kaiguan: dict[str, bool]) -> None:
         with self._lock:
             self._kaiguan = {**DEFAULT_KAIGUAN, **{k: v for k, v in kaiguan.items() if isinstance(v, bool)}}
             self._jianzhangchadui = self._kaiguan.get("jianzhang_chadui", False)
             self._fangguan_can_doing = self._kaiguan.get("fangguan_op", False)
+            self._all_disabled = not self._kaiguan.get("paidui", True)
+
+    def _reload_runtime_config(self) -> None:
+        if not self._runtime_reload_callback:
+            return
+        try:
+            self._runtime_reload_callback()
+        except Exception as exc:  # noqa: BLE001
+            self._logger.warning("刷新运行时配置失败: %s", exc)
+
+    def _persist_myjs_state_unlocked(self) -> None:
+        current = load_config()
+        myjs_cfg = _normalize_myjs_config(current.get("myjs", {}))
+        myjs_cfg["paidui_list_length_max"] = self._max_length
+        myjs_cfg["all_suoyourenbukepaidui"] = self._all_disabled
+        myjs_cfg["fangguan_can_doing"] = self._fangguan_can_doing
+        myjs_cfg["jianzhangchadui"] = self._jianzhangchadui
+        myjs_cfg["admins"] = list(self._admins)
+        myjs_cfg["ban_admins"] = list(self._blacklist)
+        myjs_cfg["jianzhang"] = list(self._jianzhang)
+        current["myjs"] = _normalize_myjs_config(myjs_cfg)
+        save_config(current)
+        self._reload_runtime_config()
+
+    def _persist_quanxian_state_unlocked(self) -> None:
+        current_quanxian = load_quanxian()
+        payload = {
+            "super_admin": list(self._super_admins),
+            "admin": list(self._admins),
+            "jianzhang": list(self._jianzhang),
+            "member": list(current_quanxian.get("member", [])),
+            "blacklist": list(self._blacklist),
+        }
+        save_quanxian(payload)
+        persisted = load_quanxian()
+        self._super_admins = list(persisted.get("super_admin", []))
+        self._admins = list(persisted.get("admin", []))
+        self._jianzhang = list(persisted.get("jianzhang", []))
+        self._blacklist = list(persisted.get("blacklist", []))
+        self._reload_runtime_config()
+
+    def _persist_kaiguan_state_unlocked(self) -> None:
+        payload = dict(self._kaiguan)
+        payload["paidui"] = not self._all_disabled
+        payload["jianzhang_chadui"] = self._jianzhangchadui
+        payload["fangguan_op"] = self._fangguan_can_doing
+        save_kaiguan(payload)
+        self._kaiguan = load_kaiguan()
+        self._jianzhangchadui = self._kaiguan.get("jianzhang_chadui", False)
+        self._fangguan_can_doing = self._kaiguan.get("fangguan_op", False)
+        self._all_disabled = not self._kaiguan.get("paidui", True)
+        self._reload_runtime_config()
 
     def restore_from_archive(self) -> None:
         slot = self._queue_archive.get_active_slot()
@@ -885,6 +1072,47 @@ class QueueManager:
 
     def get_queue_entries(self) -> list[dict[str, str]]:
         return queue_items_to_entries(self.get_queue())
+
+    def get_blacklist(self) -> list[str]:
+        with self._lock:
+            return list(self._blacklist)
+
+    def get_blacklist_entries(self) -> list[dict[str, str]]:
+        return blacklist_names_to_entries(self.get_blacklist())
+
+    def add_blacklist_item(self, name: str) -> list[dict[str, str]]:
+        target = str(name or "").strip()
+        if not target:
+            return self.get_blacklist_entries()
+        with self._lock:
+            if target not in self._blacklist:
+                self._blacklist.append(target)
+            self._super_admins = [item for item in self._super_admins if item != target]
+            self._admins = [item for item in self._admins if item != target]
+            self._jianzhang = [item for item in self._jianzhang if item != target]
+            self._persist_quanxian_state_unlocked()
+        self._logger.info("[黑名单] 已新增：%s", target)
+        return self.get_blacklist_entries()
+
+    def delete_blacklist_item(self, index: int) -> list[dict[str, str]]:
+        removed = ""
+        with self._lock:
+            if 1 <= index <= len(self._blacklist):
+                removed = self._blacklist.pop(index - 1)
+                self._persist_quanxian_state_unlocked()
+        if removed:
+            self._logger.info("[黑名单] 已删除：%s", removed)
+        return self.get_blacklist_entries()
+
+    def clear_blacklist(self) -> list[dict[str, str]]:
+        with self._lock:
+            if not self._blacklist:
+                return []
+            previous = list(self._blacklist)
+            self._blacklist.clear()
+            self._persist_quanxian_state_unlocked()
+        self._logger.info("[黑名单] 已清空，共移除 %s 人: %s", len(previous), json.dumps(previous, ensure_ascii=False))
+        return []
 
     def send_current_to(self, conn: socket.socket) -> None:
         try:
@@ -1013,6 +1241,7 @@ class QueueManager:
 
         with self._lock:
             anchor_uid = self._anchor_uid
+            is_blacklisted = uname in self._blacklist
         is_anchor = uid > 0 and anchor_uid > 0 and uid == anchor_uid
 
         medal_info = info[3] if len(info) > 3 else None
@@ -1030,7 +1259,7 @@ class QueueManager:
             return
 
         # 所有弹幕打印到 INFO
-        perm = "主播" if is_anchor else ("super_admin" if uname in self._super_admins else ("管理员" if uname in self._admins or (is_admin_flag and self._fangguan_can_doing) else ("舰长" if is_guard else "普通用户")))
+        perm = "黑名单" if is_blacklisted else ("主播" if is_anchor else ("super_admin" if uname in self._super_admins else ("管理员" if uname in self._admins or (is_admin_flag and self._fangguan_can_doing) else ("舰长" if is_guard else "普通用户"))))
         self._logger.info("[弹幕] %s(%s): %s", uname, perm, msg)
 
         modified, note = self._process(uname, msg, is_anchor, is_admin_flag, is_guard, guard_level)
@@ -1059,6 +1288,36 @@ class QueueManager:
                 return True
         return False
 
+    def _is_non_admin_command(self, msg: str) -> bool:
+        if self._is_join_cmd(msg):
+            return True
+        if msg in ("取消排队", "排队取消", "我确认我取消排队", "替换", "修改", "内容洗白"):
+            return True
+        return msg.startswith(("替换 ", "修改 "))
+
+    def _is_admin_command(self, msg: str) -> bool:
+        if any(msg.startswith(p) for p in ("del", "删除", "完成", "add ", "新增 ", "添加 ", "无影插 ", "插队 ")):
+            return True
+        if msg in (
+            "暂停排队功能",
+            "关闭自助排队",
+            "恢复排队功能",
+            "恢复自助排队",
+            "开启舰长插队",
+            "关闭舰长插队",
+            "允许房管成为插件管理员",
+            "停止房管成为插件管理员",
+        ):
+            return True
+        if any(kw in msg for kw in ("设置排队人数", "设置排队上限")):
+            return True
+        if msg.startswith(("拉黑 ", "取消拉黑 ", "添加管理员 ", "取消管理员 ")):
+            return True
+        return False
+
+    def _is_command_like(self, msg: str) -> bool:
+        return self._is_non_admin_command(msg) or self._is_admin_command(msg)
+
     def _process(
         self,
         uname: str,
@@ -1070,12 +1329,16 @@ class QueueManager:
     ) -> tuple[bool, str | None]:
         with self._lock:
             has_op = self._has_op_permission(uname, is_anchor, is_admin)
+            kg = self._kaiguan
 
-            if uname in self._ban_admins:
+            if uname in self._blacklist:
+                if self._is_command_like(msg):
+                    self._logger.warning("[黑名单拦截] uname=%s msg=%r", uname, msg)
+                    return False, "黑名单用户指令已拦截"
                 return False, None
 
-            if self._all_disabled and not has_op:
-                if self._is_join_cmd(msg):
+            if (self._all_disabled or not kg.get("paidui", True)) and not has_op:
+                if self._is_non_admin_command(msg):
                     return False, "排队功能已暂停，权限不足"
                 return False, None
 
@@ -1091,30 +1354,30 @@ class QueueManager:
                 can_join = len(self._persons) < self._max_length or has_op
                 new_item: str | None = None
 
-                kg = self._kaiguan
-                if msg == "排队" and kg.get("paidui", True):
+                join_master_enabled = kg.get("paidui", True)
+                if msg == "排队" and join_master_enabled:
                     new_item = uname
-                elif msg in ("官服排", "排官服", "官服排队", "排队官服") and kg.get("guanfu_paidui", True):
+                elif msg in ("官服排", "排官服", "官服排队", "排队官服") and join_master_enabled and kg.get("guanfu_paidui", True):
                     new_item = f"官|{uname}"
-                elif msg in ("B服排", "b服排", "排b服", "排B服", "B服排队", "排队B服", "b服排队", "排队b服") and kg.get("bfu_paidui", True):
+                elif msg in ("B服排", "b服排", "排b服", "排B服", "B服排队", "排队B服", "b服排队", "排队b服") and join_master_enabled and kg.get("bfu_paidui", True):
                     new_item = f"B|{uname}"
-                elif msg in ("超级排", "超级排队") and kg.get("chaoji_paidui", True):
+                elif msg in ("超级排", "超级排队") and join_master_enabled and kg.get("chaoji_paidui", True):
                     new_item = f"<{uname}>"
-                elif msg in ("小米排", "排小米", "排米服") and kg.get("mifu_paidui", True):
+                elif msg in ("小米排", "排小米", "排米服") and join_master_enabled and kg.get("mifu_paidui", True):
                     new_item = f"米|{uname}"
-                elif msg.startswith("排队 ") and kg.get("paidui", True):
+                elif msg.startswith("排队 ") and join_master_enabled:
                     extra = msg[3:].strip()
                     new_item = f"{uname} {extra}" if extra else uname
-                elif (re.match(r"^官服排队?\s", msg) or re.match(r"^官服排\s", msg)) and kg.get("guanfu_paidui", True):
+                elif (re.match(r"^官服排队?\s", msg) or re.match(r"^官服排\s", msg)) and join_master_enabled and kg.get("guanfu_paidui", True):
                     extra = msg.split(" ", 1)[1].strip() if " " in msg else ""
                     new_item = f"官|{uname} {extra}".rstrip()
-                elif re.match(r"^[Bb]服排\s", msg) and kg.get("bfu_paidui", True):
+                elif re.match(r"^[Bb]服排\s", msg) and join_master_enabled and kg.get("bfu_paidui", True):
                     extra = msg.split(" ", 1)[1].strip() if " " in msg else ""
                     new_item = f"B|{uname} {extra}".rstrip()
-                elif re.match(r"^超级排队?\s", msg) and kg.get("chaoji_paidui", True):
+                elif re.match(r"^超级排队?\s", msg) and join_master_enabled and kg.get("chaoji_paidui", True):
                     extra = msg.split(" ", 1)[1].strip() if " " in msg else ""
                     new_item = f"<{uname}>{extra}" if extra else f"<{uname}>"
-                elif msg.startswith("米服排 ") and kg.get("mifu_paidui", True):
+                elif msg.startswith("米服排 ") and join_master_enabled and kg.get("mifu_paidui", True):
                     extra = msg.split(" ", 1)[1].strip() if " " in msg else ""
                     new_item = f"M|{uname} {extra}".rstrip()
                 elif msg == "插队" and is_jianzhang and kg.get("jianzhang_chadui", False):
@@ -1158,6 +1421,7 @@ class QueueManager:
             ):
                 return False, "权限不足，该指令需要管理员权限"
 
+            note: str | None = None
             if has_op:
                 for kw in ("del", "删除", "完成"):
                     if kw in msg:
@@ -1193,44 +1457,66 @@ class QueueManager:
                         modified = True
 
                 if msg == "暂停排队功能" or msg == "关闭自助排队":
+                    self._kaiguan["paidui"] = False
                     self._all_disabled = True
+                    self._persist_kaiguan_state_unlocked()
                 elif msg == "恢复排队功能" or msg == "恢复自助排队":
+                    self._kaiguan["paidui"] = True
                     self._all_disabled = False
+                    self._persist_kaiguan_state_unlocked()
                 elif msg == "开启舰长插队":
+                    self._kaiguan["jianzhang_chadui"] = True
                     self._jianzhangchadui = True
+                    self._persist_kaiguan_state_unlocked()
                 elif msg == "关闭舰长插队":
+                    self._kaiguan["jianzhang_chadui"] = False
                     self._jianzhangchadui = False
+                    self._persist_kaiguan_state_unlocked()
                 elif msg == "允许房管成为插件管理员":
+                    self._kaiguan["fangguan_op"] = True
                     self._fangguan_can_doing = True
+                    self._persist_kaiguan_state_unlocked()
                 elif msg == "停止房管成为插件管理员":
+                    self._kaiguan["fangguan_op"] = False
                     self._fangguan_can_doing = False
+                    self._persist_kaiguan_state_unlocked()
 
                 if any(kw in msg for kw in ("设置排队人数", "设置排队上限")):
                     nums = re.sub(r"[^0-9]", "", msg)
                     kw_only = re.sub(r"[\d\s]+", "", msg)
                     if kw_only in ("设置排队人数", "设置排队上限", "设置排队人数上限") and nums:
                         self._max_length = max(1, int(nums))
+                        self._persist_myjs_state_unlocked()
 
                 if msg.startswith("拉黑 "):
                     target = msg[3:].strip()
-                    if target and target not in self._ban_admins:
-                        self._ban_admins.append(target)
+                    if target and target not in self._blacklist:
+                        self._blacklist.append(target)
+                        self._super_admins = [item for item in self._super_admins if item != target]
+                        self._admins = [item for item in self._admins if item != target]
+                        self._jianzhang = [item for item in self._jianzhang if item != target]
+                        self._persist_quanxian_state_unlocked()
                 elif msg.startswith("取消拉黑 "):
                     target = msg[5:].strip()
-                    if target in self._ban_admins:
-                        self._ban_admins.remove(target)
+                    if target in self._blacklist:
+                        self._blacklist.remove(target)
+                        self._persist_quanxian_state_unlocked()
 
                 if self._has_super_admin(uname, is_anchor):
                     if msg.startswith("添加管理员 "):
                         target = msg[6:].strip()
-                        if target and target not in self._admins:
+                        if target and target in self._blacklist:
+                            note = "黑名单用户不能设为管理员"
+                        elif target and target not in self._admins:
                             self._admins.append(target)
+                            self._persist_quanxian_state_unlocked()
                     elif msg.startswith("取消管理员 "):
                         target = msg[6:].strip()
                         if target in self._admins:
                             self._admins.remove(target)
+                            self._persist_quanxian_state_unlocked()
 
-            return modified, None
+            return modified, note
 
 
 DEFAULT_QUANXIAN: dict[str, Any] = {
@@ -1238,7 +1524,36 @@ DEFAULT_QUANXIAN: dict[str, Any] = {
     "admin": [],
     "jianzhang": [],
     "member": [],
+    "blacklist": [],
 }
+
+
+def _normalize_quanxian_config(raw: Any) -> dict[str, list[str]]:
+    normalized: dict[str, list[str]] = {key: list(values) for key, values in DEFAULT_QUANXIAN.items()}
+    if isinstance(raw, dict):
+        for key in DEFAULT_QUANXIAN:
+            normalized[key] = _dedupe_string_list(raw.get(key, normalized[key]))
+
+    blacklist = set(normalized.get("blacklist", []))
+    for key in ("super_admin", "admin", "jianzhang", "member"):
+        normalized[key] = [name for name in normalized.get(key, []) if name not in blacklist]
+    return normalized
+
+
+def _sync_quanxian_to_myjs(myjs_cfg: Any, quanxian_cfg: dict[str, Any]) -> dict[str, Any]:
+    merged = _normalize_myjs_config(myjs_cfg)
+    merged["admins"] = list(quanxian_cfg.get("admin", []))
+    merged["ban_admins"] = list(quanxian_cfg.get("blacklist", []))
+    merged["jianzhang"] = list(quanxian_cfg.get("jianzhang", []))
+    return merged
+
+
+def _sync_kaiguan_to_myjs(myjs_cfg: Any, kaiguan_cfg: dict[str, bool]) -> dict[str, Any]:
+    merged = _normalize_myjs_config(myjs_cfg)
+    merged["all_suoyourenbukepaidui"] = not bool(kaiguan_cfg.get("paidui", True))
+    merged["fangguan_can_doing"] = bool(kaiguan_cfg.get("fangguan_op", False))
+    merged["jianzhangchadui"] = bool(kaiguan_cfg.get("jianzhang_chadui", False))
+    return merged
 
 DEFAULT_KAIGUAN: dict[str, bool] = {
     "paidui": True,
@@ -1260,36 +1575,35 @@ def load_quanxian() -> dict[str, Any]:
     result: dict[str, Any] = {k: list(v) for k, v in DEFAULT_QUANXIAN.items()}
     for key in DEFAULT_QUANXIAN:
         if isinstance(config_section, dict) and isinstance(config_section.get(key), list):
-            result[key] = [str(x) for x in config_section[key] if x]
+            result[key] = _dedupe_string_list(config_section[key])
         elif isinstance(raw_file.get(key), list):
-            result[key] = [str(x) for x in raw_file[key] if x]
-    return result
+            result[key] = _dedupe_string_list(raw_file[key])
+    return _normalize_quanxian_config(result)
 
 
 def save_quanxian(config: dict[str, Any]) -> None:
-    normalized: dict[str, Any] = {k: list(v) for k, v in DEFAULT_QUANXIAN.items()}
-    for key in DEFAULT_QUANXIAN:
-        value = config.get(key, [])
-        if isinstance(value, list):
-            normalized[key] = [str(item).strip() for item in value if str(item).strip()]
+    normalized = _normalize_quanxian_config(config)
 
     labels = {
         "super_admin": "最高管理员：拥有所有权限，包括新增/删除管理员",
         "admin": "管理员：拥有除新增/删除管理员以外的所有操作权限",
         "jianzhang": "舰长：仅拥有「插队」命令权限",
         "member": "成员：普通观众",
+        "blacklist": "黑名单：禁止触发任何弹幕指令，且不能同时是最高管理员/管理员",
     }
     lines: list[str] = ["# 权限配置\n"]
-    for key in ("super_admin", "admin", "jianzhang", "member"):
+    for key in ("super_admin", "admin", "jianzhang", "member", "blacklist"):
         lines.append(f"# {labels[key]}\n{key}:\n")
         for item in normalized.get(key, []):
             escaped = str(item).replace('"', '\\"')
             lines.append(f'  - "{escaped}"\n')
         lines.append("\n")
     QUANXIAN_PATH.write_text("".join(lines), encoding="utf-8")
+    write_blacklist_entries(BLACKLIST_PATH, blacklist_names_to_entries(normalized.get("blacklist", [])))
 
     current = _merge_config(DEFAULT_CONFIG, _read_raw_config())
     current["quanxian"] = normalized
+    current["myjs"] = _sync_quanxian_to_myjs(current.get("myjs", {}), normalized)
     save_config(current)
 
 
@@ -1313,11 +1627,11 @@ def save_kaiguan(config: dict[str, bool]) -> None:
             normalized[key] = bool(config.get(key))
 
     comments = {
-        "paidui": "普通排队（排队 / 排队 xxx）",
-        "guanfu_paidui": "官服排队",
-        "bfu_paidui": "B服排队",
-        "chaoji_paidui": "超级排队",
-        "mifu_paidui": "米服排队",
+        "paidui": "排队总开关：关闭后普通/官服/B服/超级/米服排队全部关闭",
+        "guanfu_paidui": "官服排队（需总开关开启）",
+        "bfu_paidui": "B服排队（需总开关开启）",
+        "chaoji_paidui": "超级排队（需总开关开启）",
+        "mifu_paidui": "米服排队（需总开关开启）",
         "quxiao_paidui": "取消排队",
         "xiugai_paidui": "修改/替换排队内容",
         "jianzhang_chadui": "舰长插队",
@@ -1333,6 +1647,7 @@ def save_kaiguan(config: dict[str, bool]) -> None:
 
     current = _merge_config(DEFAULT_CONFIG, _read_raw_config())
     current["kaiguan"] = normalized
+    current["myjs"] = _sync_kaiguan_to_myjs(current.get("myjs", {}), normalized)
     save_config(current)
 
 
@@ -2538,6 +2853,21 @@ class ApiHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if parsed.path == "/api/blacklist/state":
+            entries = (
+                self.server.queue_manager.get_blacklist_entries()
+                if hasattr(self.server, "queue_manager")
+                else read_blacklist_entries()
+            )
+            self._write_json(
+                {
+                    "status": "ok",
+                    "entries": entries,
+                    "size": len(entries),
+                }
+            )
+            return
+
         if parsed.path == "/api/queue/archive":
             snapshot = self.server.queue_archive.read_latest_snapshot()
             self._write_json(
@@ -2547,6 +2877,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                     "slot": int(snapshot.get("slot", 0) or 0),
                     "path": str(snapshot.get("path", "") or ""),
                     "timestamp": str(snapshot.get("timestamp", "") or ""),
+                    "last_operation_at": str(snapshot.get("last_operation_at", "") or ""),
                     "actor": str(snapshot.get("actor", "") or ""),
                     "message": str(snapshot.get("message", "") or ""),
                     "queue": snapshot.get("queue", []),
@@ -2633,6 +2964,25 @@ class ApiHandler(BaseHTTPRequestHandler):
             callback_timeout = int(callback_payload.get("timeout_seconds", 5)) if isinstance(callback_payload, dict) else 5
             incoming_myjs = payload.get("myjs", {})
             myjs_payload = _normalize_myjs_config(incoming_myjs) if isinstance(incoming_myjs, dict) else None
+            incoming_quanxian = payload.get("quanxian", {})
+            quanxian_payload = None
+            if isinstance(incoming_quanxian, dict):
+                base_quanxian = load_quanxian()
+                for key in ("super_admin", "admin", "jianzhang", "member", "blacklist"):
+                    if key in incoming_quanxian:
+                        base_quanxian[key] = incoming_quanxian.get(key, [])
+                quanxian_payload = _normalize_quanxian_config(base_quanxian)
+            elif myjs_payload is not None and any(
+                key in myjs_payload for key in ("admins", "ban_admins", "jianzhang")
+            ):
+                quanxian_payload = _normalize_quanxian_config(
+                    {
+                        **load_quanxian(),
+                        "admin": myjs_payload.get("admins", []),
+                        "jianzhang": myjs_payload.get("jianzhang", []),
+                        "blacklist": myjs_payload.get("ban_admins", []),
+                    }
+                )
             login_state = _resolve_bilibili_login(cookie, fallback_uid=uid, logger=self.server.logger if cookie else None)
             resolved_uid = _to_int(login_state.get("uid", 0))
             if cookie and resolved_uid > 0 and resolved_uid != uid:
@@ -2659,6 +3009,9 @@ class ApiHandler(BaseHTTPRequestHandler):
             )
             updated["myjs"] = _normalize_myjs_config(updated.get("myjs", {}))
             save_config(updated)
+            if quanxian_payload is not None:
+                save_quanxian(quanxian_payload)
+            updated = load_config()
             self.server.runtime_config = updated
             if hasattr(self.server, "danmu_relay"):
                 self.server.danmu_relay.request_reconnect()
@@ -2667,6 +3020,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                     updated.get("myjs", {}),
                     anchor_uid=_to_int(updated.get("api", {}).get("uid", 0)),
                 )
+                self.server.queue_manager.load_quanxian(updated.get("quanxian", {}))
             self.server.logger.info("配置已更新，触发直播间弹幕重连 roomid=%s uid=%s", roomid, uid)
             self._write_json(
                 {
@@ -2677,6 +3031,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                     "uid_source": str(login_state.get("uid_source", "") or ""),
                     "is_login": bool(login_state.get("is_login", False)),
                     "myjs": updated.get("myjs", {}),
+                    "quanxian": updated.get("quanxian", {}),
                 }
             )
             return
@@ -2742,6 +3097,39 @@ class ApiHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if parsed.path in {
+            "/api/blacklist/add",
+            "/api/blacklist/delete",
+            "/api/blacklist/clear",
+        }:
+            length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(length).decode("utf-8", errors="replace") if length > 0 else "{}"
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                payload = {}
+            qm = getattr(self.server, "queue_manager", None)
+            if qm is None:
+                self._write_json({"status": "error", "message": "queue_manager not ready"})
+                return
+            if parsed.path == "/api/blacklist/add":
+                name = str(payload.get("name", "")).strip()
+                entries = qm.add_blacklist_item(name)
+            elif parsed.path == "/api/blacklist/delete":
+                idx = _to_int(payload.get("index", 0), 0)
+                entries = qm.delete_blacklist_item(idx)
+            else:
+                entries = qm.clear_blacklist()
+            self.server.runtime_config = load_config()
+            self._write_json(
+                {
+                    "status": "ok",
+                    "entries": entries,
+                    "size": len(entries),
+                }
+            )
+            return
+
         if parsed.path == "/api/style":
             length = int(self.headers.get("Content-Length", "0"))
             raw = self.rfile.read(length).decode("utf-8", errors="replace") if length > 0 else "{}"
@@ -2780,9 +3168,10 @@ class ApiHandler(BaseHTTPRequestHandler):
                 self._write_json({"status": "error", "message": "Body must be valid JSON"}, status=HTTPStatus.BAD_REQUEST)
                 return
             save_quanxian(payload)
-            self.server.runtime_config = _merge_config(self.server.runtime_config, {"quanxian": load_quanxian()})
+            saved_quanxian = load_quanxian()
+            self.server.runtime_config = load_config()
             if hasattr(self.server, "queue_manager"):
-                self.server.queue_manager.load_quanxian(payload)
+                self.server.queue_manager.load_quanxian(saved_quanxian)
             self._write_json({"status": "ok"})
             return
 
@@ -2795,9 +3184,10 @@ class ApiHandler(BaseHTTPRequestHandler):
                 self._write_json({"status": "error", "message": "Body must be valid JSON"}, status=HTTPStatus.BAD_REQUEST)
                 return
             save_kaiguan(payload)
-            self.server.runtime_config = _merge_config(self.server.runtime_config, {"kaiguan": load_kaiguan()})
+            saved_kaiguan = load_kaiguan()
+            self.server.runtime_config = load_config()
             if hasattr(self.server, "queue_manager"):
-                self.server.queue_manager.load_kaiguan(payload)
+                self.server.queue_manager.load_kaiguan(saved_kaiguan)
             self._write_json({"status": "ok"})
             return
 
@@ -2977,6 +3367,7 @@ def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
         ws_hub=httpd.ws_hub,
         queue_archive=httpd.queue_archive,
         logger=logger,
+        runtime_reload_callback=lambda: setattr(httpd, "runtime_config", load_config()),
     )
     httpd.queue_manager.load_config(
         runtime_config.get("myjs", {}),
