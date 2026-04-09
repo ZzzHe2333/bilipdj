@@ -94,13 +94,13 @@ class WebSocketHub:
         with self._lock:
             self._clients.add(conn)
             count = len(self._clients)
-        self.logger.info("WebSocket client connected, total=%s", count)
+        self.logger.info("WebSocket 客户端已连接，当前 %s 个", count)
 
     def unregister(self, conn: socket.socket) -> None:
         with self._lock:
             self._clients.discard(conn)
             count = len(self._clients)
-        self.logger.info("WebSocket client disconnected, total=%s", count)
+        self.logger.info("WebSocket 客户端已断开，当前 %s 个", count)
 
     def broadcast_json(self, sender: socket.socket | None, payload: dict[str, Any]) -> None:
         text = json.dumps(payload, ensure_ascii=False)
@@ -482,17 +482,19 @@ def setup_logging(config: dict[str, Any]) -> logging.Logger:
     level = getattr(logging, level_name, logging.INFO)
     log_path = LOG_DIR / f"backend_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 
+    stream_handler = logging.StreamHandler()
+    stream_handler.stream = open(stream_handler.stream.fileno(), mode="w", encoding="utf-8", buffering=1, closefd=False)  # type: ignore[assignment]
     logging.basicConfig(
         level=level,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         handlers=[
             logging.FileHandler(log_path, encoding="utf-8"),
-            logging.StreamHandler(),
+            stream_handler,
         ],
     )
     logger = logging.getLogger("danmuji.backend")
-    logger.info("Logging initialized at %s", log_path)
-    logger.info("Log cleanup retention_days=%s", retention_days)
+    logger.info("日志已初始化，文件：%s", log_path)
+    logger.info("日志自动清理：保留最近 %s 天", retention_days)
     return logger
 
 
@@ -682,10 +684,8 @@ class QueueManager:
         with self._lock:
             self._persons = [self._strip_html(item) for item in snapshot["queue"] if item]
         self._logger.info(
-            "[queue] Restored %s items from archive (slot=%s ts=%s)",
-            len(self._persons),
-            snapshot.get("slot", "?"),
-            snapshot.get("timestamp", "?"),
+            "[队列] 已从存档恢复 %s 人（槽位 %s，存档时间：%s）",
+            len(self._persons), snapshot.get("slot", "?"), snapshot.get("timestamp", "?"),
         )
 
     @staticmethod
@@ -755,16 +755,14 @@ class QueueManager:
         self._queue_archive.set_active_slot(slot)
         snapshot = self._queue_archive.read_snapshot_by_slot(slot)
         if snapshot is None:
-            self._logger.info("[queue] switch_to_slot=%s: slot file not found, keeping current queue", slot)
+            self._logger.info("[队列] 切换到槽位 %s：槽位文件不存在，保持当前队列不变", slot)
             return self.get_queue()
         items = [self._strip_html(item) for item in snapshot.get("queue", []) if item]
         with self._lock:
             self._persons = items
         self._logger.info(
-            "[queue] Switched to slot %s, loaded %s items (ts=%s)",
-            slot,
-            len(items),
-            snapshot.get("timestamp", "?"),
+            "[队列] 已切换到槽位 %s，加载 %s 人（存档时间：%s）",
+            slot, len(items), snapshot.get("timestamp", "?"),
         )
         self._broadcast_and_archive("system", f"switch_slot_{slot}")
         return list(items)
@@ -825,13 +823,31 @@ class QueueManager:
         perm = "主播" if is_anchor else ("super_admin" if uname in self._super_admins else ("管理员" if uname in self._admins or (is_admin_flag and self._fangguan_can_doing) else ("舰长" if is_guard else "普通用户")))
         self._logger.info("[弹幕] %s(%s): %s", uname, perm, msg)
 
-        modified = self._process(uname, msg, is_anchor, is_admin_flag, is_guard, guard_level)
+        modified, note = self._process(uname, msg, is_anchor, is_admin_flag, is_guard, guard_level)
         if modified:
             self._broadcast_and_archive(uname, msg)
             self._logger.info(
                 "[触发指令] uname=%s 权限=%s msg=%r → 队列变更，当前 %s 人",
                 uname, perm, msg, len(self._persons),
             )
+        elif note:
+            self._logger.info("[提示] %s(%s): %s", uname, perm, note)
+
+    # 判断弹幕是否属于"排队类指令"（不含管理员专属指令）
+    _JOIN_CMD_PATTERNS = (
+        "排队", "官服排", "排官服", "官服排队", "排队官服",
+        "B服排", "b服排", "排b服", "排B服", "B服排队", "排队B服", "b服排队", "排队b服",
+        "超级排", "超级排队", "小米排", "排小米", "排米服", "插队",
+    )
+
+    def _is_join_cmd(self, msg: str) -> bool:
+        """判断消息是否看起来像排队入队指令（用于已在队列时提示）。"""
+        if msg in self._JOIN_CMD_PATTERNS:
+            return True
+        for prefix in ("排队 ", "官服排队 ", "官服排 ", "B服排 ", "b服排 ", "超级排队 ", "超级排 ", "米服排 "):
+            if msg.startswith(prefix):
+                return True
+        return False
 
     def _process(
         self,
@@ -841,15 +857,17 @@ class QueueManager:
         is_admin: bool,
         is_guard: bool,
         guard_level: int,
-    ) -> bool:
+    ) -> tuple[bool, str | None]:
         with self._lock:
             has_op = self._has_op_permission(uname, is_anchor, is_admin)
 
             if uname in self._ban_admins:
-                return False
+                return False, None
 
             if self._all_disabled and not has_op:
-                return False
+                if self._is_join_cmd(msg):
+                    return False, "排队功能已暂停，权限不足"
+                return False, None
 
             if is_guard and guard_level > 0 and uname not in self._jianzhang:
                 self._jianzhang.append(uname)
@@ -904,6 +922,12 @@ class QueueManager:
                 if new_item is not None and can_join:
                     self._persons.append(new_item)
                     modified = True
+                elif new_item is not None and not can_join and not has_op:
+                    return False, "队列已满，无法加入排队"
+
+            # --- 已在队列时再次发排队指令 ---
+            if index >= 0 and self._is_join_cmd(msg) and not has_op:
+                return False, f"已在队列第 {index + 1} 位，无法重复排队"
 
             # --- Self-service cancel/replace (already in queue) ---
             if index >= 0:
@@ -919,6 +943,11 @@ class QueueManager:
                     modified = True
 
             # --- Operator/admin commands ---
+            if not has_op and any(
+                msg.startswith(p) for p in ("del ", "删除 ", "完成 ", "add ", "新增 ", "添加 ", "无影插 ", "插队 ")
+            ):
+                return False, "权限不足，该指令需要管理员权限"
+
             if has_op:
                 for kw in ("del", "删除", "完成"):
                     if kw in msg:
@@ -991,7 +1020,7 @@ class QueueManager:
                         if target in self._admins:
                             self._admins.remove(target)
 
-            return modified
+            return modified, None
 
 
 DEFAULT_QUANXIAN: dict[str, Any] = {
@@ -1474,10 +1503,10 @@ class BilibiliDanmuRelay(threading.Thread):
 
         data = payload.get("data", {})
         if isinstance(data, dict) and isinstance(data.get("pb"), str):
-            self.logger.info("Danmu event received cmd=%s (protobuf-wrapped)", cmd)
+            self.logger.info("收到直播间事件 cmd=%s（protobuf 格式）", cmd)
             return
 
-        self.logger.info("Danmu event received cmd=%s", cmd)
+        self.logger.info("收到直播间事件 cmd=%s", cmd)
 
     def _iter_business_messages(self, packet_data: bytes) -> list[str]:
         messages: list[str] = []
@@ -1532,7 +1561,7 @@ class BilibiliDanmuRelay(threading.Thread):
         payload = json.loads(body.decode("utf-8", errors="replace") or "{}")
         if _to_int(payload.get("code", -1), -1) != 0:
             raise ConnectionError(f"danmu auth failed: {payload}")
-        self.logger.info("Danmu auth succeeded")
+        self.logger.info("直播间鉴权成功")
         self._emit_status("danmu_auth_ok")
 
     def _iter_auth_uid_candidates(self, auth_uid: int, configured_uid: int) -> list[int]:
@@ -1596,7 +1625,7 @@ class BilibiliDanmuRelay(threading.Thread):
         cookie: str,
         initial_auth_uid: int,
     ) -> None:
-        self.logger.info("Starting danmu server discovery, roomid=%s", roomid)
+        self.logger.info("开始获取弹幕服务器信息，roomid=%s", roomid)
         real_room_id = roomid
         for candidate_room_id, candidate_cookie, mode in [
             (roomid, cookie, "room_init+cookie"),
@@ -2670,10 +2699,10 @@ def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
     httpd.danmu_relay = BilibiliDanmuRelay(httpd)
     httpd.danmu_relay.start()
 
-    logger.info("Danmuji backend started on http://%s:%s", host, port)
-    logger.info("Backend config page: http://127.0.0.1:%s/config", port)
-    logger.info("Index page: http://127.0.0.1:%s/index", port)
-    logger.info("WebSocket: ws://127.0.0.1:%s/ws (alias: /danmu/sub)", port)
+    logger.info("后端已启动，地址：http://%s:%s", host, port)
+    logger.info("配置页：http://127.0.0.1:%s/config", port)
+    logger.info("排队展示页：http://127.0.0.1:%s/index", port)
+    logger.info("WebSocket：ws://127.0.0.1:%s/ws（别名：/danmu/sub）", port)
 
     # 打印非敏感配置
     srv_cfg = runtime_config.get("server", {})

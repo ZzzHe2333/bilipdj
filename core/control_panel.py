@@ -35,6 +35,10 @@ APP_VERSION = "0.4.0"
 LOG_LEVEL_OPTIONS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 _LEVEL_ORDER = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 4}
 _LOG_LEVEL_RE = re.compile(r"\[(DEBUG|INFO|WARNING|ERROR|CRITICAL)\]")
+# 匹配后端日志完整时间戳前缀：2026-04-09 12:34:56,789 [INFO] name:
+_LOG_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2} (\d{2}:\d{2}:\d{2}),\d+ \[(?:DEBUG|INFO|WARNING|ERROR|CRITICAL)\] [^:]+: (.*)")
+# 匹配面板显示格式 "HH:MM:SS 内容"
+_PANEL_TS_RE = re.compile(r"^(\d{2}:\d{2}:\d{2}) (.*)", re.DOTALL)
 MAX_QUEUE_ARCHIVE_SLOTS = 5
 KAIGUAN_LABELS = [
     ("paidui",           "普通排队"),
@@ -247,10 +251,12 @@ class ControlPanelApp:
         self.queue_slots_var = tk.StringVar(value="3")
         self.queue_slot_choice_var = tk.IntVar(value=3)
         self.auto_start_var = tk.BooleanVar(value=False)
+        self.language_var = tk.StringVar(value="中文")
         self.ws_light_var = tk.StringVar(value="●")
         self.ws_text_var = tk.StringVar(value="直播间链接状态：未连接")
 
         self._clear_click_time: float = 0.0
+        self._prev_slot: int = self.queue_slot_choice_var.get()
 
         self._build_ui()
         self.load_from_file()
@@ -465,12 +471,28 @@ class ControlPanelApp:
         self.root.after(0, lambda: self._update_queue_ui(items))
 
     def _update_queue_ui(self, items: list[str]) -> None:
+        # 记住当前选中序号，刷新后恢复
+        sel = self.queue_tree.selection()
+        prev_idx: int | None = None
+        if sel:
+            try:
+                prev_idx = int(self.queue_tree.item(sel[0], "values")[0])
+            except (IndexError, ValueError):
+                prev_idx = None
+
         for child in self.queue_tree.get_children():
             self.queue_tree.delete(child)
+        iid_map: dict[int, str] = {}
         for idx, raw_item in enumerate(items, start=1):
             name, content = self._parse_queue_item(raw_item)
-            self.queue_tree.insert("", "end", values=(idx, name, content))
+            iid = self.queue_tree.insert("", "end", values=(idx, name, content))
+            iid_map[idx] = iid
         self.queue_count_var.set(f"当前排队：{len(items)} 人")
+
+        # 恢复选中
+        if prev_idx is not None and prev_idx in iid_map:
+            self.queue_tree.selection_set(iid_map[prev_idx])
+            self.queue_tree.see(iid_map[prev_idx])
 
     def _auto_refresh_queue(self) -> None:
         threading.Thread(target=self._refresh_queue_list, daemon=True).start()
@@ -730,6 +752,8 @@ class ControlPanelApp:
         _sys_font = ("Microsoft YaHei UI", 9) if sys.platform == "win32" else ("PingFang SC", 11) if sys.platform == "darwin" else ("Sans", 10)
         self.log_text = tk.Text(log_frame, height=18, wrap="word", state="disabled", font=_sys_font)
         self.log_text.tag_configure("warn", foreground="#c00")
+        self.log_text.tag_configure("ts", foreground="#080")   # 时间戳：绿色
+        self.log_text.tag_configure("ev", foreground="#111")   # 事件内容：深黑
         self.log_text.grid(row=0, column=0, sticky="nsew")
         log_scroll = ttk.Scrollbar(log_frame, orient="vertical", command=self.log_text.yview)
         log_scroll.grid(row=0, column=1, sticky="ns")
@@ -784,6 +808,11 @@ class ControlPanelApp:
         ttk.Checkbutton(frame, text="启动时自动运行后端", variable=self.auto_start_var).grid(
             row=row, column=1, sticky="w", pady=4
         )
+        row += 1
+
+        ttk.Label(frame, text="语言").grid(row=row, column=0, sticky="w", pady=4)
+        lang_cb = ttk.Combobox(frame, textvariable=self.language_var, values=["中文"], state="readonly", width=10)
+        lang_cb.grid(row=row, column=1, sticky="w", pady=4)
         row += 1
 
         btn_bar = ttk.Frame(frame)
@@ -1036,9 +1065,11 @@ class ControlPanelApp:
         active_slot = int(queue_archive.get("active_slot", 1))
         active_slot = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, active_slot))
         self.queue_slot_choice_var.set(active_slot)
+        self._prev_slot = active_slot
         self.queue_slots_var.set(str(MAX_QUEUE_ARCHIVE_SLOTS))
         ui_cfg = config.get("ui", {})
         self.auto_start_var.set(bool(ui_cfg.get("auto_start_backend", False)))
+        self.language_var.set(str(ui_cfg.get("language", "中文")))
         self.status_var.set("已加载配置")
         self._append_log("[GUI] 已加载配置")
 
@@ -1092,15 +1123,27 @@ class ControlPanelApp:
             },
             "ui": {
                 "auto_start_backend": bool(self.auto_start_var.get()),
+                "language": self.language_var.get(),
             },
         }
 
     def _append_log(self, message: str, warn: bool = False) -> None:
+        import time as _t
         self.log_text.configure(state="normal")
-        start = self.log_text.index("end-1c")
-        self.log_text.insert("end", f"{message}\n")
-        if warn:
-            self.log_text.tag_add("warn", start, self.log_text.index("end-1c"))
+        # 若消息尚无时间戳前缀，补一个
+        if not _PANEL_TS_RE.match(message):
+            message = f"{_t.strftime('%H:%M:%S')} {message}"
+        m = _PANEL_TS_RE.match(message)
+        if m and not warn:
+            ts_part = m.group(1)
+            ev_part = m.group(2)
+            self.log_text.insert("end", ts_part, "ts")
+            self.log_text.insert("end", f" {ev_part}\n", "ev")
+        else:
+            start = self.log_text.index("end-1c")
+            self.log_text.insert("end", f"{message}\n")
+            if warn:
+                self.log_text.tag_add("warn", start, self.log_text.index("end-1c"))
         self.log_text.see("end")
         self.log_text.configure(state="disabled")
 
@@ -1111,7 +1154,22 @@ class ControlPanelApp:
             min_level = _LEVEL_ORDER.get(self.log_level_var.get().upper(), 0)
             if msg_level < min_level:
                 return
-        self.log_queue.put(sanitize_log_message(message))
+
+        # 剥离 [STDERR]/[STDOUT] 包装，取出真正的日志行
+        inner = message
+        for pfx in ("[STDERR] ", "[STDOUT] "):
+            if inner.startswith(pfx):
+                inner = inner[len(pfx):]
+                break
+
+        # 将后端完整时间戳 "2026-04-09 12:34:56,ms [LEVEL] name: msg" → "12:34:56 msg"
+        ts_match = _LOG_TS_RE.match(inner)
+        if ts_match:
+            panel_line = f"{ts_match.group(1)} {ts_match.group(2)}"
+        else:
+            panel_line = inner
+
+        self.log_queue.put(sanitize_log_message(panel_line))
 
     def _schedule_log_pump(self) -> None:
         if self.log_pump_running:
@@ -1182,20 +1240,48 @@ class ControlPanelApp:
             return
         self._switch_queue_slot()
 
+    def _read_slot_csv(self, slot: int) -> list[str]:
+        """读取指定槽位 CSV 的队列条目。"""
+        import csv as _csv
+        try:
+            bs = load_backend_server_module()
+            path = bs.PD_DIR / f"queue_archive_slot_{slot}.csv"
+        except Exception:
+            return []
+        if not path.exists():
+            return []
+        try:
+            items: list[str] = []
+            with path.open("r", encoding="utf-8-sig", newline="") as f:
+                for row in _csv.reader(f):
+                    if row and row[0].strip().isdigit() and len(row) > 1:
+                        items.append(str(row[1]))
+            return items
+        except Exception:
+            return []
+
     def _switch_queue_slot(self) -> None:
-        slot = self.queue_slot_choice_var.get()
+        new_slot = self.queue_slot_choice_var.get()
+        old_slot = self._prev_slot
+        # 切换前读取旧槽位人数（以 CSV 为准）
+        old_count = len(self._read_slot_csv(old_slot))
+        # 读取新槽位 CSV 人数
+        new_count_csv = len(self._read_slot_csv(new_slot))
+
         port = self.port_var.get().strip() or "9816"
         url = f"http://127.0.0.1:{port}/api/queue/switch"
-        body = json.dumps({"slot": slot}).encode("utf-8")
+        body = json.dumps({"slot": new_slot}).encode("utf-8")
         req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=2) as resp:
                 result = json.loads(resp.read().decode("utf-8", errors="replace"))
-            size = result.get("size", 0)
-            self._append_log(f"[GUI] 已切换到存档槽位 {slot}，队列 {size} 人")
+            new_count = result.get("size", new_count_csv)
+            self._append_log(f"[GUI] 切换到存档槽位 {new_slot}，旧存档 {old_count} 人，新存档 {new_count} 人")
+            self._prev_slot = new_slot
             self.root.after(300, lambda: threading.Thread(target=self._refresh_queue_list, daemon=True).start())
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
-            self._append_log(f"[GUI] 存档槽位已选择 {slot}（后端未运行，下次启动生效）")
+            self._append_log(f"[GUI] 存档槽位已选择 {new_slot}，旧存档 {old_count} 人，新存档 {new_count_csv} 人（下次启动生效）")
+            self._prev_slot = new_slot
 
     def start_server(self) -> None:
         if self.server_proc and self.server_proc.poll() is None:
