@@ -242,7 +242,7 @@ class ControlPanelApp:
         self.uid_var = tk.StringVar(value="0")
         self.cookie_var = tk.StringVar(value="")
         self.log_level_var = tk.StringVar(value="INFO")
-        self.retention_days_var = tk.StringVar(value="15")
+        self.retention_days_var = tk.StringVar(value="7")
         self.queue_enabled_var = tk.BooleanVar(value=True)
         self.queue_slots_var = tk.StringVar(value="3")
         self.queue_slot_choice_var = tk.IntVar(value=3)
@@ -250,8 +250,11 @@ class ControlPanelApp:
         self.ws_light_var = tk.StringVar(value="●")
         self.ws_text_var = tk.StringVar(value="直播间链接状态：未连接")
 
+        self._clear_click_time: float = 0.0
+
         self._build_ui()
         self.load_from_file()
+        self._append_log("[GUI] 初始化完成 — 后端尚未启动，请点击「启动后端」")
         if self.auto_start_var.get():
             self.root.after(200, self.start_server)
         self.root.after(1000, self.refresh_runtime_status)
@@ -312,7 +315,12 @@ class ControlPanelApp:
         notebook.add(perf_tab, text="性能")
         self._build_perf_tab(perf_tab)
 
-        # Tab 6: 关于
+        # Tab 6: 样式设置
+        style_tab = ttk.Frame(notebook, padding=8)
+        notebook.add(style_tab, text="样式设置")
+        self._build_style_tab(style_tab)
+
+        # Tab 7: 关于
         about_tab = ttk.Frame(notebook, padding=8)
         notebook.add(about_tab, text="关于")
         self._build_about_tab(about_tab)
@@ -321,11 +329,13 @@ class ControlPanelApp:
         frame.columnconfigure(0, weight=1)
         frame.rowconfigure(1, weight=1)
 
-        # 顶部：排队人数 + 手动刷新按钮
+        # 顶部：排队人数 + 状态 + 手动刷新按钮
         top_bar = ttk.Frame(frame)
         top_bar.grid(row=0, column=0, sticky="ew", pady=(0, 6))
         self.queue_count_var = tk.StringVar(value="当前排队：0 人")
         ttk.Label(top_bar, textvariable=self.queue_count_var, font=("Arial", 11, "bold")).pack(side="left")
+        self.queue_status_var = tk.StringVar(value="")
+        ttk.Label(top_bar, textvariable=self.queue_status_var, foreground="#0a0", width=28).pack(side="left", padx=(10, 0))
         ttk.Button(top_bar, text="刷新", command=lambda: threading.Thread(target=self._refresh_queue_list, daemon=True).start()).pack(side="right")
 
         # 排队列表（Treeview + 滚动条）
@@ -348,6 +358,15 @@ class ControlPanelApp:
 
         self.queue_tree.grid(row=0, column=0, sticky="nsew")
         y_scroll.grid(row=0, column=1, sticky="ns")
+
+        # 操作按钮栏
+        op_bar = ttk.Frame(frame)
+        op_bar.grid(row=2, column=0, sticky="ew", pady=(6, 0))
+        ttk.Button(op_bar, text="删除", command=self._queue_delete).pack(side="left", padx=(0, 4))
+        ttk.Button(op_bar, text="上移", command=self._queue_move_up).pack(side="left", padx=(0, 4))
+        ttk.Button(op_bar, text="下移", command=self._queue_move_down).pack(side="left", padx=(0, 4))
+        ttk.Button(op_bar, text="在下方新增", command=self._queue_insert).pack(side="left", padx=(0, 4))
+        ttk.Button(op_bar, text="一键清空", command=self._queue_clear).pack(side="right")
 
         # 启动定时刷新
         self.root.after(2000, self._auto_refresh_queue)
@@ -379,16 +398,70 @@ class ControlPanelApp:
     def _backend_is_running(self) -> bool:
         return bool(self.server_proc and self.server_proc.poll() is None)
 
-    def _refresh_queue_list(self) -> None:
-        """在后台线程中拉取队列数据，UI 更新回到主线程。"""
-        port = self.port_var.get().strip() or "9816"
+    def _active_slot_csv(self) -> "Path | None":
+        """返回当前活跃存档槽位的 CSV 路径（可在后端未启动时使用）。"""
         try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/queue/state", timeout=2) as r:
-                data = json.loads(r.read().decode("utf-8", errors="replace"))
-            items: list[str] = data.get("queue", [])
-        except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError):
-            return  # 后端未运行，保持上一次显示
+            bs = load_backend_server_module()
+            slot = self.queue_slot_choice_var.get()
+            return bs.PD_DIR / f"queue_archive_slot_{slot}.csv"
+        except Exception:
+            return None
 
+    def _read_queue_from_csv(self) -> list[str]:
+        """直接从 CSV 文件读取队列条目（源头）。"""
+        import csv as _csv
+        path = self._active_slot_csv()
+        if path is None or not path.exists():
+            return []
+        try:
+            items: list[str] = []
+            with path.open("r", encoding="utf-8-sig", newline="") as f:
+                for row in _csv.reader(f):
+                    if row and row[0].strip().isdigit() and len(row) > 1:
+                        items.append(str(row[1]))
+            return items
+        except Exception:
+            return []
+
+    def _write_queue_to_csv(self, items: list[str]) -> bool:
+        """将条目列表写回当前活跃存档槽位的 CSV。"""
+        import csv as _csv
+        import datetime as _dt
+        path = self._active_slot_csv()
+        if path is None:
+            return False
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("w", encoding="utf-8-sig", newline="") as f:
+                w = _csv.writer(f)
+                w.writerow(["timestamp", _dt.datetime.now().isoformat(timespec="seconds")])
+                w.writerow(["actor", "gui"])
+                w.writerow(["message", "gui_edit"])
+                w.writerow([])
+                w.writerow(["position", "queue_item"])
+                for idx, item in enumerate(items, start=1):
+                    w.writerow([idx, item])
+            return True
+        except Exception as exc:
+            self.root.after(0, lambda: self._append_log(f"[GUI] CSV 写入失败: {exc}"))
+            return False
+
+    def _notify_backend_reload(self) -> None:
+        """通知后端从 CSV 重新加载队列（如后端正在运行）。"""
+        if not self._backend_is_running():
+            return
+        port = self.port_var.get().strip() or "9816"
+        url = f"http://127.0.0.1:{port}/api/queue/reload"
+        req = urllib.request.Request(url, data=b"{}", headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=2):
+                pass
+        except (urllib.error.URLError, TimeoutError):
+            pass
+
+    def _refresh_queue_list(self) -> None:
+        """从 CSV 读取队列（始终以存档文件为准），UI 更新回主线程。"""
+        items = self._read_queue_from_csv()
         self.root.after(0, lambda: self._update_queue_ui(items))
 
     def _update_queue_ui(self, items: list[str]) -> None:
@@ -400,9 +473,239 @@ class ControlPanelApp:
         self.queue_count_var.set(f"当前排队：{len(items)} 人")
 
     def _auto_refresh_queue(self) -> None:
-        if self._backend_is_running():
-            threading.Thread(target=self._refresh_queue_list, daemon=True).start()
+        threading.Thread(target=self._refresh_queue_list, daemon=True).start()
         self.root.after(3000, self._auto_refresh_queue)
+
+    # ── 队列操作辅助 ──────────────────────────────────────────────────────
+
+    def _get_selected_index(self) -> int | None:
+        """返回当前选中项的序号（1-based），未选中则返回 None。"""
+        sel = self.queue_tree.selection()
+        if not sel:
+            return None
+        values = self.queue_tree.item(sel[0], "values")
+        try:
+            return int(values[0])
+        except (IndexError, ValueError):
+            return None
+
+    def _queue_csv_op(self, op, status_msg: str = "") -> None:
+        """在后台线程：读取 CSV → 执行 op(items) → 写回 CSV → 通知后端 → 刷新 UI。"""
+        items = self._read_queue_from_csv()
+        new_items = op(list(items))
+        if new_items is None:
+            new_items = items
+        if not self._write_queue_to_csv(new_items):
+            return
+        self._notify_backend_reload()
+        import time as _time
+        ts = _time.strftime("%H:%M:%S")
+        msg = f"{ts} {status_msg}" if status_msg else ts
+        self.root.after(0, lambda: (self._update_queue_ui(new_items), self.queue_status_var.set(msg)))
+
+    def _queue_delete(self) -> None:
+        idx = self._get_selected_index()
+        if idx is None:
+            return
+        def op(items):
+            if 1 <= idx <= len(items):
+                items.pop(idx - 1)
+            return items
+        threading.Thread(target=self._queue_csv_op, args=(op, f"已删除第{idx}位"), daemon=True).start()
+
+    def _queue_move_up(self) -> None:
+        idx = self._get_selected_index()
+        if idx is None:
+            return
+        def op(items):
+            if 2 <= idx <= len(items):
+                items[idx - 2], items[idx - 1] = items[idx - 1], items[idx - 2]
+            return items
+        threading.Thread(target=self._queue_csv_op, args=(op, f"第{idx}位已上移"), daemon=True).start()
+
+    def _queue_move_down(self) -> None:
+        idx = self._get_selected_index()
+        if idx is None:
+            return
+        def op(items):
+            if 1 <= idx <= len(items) - 1:
+                items[idx - 1], items[idx] = items[idx], items[idx - 1]
+            return items
+        threading.Thread(target=self._queue_csv_op, args=(op, f"第{idx}位已下移"), daemon=True).start()
+
+    def _queue_insert(self) -> None:
+        idx = self._get_selected_index() or 0
+        from tkinter import simpledialog
+        entry = simpledialog.askstring("在下方新增", "请输入排队内容（如：用户名 角色名 或 G|用户名 角色名）：", parent=self.root)
+        if not entry or not entry.strip():
+            return
+        val = entry.strip()
+        def op(items):
+            pos = max(0, min(idx, len(items)))
+            items.insert(pos, val)
+            return items
+        threading.Thread(target=self._queue_csv_op, args=(op, f"已在第{idx}位后新增"), daemon=True).start()
+
+    def _queue_clear(self) -> None:
+        import time
+        now = time.time()
+        if self._clear_click_time > 0 and now - self._clear_click_time <= 5.0:
+            self._clear_click_time = 0.0
+            threading.Thread(target=self._queue_csv_op, args=(lambda _: [], "已清空"), daemon=True).start()
+        else:
+            self._clear_click_time = now
+            self._append_log("[GUI] 确认清空？请在 5 秒内再次点击「一键清空」")
+
+    # ── 样式设置辅助 ──────────────────────────────────────────────────────
+
+    _DEFAULT_STYLE = {
+        "bg1": "#0e2036", "bg2": "#060b14", "bg3": "#020409",
+        "text_color": "#eaf6ff", "queue_font_size": "50",
+        "text_grad_start": "#f7f7f7", "text_grad_end": "rgba(255,255,255,0.6)",
+        "text_stroke_color": "#000000",
+    }
+
+    def _build_style_tab(self, frame: ttk.Frame) -> None:
+        from tkinter import colorchooser
+        frame.columnconfigure(0, weight=0)
+        frame.columnconfigure(1, weight=1)
+        frame.rowconfigure(0, weight=1)
+
+        left = ttk.Frame(frame)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 16))
+
+        right = ttk.LabelFrame(frame, text="预览效果（近似）")
+        right.grid(row=0, column=1, sticky="nsew")
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(0, weight=1)
+
+        fields = [
+            ("bg1",              "背景渐变色 1",   True),
+            ("bg2",              "背景渐变色 2",   True),
+            ("bg3",              "背景渐变色 3",   True),
+            ("text_color",       "页面文字颜色",   True),
+            ("queue_font_size",  "队列字体大小(px)", False),
+            ("text_grad_start",  "文字渐变起始色", True),
+            ("text_grad_end",    "文字渐变结束色", False),
+            ("text_stroke_color","文字描边颜色",   True),
+        ]
+        self._style_vars: dict[str, tk.StringVar] = {}
+        for row_idx, (key, label, has_picker) in enumerate(fields):
+            ttk.Label(left, text=label, anchor="e", width=14).grid(row=row_idx, column=0, sticky="e", padx=(0, 6), pady=3)
+            var = tk.StringVar(value=self._DEFAULT_STYLE.get(key, ""))
+            self._style_vars[key] = var
+            entry = ttk.Entry(left, textvariable=var, width=20)
+            entry.grid(row=row_idx, column=1, sticky="w")
+            if has_picker:
+                def _pick(v=var):
+                    color = colorchooser.askcolor(color=v.get() if v.get().startswith("#") else "#ffffff", parent=frame)
+                    if color and color[1]:
+                        v.set(color[1])
+                ttk.Button(left, text="取色", command=_pick, width=4).grid(row=row_idx, column=2, padx=(4, 0))
+
+        btn_bar = ttk.Frame(left)
+        btn_bar.grid(row=len(fields), column=0, columnspan=3, sticky="w", pady=(12, 0))
+        ttk.Button(btn_bar, text="保存样式", command=self._save_style).grid(row=0, column=0, padx=(0, 8))
+        ttk.Button(btn_bar, text="恢复默认", command=self._reset_style).grid(row=0, column=1)
+        self._style_save_status_var = tk.StringVar(value="")
+        ttk.Label(btn_bar, textvariable=self._style_save_status_var, foreground="#0a0").grid(row=0, column=2, padx=(12, 0))
+
+        # 预览画布
+        self._style_preview_canvas = tk.Canvas(right, highlightthickness=0)
+        self._style_preview_canvas.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+        for var in self._style_vars.values():
+            var.trace_add("write", lambda *_: self.root.after(0, self._redraw_style_preview))
+        self._style_preview_canvas.bind("<Configure>", lambda *_: self._redraw_style_preview())
+
+        self._load_style_into_ui()
+
+    def _redraw_style_preview(self) -> None:
+        cv = self._style_preview_canvas
+        w = cv.winfo_width()
+        h = cv.winfo_height()
+        if w <= 1 or h <= 1:
+            return
+
+        def _safe(key: str, fallback: str) -> str:
+            v = self._style_vars.get(key, tk.StringVar()).get().strip()
+            return v if v.startswith("#") else fallback
+
+        bg = _safe("bg1", "#0e2036")
+        text_c = _safe("text_grad_start", "#f7f7f7")
+        side_c = _safe("text_color", "#eaf6ff")
+        try:
+            fsize_raw = int(self._style_vars["queue_font_size"].get().strip() or 50)
+        except (ValueError, KeyError):
+            fsize_raw = 50
+        # 按预览宽度等比缩放：假设原始宽1920
+        fsize = max(8, int(fsize_raw * w / 1920 * 2.5))
+
+        cv.configure(bg=bg)
+        cv.delete("all")
+
+        # 侧边竖排文字区域
+        side_w = max(24, w // 8)
+        cv.create_rectangle(0, 0, side_w, h, fill=_safe("bg2", "#060b14"), outline="")
+        font_side = ("Microsoft YaHei UI", max(6, fsize - 4), "bold") if sys.platform == "win32" else ("", max(6, fsize - 4), "bold")
+        cv.create_text(side_w // 2, 16, text="排\n队\n姬", fill=side_c, font=font_side, anchor="n")
+
+        # 主队列文字
+        font_main = ("Microsoft YaHei UI", fsize, "bold italic") if sys.platform == "win32" else ("", fsize, "bold italic")
+        sample = ["示例用户名 角色名", "第二位 职业名称", "第三位用户"]
+        y = 12
+        for item in sample:
+            cv.create_text(side_w + 10, y, text=item, fill=text_c, font=font_main, anchor="nw")
+            y += fsize + 6
+            if y > h - fsize:
+                break
+
+    def _load_style_into_ui(self) -> None:
+        try:
+            backend_server = load_backend_server_module()
+            data = backend_server.load_style()
+        except Exception:
+            data = {}
+        for key, var in self._style_vars.items():
+            val = data.get(key)
+            if val is not None:
+                var.set(str(val))
+
+    def _save_style(self) -> None:
+        data: dict = {}
+        for key, var in self._style_vars.items():
+            v = var.get().strip()
+            if key == "queue_font_size":
+                try:
+                    data[key] = int(v)
+                except ValueError:
+                    data[key] = 50
+            else:
+                data[key] = v
+        # 始终先写本地文件（index.html 启动时从文件 fetch）
+        try:
+            backend_server = load_backend_server_module()
+            backend_server.save_style(data)
+        except Exception as exc:
+            self._append_log(f"[GUI] 样式写入文件失败: {exc}")
+            self._style_save_status_var.set("保存失败")
+            return
+        # 如果后端在跑，通知它也刷新（可选）
+        port = self.port_var.get().strip() or "9816"
+        url = f"http://127.0.0.1:{port}/api/style"
+        body = json.dumps(data).encode("utf-8")
+        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=2):
+                pass
+        except (urllib.error.URLError, TimeoutError):
+            pass
+        import time as _t
+        self._style_save_status_var.set(f"✓ 修改成功 {_t.strftime('%H:%M:%S')}")
+        self._append_log("[GUI] 样式已保存，刷新排队展示页即可生效")
+
+    def _reset_style(self) -> None:
+        for key, var in self._style_vars.items():
+            var.set(self._DEFAULT_STYLE.get(key, ""))
 
     def _build_log_tab(self, frame: ttk.Frame) -> None:
         frame.columnconfigure(0, weight=1)
@@ -728,7 +1031,7 @@ class ControlPanelApp:
         self.uid_var.set(str(api.get("uid", 0)))
         self.cookie_var.set(str(api.get("cookie", "")))
         self.log_level_var.set(str(logging_cfg.get("level", "INFO")))
-        self.retention_days_var.set(str(logging_cfg.get("retention_days", 15)))
+        self.retention_days_var.set(str(logging_cfg.get("retention_days", 7)))
         self.queue_enabled_var.set(bool(queue_archive.get("enabled", True)))
         active_slot = int(queue_archive.get("active_slot", 1))
         active_slot = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, active_slot))
@@ -780,7 +1083,7 @@ class ControlPanelApp:
             "myjs": {},
             "logging": {
                 "level": self.log_level_var.get().strip().upper() or "INFO",
-                "retention_days": int(self.retention_days_var.get().strip() or 15),
+                "retention_days": int(self.retention_days_var.get().strip() or 7),
             },
             "queue_archive": {
                 "enabled": bool(self.queue_enabled_var.get()),
@@ -890,6 +1193,7 @@ class ControlPanelApp:
                 result = json.loads(resp.read().decode("utf-8", errors="replace"))
             size = result.get("size", 0)
             self._append_log(f"[GUI] 已切换到存档槽位 {slot}，队列 {size} 人")
+            self.root.after(300, lambda: threading.Thread(target=self._refresh_queue_list, daemon=True).start())
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
             self._append_log(f"[GUI] 存档槽位已选择 {slot}（后端未运行，下次启动生效）")
 
