@@ -353,6 +353,7 @@ def _read_raw_config() -> dict[str, Any]:
 ARCHIVE_HEADER_SEQ = "序号"
 ARCHIVE_HEADER_ID = "id"
 ARCHIVE_HEADER_CONTENT = "内容"
+ARCHIVE_HEADER_LAST_OPERATION_AT = "最后操作时间"
 ARCHIVE_META_TIMESTAMP = "最后操作时间"
 ARCHIVE_META_ACTOR = "操作人"
 ARCHIVE_META_MESSAGE = "操作说明"
@@ -422,13 +423,33 @@ def queue_parts_to_item(item_id: Any, content: Any) -> str:
     return f"{item_id_text} {content_text}".rstrip()
 
 
-def queue_item_to_entry(item: Any) -> dict[str, str]:
+def build_queue_entry(item_id: Any, content: Any, last_operation_at: Any = "") -> dict[str, str]:
+    timestamp = str(last_operation_at or "").strip()
+    return {
+        "id": str(item_id or "").strip(),
+        "content": str(content or "").strip(),
+        "last_operation_at": _format_archive_timestamp(timestamp) if timestamp else "",
+    }
+
+
+def queue_item_to_entry(item: Any, last_operation_at: Any = "") -> dict[str, str]:
+    if isinstance(item, dict):
+        return build_queue_entry(
+            item.get("id", ""),
+            item.get("content", ""),
+            item.get("last_operation_at", last_operation_at),
+        )
     item_id, content = queue_item_to_parts(item)
-    return {"id": item_id, "content": content}
+    return build_queue_entry(item_id, content, last_operation_at)
 
 
-def queue_items_to_entries(queue_items: list[Any]) -> list[dict[str, str]]:
-    return [queue_item_to_entry(item) for item in queue_items if str(item or "").strip()]
+def queue_items_to_entries(queue_items: list[Any], last_operation_at: Any = "") -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    for item in queue_items:
+        entry = queue_item_to_entry(item, last_operation_at=last_operation_at)
+        if entry.get("id") or entry.get("content"):
+            entries.append(entry)
+    return entries
 
 
 def queue_entries_to_items(entries: list[dict[str, Any]]) -> list[str]:
@@ -474,13 +495,42 @@ def parse_queue_archive_rows(rows: list[list[str]]) -> tuple[dict[str, str], lis
             if len(row) >= 3:
                 item_id = str(row[1]).strip()
                 content = str(row[2]).strip()
+                last_operation_at = str(row[3]).strip() if len(row) > 3 else ""
             elif len(row) >= 2:
                 item_id, content = queue_item_to_parts(row[1])
+                last_operation_at = ""
             else:
                 continue
-            entries.append({"id": item_id, "content": content})
+            entries.append(build_queue_entry(item_id, content, last_operation_at))
+
+    fallback_timestamp = str(meta.get("timestamp", "")).strip()
+    if fallback_timestamp:
+        for entry in entries:
+            if not entry.get("last_operation_at", ""):
+                entry["last_operation_at"] = fallback_timestamp
 
     return meta, entries
+
+
+def latest_queue_entry_timestamp(entries: list[dict[str, Any]]) -> str:
+    latest_text = ""
+    latest_value: dt.datetime | None = None
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        text = str(entry.get("last_operation_at", "") or "").strip()
+        if not text:
+            continue
+        try:
+            candidate = dt.datetime.fromisoformat(text)
+        except ValueError:
+            if not latest_text:
+                latest_text = text
+            continue
+        if latest_value is None or candidate > latest_value:
+            latest_value = candidate
+            latest_text = _format_archive_timestamp(candidate)
+    return latest_text
 
 
 def read_queue_archive_entries(path: Path) -> list[dict[str, str]]:
@@ -496,28 +546,28 @@ def read_queue_archive_entries(path: Path) -> list[dict[str, str]]:
 
 def write_queue_archive_entries(path: Path, entries: list[dict[str, Any]], meta: dict[str, Any] | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    merged_meta = {"timestamp": "", "actor": "", "message": ""}
+    merged_meta = {"actor": "", "message": ""}
     if isinstance(meta, dict):
-        merged_meta["timestamp"] = _format_archive_timestamp(meta.get("timestamp", ""))
         merged_meta["actor"] = str(meta.get("actor", "") or "").strip()
         merged_meta["message"] = str(meta.get("message", "") or "").strip()
-    else:
-        merged_meta["timestamp"] = _format_archive_timestamp()
 
     with path.open("w", encoding="utf-8-sig", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow([ARCHIVE_META_TIMESTAMP, merged_meta["timestamp"]])
         if merged_meta["actor"]:
             writer.writerow([ARCHIVE_META_ACTOR, merged_meta["actor"]])
         if merged_meta["message"]:
             writer.writerow([ARCHIVE_META_MESSAGE, merged_meta["message"]])
-        writer.writerow([ARCHIVE_HEADER_SEQ, ARCHIVE_HEADER_ID, ARCHIVE_HEADER_CONTENT])
+        writer.writerow([ARCHIVE_HEADER_SEQ, ARCHIVE_HEADER_ID, ARCHIVE_HEADER_CONTENT, ARCHIVE_HEADER_LAST_OPERATION_AT])
         for idx, entry in enumerate(entries, start=1):
-            if not isinstance(entry, dict):
-                continue
-            item_id = str(entry.get("id", "")).strip()
-            content = str(entry.get("content", "")).strip()
-            writer.writerow([idx, item_id, content])
+            normalized = queue_item_to_entry(entry)
+            writer.writerow(
+                [
+                    idx,
+                    normalized.get("id", ""),
+                    normalized.get("content", ""),
+                    normalized.get("last_operation_at", ""),
+                ]
+            )
 
 
 def blacklist_names_to_entries(names: list[Any]) -> list[dict[str, str]]:
@@ -554,7 +604,7 @@ def write_blacklist_entries(path: Path, entries: list[dict[str, Any]]) -> None:
     write_queue_archive_entries(path, blacklist_names_to_entries(blacklist_entries_to_names(entries)))
 
 
-def ensure_queue_archive_metadata(path: Path) -> None:
+def ensure_queue_archive_row_timestamps(path: Path) -> None:
     if not path.exists():
         return
     try:
@@ -564,11 +614,38 @@ def ensure_queue_archive_metadata(path: Path) -> None:
         return
 
     meta, entries = parse_queue_archive_rows(rows)
-    if str(meta.get("timestamp", "")).strip():
+    header_row = next(
+        (row for row in rows if row and str(row[0]).strip() == ARCHIVE_HEADER_SEQ),
+        [],
+    )
+    has_last_operation_column = (
+        len(header_row) > 3 and str(header_row[3]).strip() == ARCHIVE_HEADER_LAST_OPERATION_AT
+    )
+    has_file_level_timestamp = any(
+        row and str(row[0]).strip() == ARCHIVE_META_TIMESTAMP and str(row[0]).strip() != ARCHIVE_HEADER_SEQ
+        for row in rows
+    )
+    missing_entry_timestamp = any(not str(entry.get("last_operation_at", "")).strip() for entry in entries)
+
+    if not (has_file_level_timestamp or missing_entry_timestamp or not has_last_operation_column):
         return
 
-    timestamp = _format_archive_timestamp(dt.datetime.fromtimestamp(path.stat().st_mtime))
-    write_queue_archive_entries(path, entries, meta={"timestamp": timestamp, "actor": meta.get("actor", ""), "message": meta.get("message", "")})
+    fallback_timestamp = str(meta.get("timestamp", "")).strip()
+    if not fallback_timestamp:
+        fallback_timestamp = _format_archive_timestamp(dt.datetime.fromtimestamp(path.stat().st_mtime))
+    normalized_entries = [
+        build_queue_entry(
+            entry.get("id", ""),
+            entry.get("content", ""),
+            entry.get("last_operation_at", "") or fallback_timestamp,
+        )
+        for entry in entries
+    ]
+    write_queue_archive_entries(
+        path,
+        normalized_entries,
+        meta={"actor": meta.get("actor", ""), "message": meta.get("message", "")},
+    )
 
 
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -612,7 +689,7 @@ def ensure_runtime_layout() -> None:
         if not slot_file.exists():
             write_queue_archive_entries(slot_file, [])
         else:
-            ensure_queue_archive_metadata(slot_file)
+            ensure_queue_archive_row_timestamps(slot_file)
     if not BLACKLIST_PATH.exists():
         write_blacklist_entries(BLACKLIST_PATH, blacklist_names_to_entries(load_quanxian().get("blacklist", [])))
 
@@ -839,17 +916,25 @@ class QueueArchiveManager:
         state["active_slot"] = max(1, min(self.slots, slot))
         self._write_state(state)
 
-    def write_snapshot(self, actor: str, message: str, queue_items: list[str]) -> Path | None:
+    def write_snapshot(self, actor: str, message: str, queue_items: list[Any]) -> Path | None:
         if not self.enabled:
             return None
 
         slot = self.get_active_slot()
         out = self._slot_file(slot)
+        default_timestamp = _format_archive_timestamp()
+        entries = [
+            build_queue_entry(
+                entry.get("id", ""),
+                entry.get("content", ""),
+                entry.get("last_operation_at", "") or default_timestamp,
+            )
+            for entry in queue_items_to_entries(queue_items)
+        ]
         write_queue_archive_entries(
             out,
-            queue_items_to_entries(queue_items),
+            entries,
             meta={
-                "timestamp": _format_archive_timestamp(),
                 "actor": actor,
                 "message": message,
             },
@@ -865,7 +950,6 @@ class QueueArchiveManager:
             out,
             [],
             meta={
-                "timestamp": _format_archive_timestamp(),
                 "actor": actor,
                 "message": message,
             },
@@ -895,7 +979,8 @@ class QueueArchiveManager:
             return None
 
         meta, entries = parse_queue_archive_rows(rows)
-        snapshot["timestamp"] = meta.get("timestamp", "")
+        snapshot_last_operation_at = latest_queue_entry_timestamp(entries)
+        snapshot["timestamp"] = meta.get("timestamp", "") or snapshot_last_operation_at
         snapshot["actor"] = meta.get("actor", "")
         snapshot["message"] = meta.get("message", "")
         snapshot["entries"] = entries
@@ -903,10 +988,10 @@ class QueueArchiveManager:
 
         modified = dt.datetime.fromtimestamp(path.stat().st_mtime)
         if not snapshot["timestamp"]:
-            snapshot["timestamp"] = modified.isoformat(timespec="seconds")
-        snapshot["last_operation_at"] = snapshot["timestamp"]
+            snapshot["timestamp"] = _format_archive_timestamp(modified)
+        snapshot["last_operation_at"] = snapshot_last_operation_at or _format_archive_timestamp(modified)
         try:
-            sort_key = dt.datetime.fromisoformat(str(snapshot["timestamp"]))
+            sort_key = dt.datetime.fromisoformat(str(snapshot["last_operation_at"]))
         except ValueError:
             sort_key = modified
         snapshot["_sort_key"] = sort_key.isoformat()
@@ -952,6 +1037,7 @@ class QueueManager:
         self._runtime_reload_callback = runtime_reload_callback
         self._lock = threading.Lock()
         self._persons: list[str] = []
+        self._entry_timestamps: list[str] = []
         self._admins: list[str] = []
         self._blacklist: list[str] = []
         self._jianzhang: list[str] = []
@@ -1054,7 +1140,7 @@ class QueueManager:
         if snapshot is None:
             return
         with self._lock:
-            self._persons = [self._strip_html(item) for item in snapshot.get("queue", []) if item]
+            self._set_queue_from_entries_unlocked(snapshot.get("entries", []))
         self._logger.info(
             "[队列] 已从存档恢复 %s 人（槽位 %s，存档时间：%s）",
             len(self._persons), snapshot.get("slot", "?"), snapshot.get("timestamp", "?"),
@@ -1066,12 +1152,101 @@ class QueueManager:
         cleaned = re.sub(r"⏳待确认|等待确认", "", cleaned)
         return cleaned.strip()
 
+    def _now_queue_timestamp(self) -> str:
+        return _format_archive_timestamp()
+
+    def _sync_entry_timestamps_unlocked(self) -> None:
+        missing = len(self._persons) - len(self._entry_timestamps)
+        if missing > 0:
+            self._entry_timestamps.extend([""] * missing)
+        elif missing < 0:
+            del self._entry_timestamps[len(self._persons):]
+
+    def _set_queue_from_entries_unlocked(self, entries: list[dict[str, Any]]) -> None:
+        persons: list[str] = []
+        timestamps: list[str] = []
+        for entry in entries:
+            normalized = queue_item_to_entry(entry)
+            item = self._strip_html(
+                queue_parts_to_item(
+                    normalized.get("id", ""),
+                    normalized.get("content", ""),
+                )
+            )
+            if not item:
+                continue
+            persons.append(item)
+            timestamps.append(str(normalized.get("last_operation_at", "") or "").strip())
+        self._persons = persons
+        self._entry_timestamps = timestamps
+        self._sync_entry_timestamps_unlocked()
+
+    def _get_queue_entries_unlocked(self) -> list[dict[str, str]]:
+        self._sync_entry_timestamps_unlocked()
+        entries: list[dict[str, str]] = []
+        for idx, item in enumerate(self._persons):
+            item_text = str(item or "").strip()
+            if not item_text:
+                continue
+            entries.append(queue_item_to_entry(item_text, self._entry_timestamps[idx]))
+        return entries
+
+    def _append_queue_item_unlocked(self, item: Any, last_operation_at: Any | None = None) -> bool:
+        item_text = self._strip_html(item)
+        if not item_text:
+            return False
+        timestamp = str(last_operation_at or "").strip() or self._now_queue_timestamp()
+        self._persons.append(item_text)
+        self._entry_timestamps.append(_format_archive_timestamp(timestamp))
+        return True
+
+    def _insert_queue_item_unlocked(self, pos: int, item: Any, last_operation_at: Any | None = None) -> bool:
+        item_text = self._strip_html(item)
+        if not item_text:
+            return False
+        self._sync_entry_timestamps_unlocked()
+        insert_pos = max(0, min(pos, len(self._persons)))
+        timestamp = str(last_operation_at or "").strip() or self._now_queue_timestamp()
+        self._persons.insert(insert_pos, item_text)
+        self._entry_timestamps.insert(insert_pos, _format_archive_timestamp(timestamp))
+        return True
+
+    def _replace_queue_item_unlocked(self, index: int, item: Any) -> bool:
+        if not (0 <= index < len(self._persons)):
+            return False
+        item_text = self._strip_html(item)
+        if not item_text:
+            return False
+        self._persons[index] = item_text
+        self._sync_entry_timestamps_unlocked()
+        self._entry_timestamps[index] = self._now_queue_timestamp()
+        return True
+
+    def _remove_queue_item_unlocked(self, index: int) -> bool:
+        if not (0 <= index < len(self._persons)):
+            return False
+        self._sync_entry_timestamps_unlocked()
+        self._persons.pop(index)
+        if 0 <= index < len(self._entry_timestamps):
+            self._entry_timestamps.pop(index)
+        else:
+            self._sync_entry_timestamps_unlocked()
+        return True
+
+    def _touch_queue_items_unlocked(self, *indices: int) -> None:
+        self._sync_entry_timestamps_unlocked()
+        timestamp = self._now_queue_timestamp()
+        for index in dict.fromkeys(indices):
+            if 0 <= index < len(self._entry_timestamps):
+                self._entry_timestamps[index] = timestamp
+
     def get_queue(self) -> list[str]:
         with self._lock:
             return list(self._persons)
 
     def get_queue_entries(self) -> list[dict[str, str]]:
-        return queue_items_to_entries(self.get_queue())
+        with self._lock:
+            return self._get_queue_entries_unlocked()
 
     def get_blacklist(self) -> list[str]:
         with self._lock:
@@ -1116,9 +1291,17 @@ class QueueManager:
 
     def send_current_to(self, conn: socket.socket) -> None:
         try:
+            entries = self.get_queue_entries()
             _ws_send_text(
                 conn,
-                json.dumps({"type": "QUEUE_UPDATE", "queue": self.get_queue()}, ensure_ascii=False),
+                json.dumps(
+                    {
+                        "type": "QUEUE_UPDATE",
+                        "queue": queue_entries_to_items(entries),
+                        "entries": entries,
+                    },
+                    ensure_ascii=False,
+                ),
             )
         except OSError:
             pass
@@ -1127,7 +1310,7 @@ class QueueManager:
         """删除第 index 项（1-based），越界静默忽略。"""
         with self._lock:
             if 1 <= index <= len(self._persons):
-                self._persons.pop(index - 1)
+                self._remove_queue_item_unlocked(index - 1)
         self._broadcast_and_archive("gui", f"delete_{index}")
         return self.get_queue()
 
@@ -1140,11 +1323,23 @@ class QueueManager:
                     self._persons[index - 1],
                     self._persons[index - 2],
                 )
+                self._sync_entry_timestamps_unlocked()
+                self._entry_timestamps[index - 2], self._entry_timestamps[index - 1] = (
+                    self._entry_timestamps[index - 1],
+                    self._entry_timestamps[index - 2],
+                )
+                self._touch_queue_items_unlocked(index - 2, index - 1)
             elif direction == "down" and 1 <= index <= n - 1:
                 self._persons[index - 1], self._persons[index] = (
                     self._persons[index],
                     self._persons[index - 1],
                 )
+                self._sync_entry_timestamps_unlocked()
+                self._entry_timestamps[index - 1], self._entry_timestamps[index] = (
+                    self._entry_timestamps[index],
+                    self._entry_timestamps[index - 1],
+                )
+                self._touch_queue_items_unlocked(index - 1, index)
         self._broadcast_and_archive("gui", f"move_{direction}_{index}")
         return self.get_queue()
 
@@ -1155,7 +1350,7 @@ class QueueManager:
             return self.get_queue()
         with self._lock:
             pos = max(0, min(after_index, len(self._persons)))
-            self._persons.insert(pos, entry)
+            self._insert_queue_item_unlocked(pos, entry)
         self._broadcast_and_archive("gui", f"insert_{after_index}")
         return self.get_queue()
 
@@ -1164,7 +1359,7 @@ class QueueManager:
         with self._lock:
             if 1 <= index <= len(self._persons):
                 item_id, _old_content = queue_item_to_parts(self._persons[index - 1])
-                self._persons[index - 1] = queue_parts_to_item(item_id, content)
+                self._replace_queue_item_unlocked(index - 1, queue_parts_to_item(item_id, content))
         self._broadcast_and_archive("gui", f"update_{index}")
         return self.get_queue()
 
@@ -1173,6 +1368,7 @@ class QueueManager:
         with self._lock:
             previous_queue = list(self._persons)
             self._persons.clear()
+            self._entry_timestamps.clear()
 
         if previous_queue:
             self._logger.info(
@@ -1183,7 +1379,7 @@ class QueueManager:
         else:
             self._logger.info("[队列] 一键清空时原始队列为空")
 
-        self._ws_hub.broadcast_json(None, {"type": "QUEUE_UPDATE", "queue": []})
+        self._ws_hub.broadcast_json(None, {"type": "QUEUE_UPDATE", "queue": [], "entries": []})
         self._queue_archive.write_blank_snapshot("gui", "clear")
         self._logger.info("[队列] 当前槽位 %s 已恢复为空白存档", self._queue_archive.get_active_slot())
         return []
@@ -1195,9 +1391,9 @@ class QueueManager:
         if snapshot is None:
             self._logger.info("[队列] 切换到槽位 %s：槽位文件不存在，保持当前队列不变", slot)
             return self.get_queue()
-        items = [self._strip_html(item) for item in snapshot.get("queue", []) if item]
         with self._lock:
-            self._persons = items
+            self._set_queue_from_entries_unlocked(snapshot.get("entries", []))
+            items = list(self._persons)
         self._logger.info(
             "[队列] 已切换到槽位 %s，加载 %s 人（存档时间：%s）",
             slot, len(items), snapshot.get("timestamp", "?"),
@@ -1220,9 +1416,13 @@ class QueueManager:
         return -1
 
     def _broadcast_and_archive(self, actor: str, msg: str) -> None:
-        queue_snapshot = self.get_queue()
-        self._ws_hub.broadcast_json(None, {"type": "QUEUE_UPDATE", "queue": queue_snapshot})
-        self._queue_archive.write_snapshot(actor, msg, queue_snapshot)
+        queue_entries = self.get_queue_entries()
+        queue_snapshot = queue_entries_to_items(queue_entries)
+        self._ws_hub.broadcast_json(
+            None,
+            {"type": "QUEUE_UPDATE", "queue": queue_snapshot, "entries": queue_entries},
+        )
+        self._queue_archive.write_snapshot(actor, msg, queue_entries)
 
     def process_danmu_json(self, payload: dict[str, Any]) -> None:
         cmd = str(payload.get("cmd", "") or "").strip()
@@ -1382,18 +1582,18 @@ class QueueManager:
                     new_item = f"M|{uname} {extra}".rstrip()
                 elif msg == "插队" and is_jianzhang and kg.get("jianzhang_chadui", False):
                     if len(self._persons) == 0 or not self._jianzhangchadui:
-                        self._persons.append(uname)
+                        self._append_queue_item_unlocked(uname)
                     else:
                         insert_pos = len(self._persons)
                         while insert_pos > 0 and any(
                             j in self._persons[insert_pos - 1] for j in self._jianzhang
                         ):
                             insert_pos -= 1
-                        self._persons.insert(insert_pos, uname)
+                        self._insert_queue_item_unlocked(insert_pos, uname)
                     modified = True
 
                 if new_item is not None and can_join:
-                    self._persons.append(new_item)
+                    self._append_queue_item_unlocked(new_item)
                     modified = True
                 elif new_item is not None and not can_join and not has_op:
                     return False, "队列已满，无法加入排队"
@@ -1405,14 +1605,14 @@ class QueueManager:
             # --- Self-service cancel/replace (already in queue) ---
             if index >= 0:
                 if msg in ("取消排队", "排队取消", "我确认我取消排队") and self._kaiguan.get("quxiao_paidui", True):
-                    self._persons.pop(index)
+                    self._remove_queue_item_unlocked(index)
                     modified = True
                 elif msg in ("替换", "修改", "内容洗白") and self._kaiguan.get("xiugai_paidui", True):
-                    self._persons[index] = uname
+                    self._replace_queue_item_unlocked(index, uname)
                     modified = True
                 elif (msg.startswith("替换 ") or msg.startswith("修改 ")) and self._kaiguan.get("xiugai_paidui", True):
                     extra = msg.split(" ", 1)[1].strip() if " " in msg else ""
-                    self._persons[index] = f"{uname} {extra}".rstrip()
+                    self._replace_queue_item_unlocked(index, f"{uname} {extra}".rstrip())
                     modified = True
 
             # --- Operator/admin commands ---
@@ -1430,7 +1630,7 @@ class QueueManager:
                         if kw_only == kw and nums:
                             n = int(nums)
                             if 1 <= n <= len(self._persons):
-                                self._persons.pop(n - 1)
+                                self._remove_queue_item_unlocked(n - 1)
                                 modified = True
                         break
 
@@ -1438,7 +1638,7 @@ class QueueManager:
                     if msg.startswith(prefix):
                         text = msg[len(prefix):].strip()
                         if text:
-                            self._persons.append(text)
+                            self._append_queue_item_unlocked(text)
                             modified = True
                         break
 
@@ -1446,14 +1646,14 @@ class QueueManager:
                 if m:
                     pos, text = int(m.group(1)), m.group(2).strip()
                     if text and 1 <= pos <= 20:
-                        self._persons.insert(pos - 1, text)
+                        self._insert_queue_item_unlocked(pos - 1, text)
                         modified = True
 
                 m2 = re.match(r"^插队\s+(\d+)\s+(.+)", msg)
                 if m2:
                     pos, text = int(m2.group(1)), m2.group(2).strip()
                     if text and 1 <= pos <= 30:
-                        self._persons.insert(pos - 1, f"@{text}")
+                        self._insert_queue_item_unlocked(pos - 1, f"@{text}")
                         modified = True
 
                 if msg == "暂停排队功能" or msg == "关闭自助排队":
@@ -2842,12 +3042,14 @@ class ApiHandler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/api/queue/state":
-            current = self.server.queue_manager.get_queue() if hasattr(self.server, "queue_manager") else []
+            qm = getattr(self.server, "queue_manager", None)
+            current = qm.get_queue() if qm is not None else []
+            entries = qm.get_queue_entries() if qm is not None else queue_items_to_entries(current)
             self._write_json(
                 {
                     "status": "ok",
                     "queue": current,
-                    "entries": queue_items_to_entries(current),
+                    "entries": entries,
                     "size": len(current),
                 }
             )
@@ -3040,14 +3242,16 @@ class ApiHandler(BaseHTTPRequestHandler):
             if hasattr(self.server, "queue_manager"):
                 self.server.queue_manager.restore_from_archive()
                 current = self.server.queue_manager.get_queue()
+                entries = self.server.queue_manager.get_queue_entries()
                 self.server.queue_manager._broadcast_and_archive("gui", "reload")
             else:
                 current = []
+                entries = []
             self._write_json(
                 {
                     "status": "ok",
                     "queue": current,
-                    "entries": queue_items_to_entries(current),
+                    "entries": entries,
                     "size": len(current),
                 }
             )
@@ -3087,11 +3291,12 @@ class ApiHandler(BaseHTTPRequestHandler):
                 current = qm.update_item_content(idx, content)
             else:  # /api/queue/clear
                 current = qm.clear_queue()
+            entries = qm.get_queue_entries()
             self._write_json(
                 {
                     "status": "ok",
                     "queue": current,
-                    "entries": queue_items_to_entries(current),
+                    "entries": entries,
                     "size": len(current),
                 }
             )
@@ -3154,9 +3359,11 @@ class ApiHandler(BaseHTTPRequestHandler):
             slot = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, slot))
             if hasattr(self.server, "queue_manager"):
                 current = self.server.queue_manager.switch_to_slot(slot)
+                entries = self.server.queue_manager.get_queue_entries()
             else:
                 current = []
-            self._write_json({"status": "ok", "slot": slot, "queue": current, "size": len(current)})
+                entries = []
+            self._write_json({"status": "ok", "slot": slot, "queue": current, "entries": entries, "size": len(current)})
             return
 
         if parsed.path == "/api/quanxian":

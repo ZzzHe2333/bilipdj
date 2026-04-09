@@ -466,8 +466,18 @@ class ControlPanelApp:
         self._switch_queue_slot(slot)
 
     @staticmethod
-    def _build_queue_entry(item_id: Any, content: Any) -> dict[str, str]:
-        return {"id": str(item_id or "").strip(), "content": str(content or "").strip()}
+    def _build_queue_entry(item_id: Any, content: Any, last_operation_at: Any = "") -> dict[str, str]:
+        return {
+            "id": str(item_id or "").strip(),
+            "content": str(content or "").strip(),
+            "last_operation_at": str(last_operation_at or "").strip(),
+        }
+
+    @staticmethod
+    def _queue_entry_timestamp_now() -> str:
+        import time as _time
+
+        return _time.strftime("%Y-%m-%d %H:%M:%S", _time.localtime())
 
     def _normalize_queue_entries(self, items: list[str]) -> list[dict[str, str]]:
         entries: list[dict[str, str]] = []
@@ -484,7 +494,13 @@ class ControlPanelApp:
                 for entry in raw_entries:
                     if not isinstance(entry, dict):
                         continue
-                    entries.append(self._build_queue_entry(entry.get("id", ""), entry.get("content", "")))
+                    entries.append(
+                        self._build_queue_entry(
+                            entry.get("id", ""),
+                            entry.get("content", ""),
+                            entry.get("last_operation_at", ""),
+                        )
+                    )
                 return entries
             raw_queue = payload.get("queue")
             if isinstance(raw_queue, list):
@@ -509,7 +525,11 @@ class ControlPanelApp:
             bs = load_backend_server_module()
             entries = bs.read_queue_archive_entries(path)
             return [
-                self._build_queue_entry(entry.get("id", ""), entry.get("content", ""))
+                self._build_queue_entry(
+                    entry.get("id", ""),
+                    entry.get("content", ""),
+                    entry.get("last_operation_at", ""),
+                )
                 for entry in entries
                 if isinstance(entry, dict)
             ]
@@ -859,6 +879,15 @@ class ControlPanelApp:
         new_entries = op([dict(entry) for entry in entries])
         if new_entries is None:
             new_entries = entries
+        new_entries = [
+            self._build_queue_entry(
+                entry.get("id", ""),
+                entry.get("content", ""),
+                entry.get("last_operation_at", ""),
+            )
+            for entry in new_entries
+            if isinstance(entry, dict)
+        ]
         if not self._write_queue_entries_to_csv(new_entries):
             return
         import time as _time
@@ -907,6 +936,7 @@ class ControlPanelApp:
         def op(entries):
             if 1 <= idx <= len(entries):
                 entries[idx - 1]["content"] = normalized_content
+                entries[idx - 1]["last_operation_at"] = self._queue_entry_timestamp_now()
             return entries
 
         threading.Thread(target=self._queue_local_op, args=(op, f"已修改第{idx}位内容"), daemon=True).start()
@@ -952,6 +982,9 @@ class ControlPanelApp:
         def op(entries):
             if 2 <= idx <= len(entries):
                 entries[idx - 2], entries[idx - 1] = entries[idx - 1], entries[idx - 2]
+                ts = self._queue_entry_timestamp_now()
+                entries[idx - 2]["last_operation_at"] = ts
+                entries[idx - 1]["last_operation_at"] = ts
             return entries
 
         threading.Thread(target=self._queue_local_op, args=(op, f"第{idx}位已上移"), daemon=True).start()
@@ -971,6 +1004,9 @@ class ControlPanelApp:
         def op(entries):
             if 1 <= idx <= len(entries) - 1:
                 entries[idx - 1], entries[idx] = entries[idx], entries[idx - 1]
+                ts = self._queue_entry_timestamp_now()
+                entries[idx - 1]["last_operation_at"] = ts
+                entries[idx]["last_operation_at"] = ts
             return entries
 
         threading.Thread(target=self._queue_local_op, args=(op, f"第{idx}位已下移"), daemon=True).start()
@@ -994,7 +1030,7 @@ class ControlPanelApp:
 
         def op(entries):
             pos = max(0, min(idx, len(entries)))
-            entries.insert(pos, self._build_queue_entry(item_id, content))
+            entries.insert(pos, self._build_queue_entry(item_id, content, self._queue_entry_timestamp_now()))
             return entries
 
         threading.Thread(target=self._queue_local_op, args=(op, f"已在第{idx}位后新增"), daemon=True).start()
@@ -1706,7 +1742,11 @@ class ControlPanelApp:
         try:
             entries = bs.read_queue_archive_entries(path)
             return [
-                self._build_queue_entry(entry.get("id", ""), entry.get("content", ""))
+                self._build_queue_entry(
+                    entry.get("id", ""),
+                    entry.get("content", ""),
+                    entry.get("last_operation_at", ""),
+                )
                 for entry in entries
                 if isinstance(entry, dict)
             ]
