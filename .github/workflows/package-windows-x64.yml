@@ -74,6 +74,8 @@ jobs:
         shell: pwsh
         run: |
           pyinstaller --noconfirm --clean bilipdj_onedir.spec
+          pyinstaller --noconfirm --clean paiduijitm.spec
+          Copy-Item "dist\paiduijitm.exe" "dist\bilipdj\paiduijitm.exe"
           Rename-Item "dist\bilipdj\bilipdj.exe" "${{ steps.resolve_tag.outputs.exe_name }}.exe"
 
       - name: Create release zip

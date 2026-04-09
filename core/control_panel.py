@@ -45,6 +45,8 @@ CONFIG_PATH = _YAML_DIR / "config.yaml"
 QUANXIAN_PATH = _YAML_DIR / "quanxian.yaml"
 KAIGUAN_PATH = _YAML_DIR / "kaiguan.yaml"
 SERVER_PATH = BUNDLE_DIR / "core" / "server.py"
+OVERLAY_HOST_SCRIPT = BUNDLE_DIR / "core" / "overlay_host.py"
+OVERLAY_HOST_EXE_NAME = "paiduijitm.exe"
 APP_NAME = "弹幕排队姬"
 APP_VERSION = "0.4.0"
 LOG_LEVEL_OPTIONS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
@@ -284,6 +286,7 @@ class ControlPanelApp:
         self.root.title(f"{APP_NAME} 控制台 v{APP_VERSION}")
         self._apply_root_icon()
         self.server_proc: subprocess.Popen[str] | None = None
+        self.overlay_proc: subprocess.Popen[str] | None = None
         self.log_queue: queue.Queue[str] = queue.Queue()
         self.log_pump_running = False
         self.stdout_thread: threading.Thread | None = None
@@ -774,67 +777,99 @@ class ControlPanelApp:
         y = max(24, min(120, screen_h - height - 80))
         return f"{width}x{height}+{x}+{y}"
 
+    def _overlay_process_running(self) -> bool:
+        return bool(self.overlay_proc and self.overlay_proc.poll() is None)
+
+    def _build_overlay_command(self) -> list[str]:
+        settings = self._get_overlay_settings()
+        port = self.port_var.get().strip() or "9816"
+        common_args = [
+            "--port",
+            str(port),
+            "--width",
+            str(settings["width"]),
+            "--height",
+            str(settings["height"]),
+            "--scale",
+            str(settings["scale"]),
+        ]
+        if not self._overlay_topmost:
+            common_args.append("--no-topmost")
+        if getattr(sys, "frozen", False):
+            overlay_exe = APP_DIR / OVERLAY_HOST_EXE_NAME
+            if overlay_exe.exists():
+                return [str(overlay_exe), *common_args]
+            # fallback: run overlay host in current executable
+            return [sys.executable, "--overlay-host", *common_args]
+        return [sys.executable, str(OVERLAY_HOST_SCRIPT), *common_args]
+
+    def _stop_overlay_process(self) -> None:
+        if not self._overlay_process_running():
+            self.overlay_proc = None
+            return
+        try:
+            self.overlay_proc.terminate()
+            self.overlay_proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            self.overlay_proc.kill()
+        finally:
+            self.overlay_proc = None
+
+    def _restart_overlay_process(self) -> None:
+        self._stop_overlay_process()
+        self.open_overlay_window()
+
+    def _set_overlay_topmost(self, topmost: bool) -> None:
+        self._overlay_topmost = topmost
+        if self._overlay_process_running():
+            self._restart_overlay_process()
+        self._append_log(f"[GUI] 透明窗口已{'置顶' if topmost else '取消置顶'}")
+
     def open_overlay_window(self) -> None:
-        if not PIL_AVAILABLE:
-            messagebox.showerror("缺少依赖", "透明弹窗需要 Pillow（PIL）支持。")
+        if self._overlay_process_running():
+            self._append_log("[GUI] 透明弹窗进程已在运行")
             return
 
-        if self._overlay_window_alive():
-            self._overlay_window.deiconify()
-            self._overlay_window.lift()
+        command = self._build_overlay_command()
+        if not command:
+            messagebox.showerror("启动失败", "无法构建透明弹窗启动命令")
             return
 
-        window = tk.Toplevel(self.root)
-        window.title("排队透明弹窗")
-        window.overrideredirect(True)
-        window.resizable(True, True)
-        window.geometry(self._overlay_default_geometry())
-        window.configure(bg=OVERLAY_TRANSPARENT_COLOR)
         try:
-            window.wm_attributes("-transparentcolor", OVERLAY_TRANSPARENT_COLOR)
-        except tk.TclError:
-            try:
-                window.wm_attributes("-alpha", 0.96)
-            except tk.TclError:
-                pass
-        try:
-            window.wm_attributes("-topmost", True)
-        except tk.TclError:
-            pass
-
-        canvas = tk.Canvas(
-            window,
-            bg=OVERLAY_TRANSPARENT_COLOR,
-            bd=0,
-            highlightthickness=0,
-            relief="flat",
-        )
-        canvas.pack(fill="both", expand=True)
-
-        window.bind("<Escape>", lambda _event: self._close_overlay_window())
-        window.bind("<Button-3>", lambda _event: self._close_overlay_window())
-        window.bind("<Double-Button-1>", lambda _event: self._toggle_overlay_topmost())
-        window.bind("<Configure>", self._on_overlay_window_configure)
-
-        canvas.bind("<Configure>", lambda _event: self._redraw_overlay())
-        canvas.bind("<Motion>", self._on_overlay_canvas_motion)
-        canvas.bind("<Leave>", lambda _event: canvas.configure(cursor=""))
-        canvas.bind("<ButtonPress-1>", self._begin_overlay_interaction)
-        canvas.bind("<B1-Motion>", self._perform_overlay_interaction)
-        canvas.bind("<ButtonRelease-1>", self._end_overlay_interaction)
-        canvas.bind("<Button-3>", lambda _event: self._close_overlay_window())
-        canvas.bind("<Double-Button-1>", lambda _event: self._toggle_overlay_topmost())
-
-        self._overlay_window = window
-        self._overlay_canvas = canvas
-        self._overlay_photo = None
-        self._overlay_items = []
-        self._overlay_style = self._load_style_data()
-        self._overlay_last_size = (0, 0)
-        self.root.update_idletasks()
-        self._apply_overlay_native_window_style()
-        self._append_log("[GUI] 透明弹窗已打开：中间拖动，边框缩放，双击切换置顶，右键关闭")
-        self._refresh_overlay_async()
+            overlay_env = os.environ.copy()
+            overlay_env["DANMUJI_OVERLAY_FROM_GUI"] = "1"
+            _cflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            self.overlay_proc = subprocess.Popen(
+                command,
+                cwd=str(APP_DIR),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+                creationflags=_cflags,
+                env=overlay_env,
+            )
+            if self.overlay_proc.stdout:
+                threading.Thread(
+                    target=self._read_stream_lines,
+                    args=(self.overlay_proc.stdout, "OVERLAY"),
+                    daemon=True,
+                ).start()
+            if self.overlay_proc.stderr:
+                threading.Thread(
+                    target=self._read_stream_lines,
+                    args=(self.overlay_proc.stderr, "OVERLAY-ERR"),
+                    daemon=True,
+                ).start()
+            self._append_log(f"[GUI] 透明弹窗进程已启动：{' '.join(command)}")
+            if getattr(sys, "frozen", False) and not (APP_DIR / OVERLAY_HOST_EXE_NAME).exists():
+                self._append_log(
+                    f"[GUI] 未找到独立进程 {OVERLAY_HOST_EXE_NAME}，当前使用主程序进程承载透明窗"
+                )
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("启动失败", str(exc))
 
     def _close_overlay_window(self) -> None:
         if not self._overlay_window_alive():
@@ -1902,6 +1937,8 @@ class ControlPanelApp:
     def _apply_overlay_settings_from_ui(self) -> None:
         settings = self._set_overlay_settings(self._get_overlay_settings())
         self._apply_overlay_settings_to_window(settings)
+        if self._overlay_process_running():
+            self._restart_overlay_process()
         self._append_log(
             f"[GUI] 透明窗口设置已应用：{settings['width']}x{settings['height']}，缩放 {settings['scale']}%"
         )
@@ -1952,19 +1989,28 @@ class ControlPanelApp:
         frame.columnconfigure(2, weight=1)
 
         row = 0
-        for label, var, wide in [
-            ("监听地址", self.host_var, False),
-            ("监听端口", self.port_var, False),
-            ("直播间号", self.roomid_var, False),
-            ("UID", self.uid_var, False),
-            ("Cookie", self.cookie_var, True),
-            ("日志保留天数", self.retention_days_var, False),
+        for label, var in [
+            ("监听地址", self.host_var),
+            ("监听端口", self.port_var),
+            ("直播间号", self.roomid_var),
+            ("UID", self.uid_var),
+            ("日志保留天数", self.retention_days_var),
         ]:
             ttk.Label(frame, text=label).grid(row=row, column=0, sticky="w", pady=4)
-            ttk.Entry(frame, textvariable=var, width=60 if wide else 30).grid(
+            ttk.Entry(frame, textvariable=var, width=30).grid(
                 row=row, column=1, sticky="ew", pady=4
             )
             row += 1
+
+        # Cookie 行单独处理，右侧加"获取"按钮
+        ttk.Label(frame, text="Cookie").grid(row=row, column=0, sticky="w", pady=4)
+        ttk.Entry(frame, textvariable=self.cookie_var, width=60).grid(
+            row=row, column=1, sticky="ew", pady=4
+        )
+        ttk.Button(frame, text="获取", command=self.open_config, width=6).grid(
+            row=row, column=2, padx=(4, 0), pady=4, sticky="w"
+        )
+        row += 1
 
         ttk.Label(frame, text="日志等级").grid(row=row, column=0, sticky="w", pady=4)
         self.log_level_combo = ttk.Combobox(
@@ -2016,9 +2062,15 @@ class ControlPanelApp:
         ttk.Entry(overlay_frame, textvariable=self.overlay_scale_var, width=12).grid(row=1, column=1, sticky="w", pady=4)
         ttk.Label(
             overlay_frame,
-            text="窗口支持任务栏显示、OBS 窗口捕获、拖动边框缩放；只显示“ID + 事情”。",
+            text='在 OBS 中使用「窗口捕获」，按标题”排队透明弹窗”选择；拖动边框可缩放。',
         ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(6, 0))
         ttk.Button(overlay_frame, text="应用到透明窗", command=self._apply_overlay_settings_from_ui).grid(row=1, column=3, sticky="e", pady=4)
+
+        ctrl_frame = ttk.Frame(overlay_frame)
+        ctrl_frame.grid(row=3, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        ttk.Button(ctrl_frame, text="关闭弹窗", command=self._stop_overlay_process).pack(side="left", padx=(0, 6))
+        ttk.Button(ctrl_frame, text="置顶", command=lambda: self._set_overlay_topmost(True)).pack(side="left", padx=(0, 6))
+        ttk.Button(ctrl_frame, text="取消置顶", command=lambda: self._set_overlay_topmost(False)).pack(side="left")
         row += 1
 
         btn_bar = ttk.Frame(frame)
@@ -2468,6 +2520,8 @@ class ControlPanelApp:
             return
         if self._overlay_window_alive():
             self._apply_overlay_settings_to_window()
+        if self._overlay_process_running():
+            self._restart_overlay_process()
         self._switch_queue_slot()
 
     def _read_slot_csv(self, slot: int) -> list[dict[str, str]]:
@@ -2582,6 +2636,7 @@ class ControlPanelApp:
         webbrowser.open(f"http://127.0.0.1:{port}/index")
 
     def on_close(self) -> None:
+        self._stop_overlay_process()
         self._close_overlay_window()
         if self.server_proc and self.server_proc.poll() is None:
             self.stop_server()
@@ -2595,6 +2650,12 @@ def main() -> None:
         host = str(config.get("server", {}).get("host", "0.0.0.0"))
         port = int(config.get("server", {}).get("port", 9816))
         backend_server.run_server(host=host, port=port)
+        return
+    if "--overlay-host" in sys.argv[1:]:
+        from core import overlay_host
+
+        args = [arg for arg in sys.argv[1:] if arg != "--overlay-host"]
+        overlay_host.main(args)
         return
 
     root = tk.Tk()
