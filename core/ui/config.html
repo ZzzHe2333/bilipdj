@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>PDJ 配置面板</title>
+    <title>弹幕排队姬 - 登录</title>
     <style>
         body {
             margin: 0;
@@ -70,22 +70,11 @@
             color: #c8d6e4;
             font-size: 14px;
         }
-
-        .section {
-            margin-top: 18px;
-            padding-top: 12px;
-            border-top: 1px solid rgba(92, 127, 154, 0.35);
-        }
     </style>
 </head>
 <body>
     <div id="app" class="panel">
-        <h3>PDJ 配置面板</h3>
-
-        <div class="row">
-            <label>直播间号</label>
-            <input v-model.trim="form.roomid" type="number" placeholder="例如：26714219">
-        </div>
+        <h3>弹幕排队姬 - 登录</h3>
 
         <div class="row">
             <label>UID</label>
@@ -97,43 +86,8 @@
             <textarea v-model.trim="form.cookie" rows="3" placeholder="粘贴 Bilibili Cookie，至少包含 SESSDATA"></textarea>
         </div>
 
-        <div class="section">
-            <h4>权限用户</h4>
-
-            <div class="row">
-                <label>管理员</label>
-                <textarea v-model="form.myjs.admins_text" placeholder="一行一个用户名，对应 quanxian.admin"></textarea>
-            </div>
-
-            <div class="row">
-                <label>黑名单</label>
-                <textarea v-model="form.myjs.ban_admins_text" placeholder="一行一个用户名，对应 quanxian.blacklist"></textarea>
-            </div>
-
-            <div class="row">
-                <label>舰长名单</label>
-                <textarea v-model="form.myjs.jianzhang_text" placeholder="一行一个用户名，对应 quanxian.jianzhang"></textarea>
-            </div>
-        </div>
-
-        <div class="section">
-            <h4>扫码回调</h4>
-
-            <div class="row">
-                <label>回调地址</label>
-                <input v-model.trim="form.callback.url" type="text" placeholder="扫码成功后会 POST 到该地址，可留空">
-            </div>
-
-            <div class="row">
-                <label>启用回调</label>
-                <input v-model="form.callback.enabled" type="checkbox" style="width:auto;flex:0 0 auto;">
-                <span class="hint">开启后，扫码成功时会回调你的后端程序</span>
-            </div>
-        </div>
-
         <div class="actions">
             <button @click="saveConfig">保存配置</button>
-            <button @click="readLocalCookie">读取当前页面 Cookie</button>
             <button @click="openCookieLogin">扫码自动获取 Cookie</button>
             <span class="hint">{{ statusText }}</span>
         </div>
@@ -150,11 +104,6 @@
                         roomid: "",
                         uid: "",
                         cookie: "",
-                        myjs: {
-                            admins_text: "",
-                            ban_admins_text: "",
-                            jianzhang_text: ""
-                        },
                         callback: { enabled: false, url: "", auth_token: "", timeout_seconds: 5 }
                     },
                     statusText: "等待初始化..."
@@ -164,21 +113,6 @@
                 await this.loadConfig();
             },
             methods: {
-                formatUserList(value) {
-                    if (Array.isArray(value)) {
-                        return value.join("\n");
-                    }
-                    if (typeof value === "string") {
-                        return value;
-                    }
-                    return "";
-                },
-                parseUserList(text) {
-                    return String(text || "")
-                        .split(/\r?\n/)
-                        .map((item) => item.trim())
-                        .filter(Boolean);
-                },
                 async loadConfig() {
                     try {
                         const res = await fetch("/api/config");
@@ -186,9 +120,6 @@
                         this.form.roomid = cfg.roomid || "";
                         this.form.uid = cfg.uid || "";
                         this.form.cookie = cfg.cookie || "";
-                        this.form.myjs.admins_text = this.formatUserList(cfg?.quanxian?.admin || cfg?.myjs?.admins);
-                        this.form.myjs.ban_admins_text = this.formatUserList(cfg?.quanxian?.blacklist || cfg?.myjs?.ban_admins);
-                        this.form.myjs.jianzhang_text = this.formatUserList(cfg?.quanxian?.jianzhang || cfg?.myjs?.jianzhang);
                         this.form.callback = Object.assign(
                             { enabled: false, url: "", auth_token: "", timeout_seconds: 5 },
                             cfg.callback || {}
@@ -205,22 +136,7 @@
                             roomid: Number(this.form.roomid || 0),
                             uid: Number(this.form.uid || 0),
                             cookie: this.form.cookie || "",
-                            myjs: {
-                                admins: this.parseUserList(this.form.myjs.admins_text),
-                                ban_admins: this.parseUserList(this.form.myjs.ban_admins_text),
-                                jianzhang: this.parseUserList(this.form.myjs.jianzhang_text)
-                            },
-                            quanxian: {
-                                admin: this.parseUserList(this.form.myjs.admins_text),
-                                blacklist: this.parseUserList(this.form.myjs.ban_admins_text),
-                                jianzhang: this.parseUserList(this.form.myjs.jianzhang_text)
-                            },
-                            callback: {
-                                enabled: Boolean(this.form.callback.enabled),
-                                url: this.form.callback.url || "",
-                                auth_token: this.form.callback.auth_token || "",
-                                timeout_seconds: Number(this.form.callback.timeout_seconds || 5)
-                            }
+                            callback: this.form.callback
                         };
                         const res = await fetch("/api/config", {
                             method: "POST",
@@ -236,15 +152,6 @@
                         if (Number.isFinite(resolvedUid) && resolvedUid > 0) {
                             this.form.uid = String(resolvedUid);
                         }
-                        if (result?.myjs) {
-                            this.form.myjs.admins_text = this.formatUserList(result.myjs.admins);
-                            this.form.myjs.ban_admins_text = this.formatUserList(result.myjs.ban_admins);
-                            this.form.myjs.jianzhang_text = this.formatUserList(result.myjs.jianzhang);
-                        } else if (result?.quanxian) {
-                            this.form.myjs.admins_text = this.formatUserList(result.quanxian.admin);
-                            this.form.myjs.ban_admins_text = this.formatUserList(result.quanxian.blacklist);
-                            this.form.myjs.jianzhang_text = this.formatUserList(result.quanxian.jianzhang);
-                        }
 
                         const resolvedName = typeof result?.uname === "string" ? result.uname.trim() : "";
                         this.statusText = silent ? "登录态已写入配置" : "保存成功，弹幕连接会自动重连";
@@ -256,12 +163,6 @@
                         this.statusText = "保存失败: " + e;
                         return false;
                     }
-                },
-                readLocalCookie() {
-                    this.form.cookie = document.cookie || "";
-                    this.statusText = this.form.cookie
-                        ? "已读取当前页面 Cookie，若为空请在 B 站页面手动复制"
-                        : "当前域没有 Cookie，请手动粘贴";
                 },
                 openCookieLogin() {
                     const popup = window.open("/cookie-login", "pdj-cookie-login", "width=560,height=760");
