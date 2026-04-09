@@ -3626,7 +3626,23 @@ def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
         httpd.danmu_relay.stop()
 
 
+def _warn_use_gui_startup() -> None:
+    message = "请使用 GUI 控制台启动后端：python core/control_panel.py"
+    print(message)
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes  # noqa: PLC0415
+
+        ctypes.windll.user32.MessageBoxW(0, message, "弹幕排队姬", 0x40)
+    except Exception:
+        pass
+
+
 if __name__ == "__main__":
+    if os.getenv("DANMUJI_LAUNCHED_BY_GUI", "").strip() != "1":
+        _warn_use_gui_startup()
+        raise SystemExit(0)
     config = load_config()
     host = os.getenv("DANMUJI_BACKEND_HOST", str(config.get("server", {}).get("host", DEFAULT_HOST)))
     port = int(os.getenv("DANMUJI_BACKEND_PORT", int(config.get("server", {}).get("port", DEFAULT_PORT))))

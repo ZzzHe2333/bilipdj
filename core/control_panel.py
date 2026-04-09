@@ -2530,6 +2530,8 @@ class ControlPanelApp:
                 command = [sys.executable, "--backend"]
             else:
                 command = [sys.executable, str(SERVER_PATH)]
+            backend_env = os.environ.copy()
+            backend_env["DANMUJI_LAUNCHED_BY_GUI"] = "1"
             _cflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
             self.server_proc = subprocess.Popen(
                 command,
@@ -2541,6 +2543,7 @@ class ControlPanelApp:
                 errors="replace",
                 bufsize=1,
                 creationflags=_cflags,
+                env=backend_env,
             )
             self.status_var.set("后端已启动")
             self._append_log(f"[GUI] 后端已启动：{' '.join(command)}")
