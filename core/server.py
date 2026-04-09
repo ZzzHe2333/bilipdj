@@ -33,7 +33,7 @@ except ImportError:  # pragma: no cover - 运行时环境可选依赖
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 9816
-MAX_QUEUE_ARCHIVE_SLOTS = 5
+MAX_QUEUE_ARCHIVE_SLOTS = 10
 DANMU_HEARTBEAT_INTERVAL_SECONDS = 30
 DANMU_IDLE_RECONNECT_SECONDS = 90
 
@@ -332,6 +332,147 @@ def _yaml_quote_string(value: Any) -> str:
     return f'"{text}"'
 
 
+def _read_raw_config() -> dict[str, Any]:
+    if not CONFIG_PATH.exists():
+        return {}
+    return load_simple_yaml(CONFIG_PATH)
+
+
+ARCHIVE_HEADER_SEQ = "序号"
+ARCHIVE_HEADER_ID = "id"
+ARCHIVE_HEADER_CONTENT = "内容"
+
+
+def _queue_labeled_content(label: str, extra: str) -> str:
+    extra_text = str(extra).strip()
+    return label if not extra_text else f"{label} {extra_text}"
+
+
+def queue_item_to_parts(item: Any) -> tuple[str, str]:
+    text = str(item or "").strip()
+    if not text:
+        return "", ""
+
+    patterns = (
+        (r"^(?:官|[Gg])\|([^ ]+)(?:\s+(.*))?$", "[官服]"),
+        (r"^[Bb]\|([^ ]+)(?:\s+(.*))?$", "[B服]"),
+        (r"^(?:米|[Mm])\|([^ ]+)(?:\s+(.*))?$", "[米服]"),
+        (r"^[Ss]\|([^ ]+)(?:\s+(.*))?$", "[超级]"),
+    )
+    for pattern, label in patterns:
+        match = re.match(pattern, text)
+        if match:
+            return match.group(1).strip(), _queue_labeled_content(label, match.group(2) or "")
+
+    super_match = re.match(r"^<([^>]+)>(.*)$", text)
+    if super_match:
+        return super_match.group(1).strip(), _queue_labeled_content("[超级]", super_match.group(2) or "")
+
+    parts = text.split(" ", 1)
+    item_id = parts[0].strip()
+    content = parts[1].strip() if len(parts) > 1 else ""
+    return item_id, content
+
+
+def queue_parts_to_item(item_id: Any, content: Any) -> str:
+    item_id_text = str(item_id or "").strip()
+    content_text = str(content or "").strip()
+
+    if not item_id_text:
+        return content_text
+
+    labels = (
+        ("[官服]", "官|"),
+        ("[B服]", "B|"),
+        ("[米服]", "米|"),
+    )
+    for label, prefix in labels:
+        if content_text == label or content_text.startswith(f"{label} "):
+            extra = content_text[len(label):].strip()
+            return f"{prefix}{item_id_text} {extra}".rstrip()
+
+    if content_text == "[超级]" or content_text.startswith("[超级] "):
+        extra = content_text[len("[超级]"):].strip()
+        return f"<{item_id_text}>{extra}" if extra else f"<{item_id_text}>"
+
+    return f"{item_id_text} {content_text}".rstrip()
+
+
+def queue_item_to_entry(item: Any) -> dict[str, str]:
+    item_id, content = queue_item_to_parts(item)
+    return {"id": item_id, "content": content}
+
+
+def queue_items_to_entries(queue_items: list[Any]) -> list[dict[str, str]]:
+    return [queue_item_to_entry(item) for item in queue_items if str(item or "").strip()]
+
+
+def queue_entries_to_items(entries: list[dict[str, Any]]) -> list[str]:
+    items: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        item = queue_parts_to_item(entry.get("id", ""), entry.get("content", ""))
+        if item.strip():
+            items.append(item)
+    return items
+
+
+def parse_queue_archive_rows(rows: list[list[str]]) -> tuple[dict[str, str], list[dict[str, str]]]:
+    meta = {"timestamp": "", "actor": "", "message": ""}
+    entries: list[dict[str, str]] = []
+
+    for row in rows:
+        if not row or not any(str(cell).strip() for cell in row):
+            continue
+
+        first = str(row[0]).strip()
+        lowered = first.lower()
+
+        if first in meta:
+            meta[first] = str(row[1]).strip() if len(row) > 1 else ""
+            continue
+
+        if first == ARCHIVE_HEADER_SEQ or lowered in {"position", "seq"}:
+            continue
+
+        if first.isdigit():
+            if len(row) >= 3:
+                item_id = str(row[1]).strip()
+                content = str(row[2]).strip()
+            elif len(row) >= 2:
+                item_id, content = queue_item_to_parts(row[1])
+            else:
+                continue
+            entries.append({"id": item_id, "content": content})
+
+    return meta, entries
+
+
+def read_queue_archive_entries(path: Path) -> list[dict[str, str]]:
+    if not path.exists():
+        return []
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as f:
+            rows = list(csv.reader(f))
+    except OSError:
+        return []
+    return parse_queue_archive_rows(rows)[1]
+
+
+def write_queue_archive_entries(path: Path, entries: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([ARCHIVE_HEADER_SEQ, ARCHIVE_HEADER_ID, ARCHIVE_HEADER_CONTENT])
+        for idx, entry in enumerate(entries, start=1):
+            if not isinstance(entry, dict):
+                continue
+            item_id = str(entry.get("id", "")).strip()
+            content = str(entry.get("content", "")).strip()
+            writer.writerow([idx, item_id, content])
+
+
 DEFAULT_CONFIG: dict[str, Any] = {
     "server": {"host": DEFAULT_HOST, "port": DEFAULT_PORT},
     "api": {"roomid": 3049445, "uid": 0, "cookie": ""},
@@ -344,7 +485,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "callback": {"enabled": False, "url": "", "auth_token": "", "timeout_seconds": 5},
     "myjs": {},
-    "ui": {"startup_splash_seconds": 5},
+    "ui": {"startup_splash_seconds": 5, "auto_start_backend": False, "language": "中文"},
     "logging": {"level": "INFO", "retention_days": 7},
     "queue_archive": {"enabled": True, "slots": MAX_QUEUE_ARCHIVE_SLOTS, "active_slot": 1},
 }
@@ -363,12 +504,12 @@ def ensure_runtime_layout() -> None:
     for slot in range(1, MAX_QUEUE_ARCHIVE_SLOTS + 1):
         slot_file = PD_DIR / f"queue_archive_slot_{slot}.csv"
         if not slot_file.exists():
-            slot_file.write_text("position,queue_item\n", encoding="utf-8-sig")
+            write_queue_archive_entries(slot_file, [])
 
 
 def load_config() -> dict[str, Any]:
     ensure_runtime_layout()
-    merged = _merge_config(DEFAULT_CONFIG, load_simple_yaml(CONFIG_PATH))
+    merged = _merge_config(DEFAULT_CONFIG, _read_raw_config())
     merged["myjs"] = _normalize_myjs_config(merged.get("myjs", {}))
     return merged
 
@@ -382,6 +523,9 @@ def save_config(config: dict[str, Any]) -> None:
     ui_cfg = config.get("ui", {})
     logging_cfg = config.get("logging", {})
     queue_archive = config.get("queue_archive", {})
+    quanxian_cfg = config.get("quanxian", {})
+    kaiguan_cfg = config.get("kaiguan", {})
+    style_cfg = config.get("style", {})
 
     myjs_lines = []
     if isinstance(myjs_cfg, dict):
@@ -406,6 +550,36 @@ def save_config(config: dict[str, Any]) -> None:
             else:
                 myjs_lines.append(f"  {key}: {_yaml_quote_string(value)}")
     myjs_block = "\n".join(myjs_lines) if myjs_lines else "  # 可在此覆盖前端 myjs.js 配置"
+
+    quanxian_lines = []
+    if isinstance(quanxian_cfg, dict):
+        for key, default_values in DEFAULT_QUANXIAN.items():
+            raw_values = quanxian_cfg.get(key, default_values)
+            values = [str(item).strip() for item in raw_values if str(item).strip()] if isinstance(raw_values, list) else list(default_values)
+            if values:
+                quanxian_lines.append(f"  {key}:")
+                for item in values:
+                    quanxian_lines.append(f"    - {_yaml_quote_string(item)}")
+            else:
+                quanxian_lines.append(f"  {key}: []")
+    quanxian_block = "\n".join(quanxian_lines) if quanxian_lines else "  # 权限配置"
+
+    kaiguan_lines = []
+    if isinstance(kaiguan_cfg, dict):
+        for key, default in DEFAULT_KAIGUAN.items():
+            value = bool(kaiguan_cfg.get(key, default))
+            kaiguan_lines.append(f"  {key}: {'true' if value else 'false'}")
+    kaiguan_block = "\n".join(kaiguan_lines) if kaiguan_lines else "  # 功能开关"
+
+    style_lines = []
+    if isinstance(style_cfg, dict):
+        for key, default in DEFAULT_STYLE.items():
+            value = style_cfg.get(key, default)
+            if isinstance(default, int):
+                style_lines.append(f"  {key}: {_to_int(value, int(default))}")
+            else:
+                style_lines.append(f"  {key}: {_yaml_quote_string(value)}")
+    style_block = "\n".join(style_lines) if style_lines else "  # 样式配置"
 
     cookie_text = _yaml_quote_string(api.get("cookie", ""))
     qr_last_success_at = _yaml_quote_string(qr_login.get("last_success_at", ""))
@@ -440,6 +614,10 @@ myjs:
 ui:
   # 页面启动提示层展示时长（秒）
   startup_splash_seconds: {max(0, int(ui_cfg.get('startup_splash_seconds', 5)))}
+  # GUI 启动时是否自动拉起后端
+  auto_start_backend: {'true' if bool(ui_cfg.get('auto_start_backend', False)) else 'false'}
+  # GUI 当前语言
+  language: {_yaml_quote_string(ui_cfg.get('language', '中文'))}
 
 logging:
   # 支持 DEBUG / INFO / WARNING / ERROR / CRITICAL
@@ -459,6 +637,15 @@ callback:
   url: {callback_url}
   auth_token: {callback_auth_token}
   timeout_seconds: {max(1, int(callback_cfg.get('timeout_seconds', 5)))}
+
+quanxian:
+{quanxian_block}
+
+kaiguan:
+{kaiguan_block}
+
+style:
+{style_block}
 """
     CONFIG_PATH.write_text(content, encoding="utf-8")
 
@@ -521,7 +708,15 @@ class QueueArchiveManager:
         return PD_DIR / f"queue_archive_slot_{slot}.csv"
 
     def _empty_snapshot(self) -> dict[str, Any]:
-        return {"slot": 0, "path": "", "timestamp": "", "actor": "", "message": "", "queue": []}
+        return {
+            "slot": 0,
+            "path": "",
+            "timestamp": "",
+            "actor": "",
+            "message": "",
+            "queue": [],
+            "entries": [],
+        }
 
     def get_active_slot(self) -> int:
         state = self._read_state()
@@ -539,18 +734,15 @@ class QueueArchiveManager:
 
         slot = self.get_active_slot()
         out = self._slot_file(slot)
+        write_queue_archive_entries(out, queue_items_to_entries(queue_items))
+        return out
 
-        now = dt.datetime.now().isoformat(timespec="seconds")
-        with out.open("w", encoding="utf-8-sig", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["timestamp", now])
-            writer.writerow(["actor", actor])
-            writer.writerow(["message", message])
-            writer.writerow([])
-            writer.writerow(["position", "queue_item"])
-            for idx, item in enumerate(queue_items, start=1):
-                writer.writerow([idx, item])
-
+    def write_blank_snapshot(self, actor: str, message: str) -> Path | None:
+        if not self.enabled:
+            return None
+        slot = self.get_active_slot()
+        out = self._slot_file(slot)
+        write_queue_archive_entries(out, [])
         return out
 
     def _read_snapshot(self, slot: int) -> dict[str, Any] | None:
@@ -565,6 +757,7 @@ class QueueArchiveManager:
             "actor": "",
             "message": "",
             "queue": [],
+            "entries": [],
         }
 
         try:
@@ -573,28 +766,20 @@ class QueueArchiveManager:
         except OSError:
             return None
 
-        for row in rows:
-            if not row:
-                continue
-            key = str(row[0]).strip()
-            if key == "timestamp":
-                snapshot["timestamp"] = str(row[1]).strip() if len(row) > 1 else ""
-            elif key == "actor":
-                snapshot["actor"] = str(row[1]).strip() if len(row) > 1 else ""
-            elif key == "message":
-                snapshot["message"] = str(row[1]).strip() if len(row) > 1 else ""
-            elif key == "position":
-                continue
-            elif key.isdigit() and len(row) > 1:
-                snapshot["queue"].append(str(row[1]))
+        meta, entries = parse_queue_archive_rows(rows)
+        snapshot["timestamp"] = meta.get("timestamp", "")
+        snapshot["actor"] = meta.get("actor", "")
+        snapshot["message"] = meta.get("message", "")
+        snapshot["entries"] = entries
+        snapshot["queue"] = queue_entries_to_items(entries)
 
-        if not snapshot["timestamp"] and not snapshot["actor"] and not snapshot["message"] and not snapshot["queue"]:
-            return None
-
+        modified = dt.datetime.fromtimestamp(path.stat().st_mtime)
+        if not snapshot["timestamp"]:
+            snapshot["timestamp"] = modified.isoformat(timespec="seconds")
         try:
             sort_key = dt.datetime.fromisoformat(str(snapshot["timestamp"]))
         except ValueError:
-            sort_key = dt.datetime.fromtimestamp(path.stat().st_mtime)
+            sort_key = modified
         snapshot["_sort_key"] = sort_key.isoformat()
         return snapshot
 
@@ -679,10 +864,10 @@ class QueueManager:
     def restore_from_archive(self) -> None:
         slot = self._queue_archive.get_active_slot()
         snapshot = self._queue_archive.read_snapshot_by_slot(slot)
-        if not snapshot or not snapshot.get("queue"):
+        if snapshot is None:
             return
         with self._lock:
-            self._persons = [self._strip_html(item) for item in snapshot["queue"] if item]
+            self._persons = [self._strip_html(item) for item in snapshot.get("queue", []) if item]
         self._logger.info(
             "[队列] 已从存档恢复 %s 人（槽位 %s，存档时间：%s）",
             len(self._persons), snapshot.get("slot", "?"), snapshot.get("timestamp", "?"),
@@ -697,6 +882,9 @@ class QueueManager:
     def get_queue(self) -> list[str]:
         with self._lock:
             return list(self._persons)
+
+    def get_queue_entries(self) -> list[dict[str, str]]:
+        return queue_items_to_entries(self.get_queue())
 
     def send_current_to(self, conn: socket.socket) -> None:
         try:
@@ -743,11 +931,33 @@ class QueueManager:
         self._broadcast_and_archive("gui", f"insert_{after_index}")
         return self.get_queue()
 
+    def update_item_content(self, index: int, content: str) -> list[str]:
+        """按序号修改排队内容，保留原条目的 id。"""
+        with self._lock:
+            if 1 <= index <= len(self._persons):
+                item_id, _old_content = queue_item_to_parts(self._persons[index - 1])
+                self._persons[index - 1] = queue_parts_to_item(item_id, content)
+        self._broadcast_and_archive("gui", f"update_{index}")
+        return self.get_queue()
+
     def clear_queue(self) -> list[str]:
         """清空队列。"""
         with self._lock:
+            previous_queue = list(self._persons)
             self._persons.clear()
-        self._broadcast_and_archive("gui", "clear")
+
+        if previous_queue:
+            self._logger.info(
+                "[队列] 一键清空前原始队列（%s 人）: %s",
+                len(previous_queue),
+                json.dumps(previous_queue, ensure_ascii=False),
+            )
+        else:
+            self._logger.info("[队列] 一键清空时原始队列为空")
+
+        self._ws_hub.broadcast_json(None, {"type": "QUEUE_UPDATE", "queue": []})
+        self._queue_archive.write_blank_snapshot("gui", "clear")
+        self._logger.info("[队列] 当前槽位 %s 已恢复为空白存档", self._queue_archive.get_active_slot())
         return []
 
     def switch_to_slot(self, slot: int) -> list[str]:
@@ -1044,15 +1254,25 @@ DEFAULT_KAIGUAN: dict[str, bool] = {
 
 
 def load_quanxian() -> dict[str, Any]:
-    raw = load_simple_yaml(QUANXIAN_PATH)
+    raw_config = _read_raw_config()
+    config_section = raw_config.get("quanxian", {})
+    raw_file = load_simple_yaml(QUANXIAN_PATH)
     result: dict[str, Any] = {k: list(v) for k, v in DEFAULT_QUANXIAN.items()}
     for key in DEFAULT_QUANXIAN:
-        if isinstance(raw.get(key), list):
-            result[key] = [str(x) for x in raw[key] if x]
+        if isinstance(config_section, dict) and isinstance(config_section.get(key), list):
+            result[key] = [str(x) for x in config_section[key] if x]
+        elif isinstance(raw_file.get(key), list):
+            result[key] = [str(x) for x in raw_file[key] if x]
     return result
 
 
 def save_quanxian(config: dict[str, Any]) -> None:
+    normalized: dict[str, Any] = {k: list(v) for k, v in DEFAULT_QUANXIAN.items()}
+    for key in DEFAULT_QUANXIAN:
+        value = config.get(key, [])
+        if isinstance(value, list):
+            normalized[key] = [str(item).strip() for item in value if str(item).strip()]
+
     labels = {
         "super_admin": "最高管理员：拥有所有权限，包括新增/删除管理员",
         "admin": "管理员：拥有除新增/删除管理员以外的所有操作权限",
@@ -1062,23 +1282,36 @@ def save_quanxian(config: dict[str, Any]) -> None:
     lines: list[str] = ["# 权限配置\n"]
     for key in ("super_admin", "admin", "jianzhang", "member"):
         lines.append(f"# {labels[key]}\n{key}:\n")
-        for item in config.get(key, []):
+        for item in normalized.get(key, []):
             escaped = str(item).replace('"', '\\"')
             lines.append(f'  - "{escaped}"\n')
         lines.append("\n")
     QUANXIAN_PATH.write_text("".join(lines), encoding="utf-8")
 
+    current = _merge_config(DEFAULT_CONFIG, _read_raw_config())
+    current["quanxian"] = normalized
+    save_config(current)
+
 
 def load_kaiguan() -> dict[str, bool]:
-    raw = load_simple_yaml(KAIGUAN_PATH)
+    raw_config = _read_raw_config()
+    config_section = raw_config.get("kaiguan", {})
+    raw_file = load_simple_yaml(KAIGUAN_PATH)
     result: dict[str, bool] = dict(DEFAULT_KAIGUAN)
     for key in DEFAULT_KAIGUAN:
-        if isinstance(raw.get(key), bool):
-            result[key] = raw[key]
+        if isinstance(config_section, dict) and isinstance(config_section.get(key), bool):
+            result[key] = config_section[key]
+        elif isinstance(raw_file.get(key), bool):
+            result[key] = raw_file[key]
     return result
 
 
 def save_kaiguan(config: dict[str, bool]) -> None:
+    normalized: dict[str, bool] = dict(DEFAULT_KAIGUAN)
+    for key in DEFAULT_KAIGUAN:
+        if isinstance(config.get(key), bool):
+            normalized[key] = bool(config.get(key))
+
     comments = {
         "paidui": "普通排队（排队 / 排队 xxx）",
         "guanfu_paidui": "官服排队",
@@ -1092,11 +1325,15 @@ def save_kaiguan(config: dict[str, bool]) -> None:
     }
     lines: list[str] = ["# 功能开关（true=启用，false=禁用）\n"]
     for key, default in DEFAULT_KAIGUAN.items():
-        value = config.get(key, default)
+        value = normalized.get(key, default)
         value_str = "true" if value else "false"
         comment = comments.get(key, key)
         lines.append(f"{key}: {value_str}              # {comment}\n")
     KAIGUAN_PATH.write_text("".join(lines), encoding="utf-8")
+
+    current = _merge_config(DEFAULT_CONFIG, _read_raw_config())
+    current["kaiguan"] = normalized
+    save_config(current)
 
 
 DEFAULT_STYLE: dict[str, Any] = {
@@ -1110,8 +1347,19 @@ DEFAULT_STYLE: dict[str, Any] = {
     "text_stroke_color": "#000000",
 }
 
+DEFAULT_CONFIG["quanxian"] = {key: list(values) for key, values in DEFAULT_QUANXIAN.items()}
+DEFAULT_CONFIG["kaiguan"] = dict(DEFAULT_KAIGUAN)
+DEFAULT_CONFIG["style"] = dict(DEFAULT_STYLE)
+
 
 def load_style() -> dict[str, Any]:
+    raw_config = _read_raw_config()
+    config_section = raw_config.get("style", {})
+    if isinstance(config_section, dict) and config_section:
+        result = dict(DEFAULT_STYLE)
+        result.update(config_section)
+        return result
+
     if STYLE_PATH.exists():
         try:
             data = json.loads(STYLE_PATH.read_text(encoding="utf-8"))
@@ -1128,6 +1376,9 @@ def save_style(data: dict[str, Any]) -> None:
     merged = dict(DEFAULT_STYLE)
     merged.update(data)
     STYLE_PATH.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+    current = _merge_config(DEFAULT_CONFIG, _read_raw_config())
+    current["style"] = merged
+    save_config(current)
 
 
 def load_model() -> dict[str, Any]:
@@ -2242,6 +2493,9 @@ class ApiHandler(BaseHTTPRequestHandler):
                     "callback": cfg.get("callback", {}),
                     "myjs": cfg.get("myjs", {}),
                     "ui": cfg.get("ui", {}),
+                    "quanxian": cfg.get("quanxian", {}),
+                    "kaiguan": cfg.get("kaiguan", {}),
+                    "style": cfg.get("style", {}),
                 }
             )
             return
@@ -2274,7 +2528,14 @@ class ApiHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/api/queue/state":
             current = self.server.queue_manager.get_queue() if hasattr(self.server, "queue_manager") else []
-            self._write_json({"status": "ok", "queue": current, "size": len(current)})
+            self._write_json(
+                {
+                    "status": "ok",
+                    "queue": current,
+                    "entries": queue_items_to_entries(current),
+                    "size": len(current),
+                }
+            )
             return
 
         if parsed.path == "/api/queue/archive":
@@ -2289,6 +2550,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                     "actor": str(snapshot.get("actor", "") or ""),
                     "message": str(snapshot.get("message", "") or ""),
                     "queue": snapshot.get("queue", []),
+                    "entries": snapshot.get("entries", []),
                 }
             )
             return
@@ -2426,10 +2688,23 @@ class ApiHandler(BaseHTTPRequestHandler):
                 self.server.queue_manager._broadcast_and_archive("gui", "reload")
             else:
                 current = []
-            self._write_json({"status": "ok", "queue": current, "size": len(current)})
+            self._write_json(
+                {
+                    "status": "ok",
+                    "queue": current,
+                    "entries": queue_items_to_entries(current),
+                    "size": len(current),
+                }
+            )
             return
 
-        if parsed.path in {"/api/queue/delete", "/api/queue/move", "/api/queue/insert", "/api/queue/clear"}:
+        if parsed.path in {
+            "/api/queue/delete",
+            "/api/queue/move",
+            "/api/queue/insert",
+            "/api/queue/update",
+            "/api/queue/clear",
+        }:
             length = int(self.headers.get("Content-Length", "0"))
             raw = self.rfile.read(length).decode("utf-8", errors="replace") if length > 0 else "{}"
             try:
@@ -2451,9 +2726,20 @@ class ApiHandler(BaseHTTPRequestHandler):
                 after = _to_int(payload.get("after", 0), 0)
                 entry = str(payload.get("entry", ""))
                 current = qm.insert_item(after, entry)
+            elif parsed.path == "/api/queue/update":
+                idx = _to_int(payload.get("index", 0), 0)
+                content = str(payload.get("content", ""))
+                current = qm.update_item_content(idx, content)
             else:  # /api/queue/clear
                 current = qm.clear_queue()
-            self._write_json({"status": "ok", "queue": current, "size": len(current)})
+            self._write_json(
+                {
+                    "status": "ok",
+                    "queue": current,
+                    "entries": queue_items_to_entries(current),
+                    "size": len(current),
+                }
+            )
             return
 
         if parsed.path == "/api/style":
@@ -2465,6 +2751,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                 payload = {}
             if isinstance(payload, dict):
                 save_style(payload)
+                self.server.runtime_config = _merge_config(self.server.runtime_config, {"style": load_style()})
             self._write_json({"status": "ok"})
             return
 
@@ -2493,6 +2780,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                 self._write_json({"status": "error", "message": "Body must be valid JSON"}, status=HTTPStatus.BAD_REQUEST)
                 return
             save_quanxian(payload)
+            self.server.runtime_config = _merge_config(self.server.runtime_config, {"quanxian": load_quanxian()})
             if hasattr(self.server, "queue_manager"):
                 self.server.queue_manager.load_quanxian(payload)
             self._write_json({"status": "ok"})
@@ -2507,6 +2795,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                 self._write_json({"status": "error", "message": "Body must be valid JSON"}, status=HTTPStatus.BAD_REQUEST)
                 return
             save_kaiguan(payload)
+            self.server.runtime_config = _merge_config(self.server.runtime_config, {"kaiguan": load_kaiguan()})
             if hasattr(self.server, "queue_manager"):
                 self.server.queue_manager.load_kaiguan(payload)
             self._write_json({"status": "ok"})
