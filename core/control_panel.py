@@ -41,7 +41,7 @@ _LOG_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2} (\d{2}:\d{2}:\d{2}),\d+ \[(?:DEBUG|
 _PANEL_TS_RE = re.compile(r"^(\d{2}:\d{2}:\d{2}) (.*)", re.DOTALL)
 MAX_QUEUE_ARCHIVE_SLOTS = 10
 KAIGUAN_LABELS = [
-    ("paidui",           "普通排队"),
+    ("paidui",           "排队总开关"),
     ("guanfu_paidui",    "官服排队"),
     ("bfu_paidui",       "B服排队"),
     ("chaoji_paidui",    "超级排队"),
@@ -263,6 +263,7 @@ class ControlPanelApp:
         self.ws_text_var = tk.StringVar(value="直播间链接状态：未连接")
 
         self._clear_click_time: float = 0.0
+        self._blacklist_clear_click_time: float = 0.0
         self._prev_slot: int = self.queue_slot_choice_var.get()
 
         self._build_ui()
@@ -308,32 +309,37 @@ class ControlPanelApp:
         notebook.add(queue_tab, text="当前排队")
         self._build_queue_tab(queue_tab)
 
-        # Tab 2: 设置
+        # Tab 2: 黑名单
+        blacklist_tab = ttk.Frame(notebook, padding=8)
+        notebook.add(blacklist_tab, text="黑名单")
+        self._build_blacklist_tab(blacklist_tab)
+
+        # Tab 3: 设置
         settings_tab = ttk.Frame(notebook, padding=8)
         notebook.add(settings_tab, text="设置")
         self._build_settings_tab(settings_tab)
 
-        # Tab 3: 权限
+        # Tab 4: 权限
         quanxian_tab = ttk.Frame(notebook, padding=8)
         notebook.add(quanxian_tab, text="权限")
         self._build_quanxian_tab(quanxian_tab)
 
-        # Tab 4: 开关
+        # Tab 5: 开关
         kaiguan_tab = ttk.Frame(notebook, padding=8)
         notebook.add(kaiguan_tab, text="开关")
         self._build_kaiguan_tab(kaiguan_tab)
 
-        # Tab 5: 性能
+        # Tab 6: 性能
         perf_tab = ttk.Frame(notebook, padding=8)
         notebook.add(perf_tab, text="性能")
         self._build_perf_tab(perf_tab)
 
-        # Tab 6: 样式设置
+        # Tab 7: 样式设置
         style_tab = ttk.Frame(notebook, padding=8)
         notebook.add(style_tab, text="样式设置")
         self._build_style_tab(style_tab)
 
-        # Tab 7: 关于
+        # Tab 8: 关于
         about_tab = ttk.Frame(notebook, padding=8)
         notebook.add(about_tab, text="关于")
         self._build_about_tab(about_tab)
@@ -572,6 +578,247 @@ class ControlPanelApp:
     def _auto_refresh_queue(self) -> None:
         threading.Thread(target=self._refresh_queue_list, daemon=True).start()
         self.root.after(3000, self._auto_refresh_queue)
+
+    def _build_blacklist_tab(self, frame: ttk.Frame) -> None:
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(1, weight=1)
+
+        top_bar = ttk.Frame(frame)
+        top_bar.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        self.blacklist_count_var = tk.StringVar(value="黑名单：0 人")
+        ttk.Label(top_bar, textvariable=self.blacklist_count_var, font=("Arial", 11, "bold")).pack(side="left")
+        self.blacklist_status_var = tk.StringVar(value="")
+        ttk.Label(top_bar, textvariable=self.blacklist_status_var, foreground="#0a0", width=28).pack(side="left", padx=(10, 0))
+        ttk.Button(top_bar, text="刷新", command=lambda: threading.Thread(target=self._refresh_blacklist_list, daemon=True).start()).pack(side="right")
+
+        tree_frame = ttk.Frame(frame)
+        tree_frame.grid(row=1, column=0, sticky="nsew")
+        tree_frame.columnconfigure(0, weight=1)
+        tree_frame.rowconfigure(0, weight=1)
+
+        columns = ("seq", "name")
+        self.blacklist_tree = ttk.Treeview(tree_frame, columns=columns, show="headings", selectmode="browse")
+        self.blacklist_tree.heading("seq", text="#")
+        self.blacklist_tree.heading("name", text="用户名")
+        self.blacklist_tree.column("seq", width=40, minwidth=30, anchor="center", stretch=False)
+        self.blacklist_tree.column("name", width=420, minwidth=120, anchor="w")
+
+        y_scroll = ttk.Scrollbar(tree_frame, orient="vertical", command=self.blacklist_tree.yview)
+        self.blacklist_tree.configure(yscrollcommand=y_scroll.set)
+        self.blacklist_tree.grid(row=0, column=0, sticky="nsew")
+        y_scroll.grid(row=0, column=1, sticky="ns")
+
+        op_bar = ttk.Frame(frame)
+        op_bar.grid(row=2, column=0, sticky="ew", pady=(6, 0))
+        ttk.Button(op_bar, text="新增", command=self._blacklist_add).pack(side="left", padx=(0, 4))
+        ttk.Button(op_bar, text="删除", command=self._blacklist_delete).pack(side="left", padx=(0, 4))
+        ttk.Button(op_bar, text="一键清空", command=self._blacklist_clear).pack(side="right")
+
+        self.root.after(2200, self._auto_refresh_blacklist)
+
+    @staticmethod
+    def _build_blacklist_entry(name: Any) -> dict[str, str]:
+        return {"id": str(name or "").strip(), "content": ""}
+
+    def _normalize_blacklist_entries(self, values: list[Any]) -> list[dict[str, str]]:
+        entries: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for value in values:
+            if isinstance(value, dict):
+                name = str(value.get("id", "") or value.get("content", "")).strip()
+            else:
+                name = str(value or "").strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            entries.append(self._build_blacklist_entry(name))
+        return entries
+
+    def _extract_blacklist_entries_from_payload(self, payload: Any) -> list[dict[str, str]]:
+        if isinstance(payload, dict):
+            raw_entries = payload.get("entries")
+            if isinstance(raw_entries, list):
+                return self._normalize_blacklist_entries(raw_entries)
+        if isinstance(payload, list):
+            return self._normalize_blacklist_entries(payload)
+        return []
+
+    def _blacklist_csv_path(self) -> "Path | None":
+        try:
+            bs = load_backend_server_module()
+            return getattr(bs, "BLACKLIST_PATH", APP_DIR / "core" / "cd" / "blacklist.csv")
+        except Exception:
+            return APP_DIR / "core" / "cd" / "blacklist.csv"
+
+    def _read_blacklist_entries_from_csv(self) -> list[dict[str, str]]:
+        path = self._blacklist_csv_path()
+        if path is None or not path.exists():
+            try:
+                bs = load_backend_server_module()
+                return self._normalize_blacklist_entries(bs.load_quanxian().get("blacklist", []))
+            except Exception:
+                return []
+        try:
+            bs = load_backend_server_module()
+            entries = bs.read_blacklist_entries(path)
+            return self._normalize_blacklist_entries(entries)
+        except Exception:
+            return []
+
+    def _write_blacklist_entries_to_config(self, entries: list[dict[str, str]]) -> bool:
+        try:
+            bs = load_backend_server_module()
+            quanxian = bs.load_quanxian()
+            quanxian["blacklist"] = [str(entry.get("id", "")).strip() for entry in entries if str(entry.get("id", "")).strip()]
+            bs.save_quanxian(quanxian)
+            return True
+        except Exception as exc:
+            self.root.after(0, lambda: self._append_log(f"[GUI] 黑名单保存失败: {exc}"))
+            return False
+
+    def _fetch_blacklist_entries_from_backend(self) -> list[dict[str, str]] | None:
+        if not self._backend_is_running():
+            return None
+        port = self.port_var.get().strip() or "9816"
+        url = f"http://127.0.0.1:{port}/api/blacklist/state"
+        try:
+            with urllib.request.urlopen(url, timeout=2) as resp:
+                payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+            return self._extract_blacklist_entries_from_payload(payload)
+        except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError):
+            return None
+
+    def _refresh_blacklist_list(self) -> None:
+        entries = self._fetch_blacklist_entries_from_backend()
+        if entries is None:
+            entries = self._read_blacklist_entries_from_csv()
+        self.root.after(0, lambda: self._update_blacklist_ui(entries))
+
+    def _update_blacklist_ui(self, entries: list[dict[str, str]]) -> None:
+        sel = self.blacklist_tree.selection()
+        prev_idx: int | None = None
+        if sel:
+            try:
+                prev_idx = int(self.blacklist_tree.item(sel[0], "values")[0])
+            except (IndexError, ValueError):
+                prev_idx = None
+
+        for child in self.blacklist_tree.get_children():
+            self.blacklist_tree.delete(child)
+        iid_map: dict[int, str] = {}
+        for idx, entry in enumerate(entries, start=1):
+            iid = self.blacklist_tree.insert("", "end", values=(idx, str(entry.get("id", ""))))
+            iid_map[idx] = iid
+        self.blacklist_count_var.set(f"黑名单：{len(entries)} 人")
+
+        if prev_idx is not None and prev_idx in iid_map:
+            self.blacklist_tree.selection_set(iid_map[prev_idx])
+            self.blacklist_tree.see(iid_map[prev_idx])
+
+    def _auto_refresh_blacklist(self) -> None:
+        threading.Thread(target=self._refresh_blacklist_list, daemon=True).start()
+        self.root.after(4000, self._auto_refresh_blacklist)
+
+    def _get_selected_blacklist_index(self) -> int | None:
+        sel = self.blacklist_tree.selection()
+        if not sel:
+            return None
+        values = self.blacklist_tree.item(sel[0], "values")
+        try:
+            return int(values[0])
+        except (IndexError, ValueError):
+            return None
+
+    def _blacklist_backend_op(self, path: str, payload: dict[str, Any], status_msg: str = "") -> bool:
+        if not self._backend_is_running():
+            return False
+        port = self.port_var.get().strip() or "9816"
+        url = f"http://127.0.0.1:{port}{path}"
+        body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                result = json.loads(resp.read().decode("utf-8", errors="replace"))
+            entries = self._extract_blacklist_entries_from_payload(result)
+        except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+            self.root.after(0, lambda: self._append_log(f"[GUI] 黑名单操作失败: {exc}"))
+            return False
+
+        import time as _time
+        ts = _time.strftime("%H:%M:%S")
+        msg = f"{ts} {status_msg}" if status_msg else ts
+        self.root.after(0, lambda: (self._update_blacklist_ui(entries), self.blacklist_status_var.set(msg)))
+        return True
+
+    def _blacklist_local_op(self, op, status_msg: str = "") -> None:
+        entries = self._read_blacklist_entries_from_csv()
+        new_entries = op([dict(entry) for entry in entries])
+        if new_entries is None:
+            new_entries = entries
+        new_entries = self._normalize_blacklist_entries(new_entries)
+        if not self._write_blacklist_entries_to_config(new_entries):
+            return
+        final_entries = self._read_blacklist_entries_from_csv()
+        import time as _time
+        ts = _time.strftime("%H:%M:%S")
+        msg = f"{ts} {status_msg}" if status_msg else ts
+        self.root.after(0, lambda: (self._update_blacklist_ui(final_entries), self.blacklist_status_var.set(msg)))
+
+    def _blacklist_add(self) -> None:
+        from tkinter import simpledialog
+        name = simpledialog.askstring("新增黑名单", "请输入要加入黑名单的用户名：", parent=self.root)
+        if not name or not name.strip():
+            return
+        target = name.strip()
+        if self._backend_is_running():
+            threading.Thread(
+                target=self._blacklist_backend_op,
+                args=("/api/blacklist/add", {"name": target}, f"已加入黑名单：{target}"),
+                daemon=True,
+            ).start()
+            return
+
+        def op(entries):
+            entries.append(self._build_blacklist_entry(target))
+            return entries
+
+        threading.Thread(target=self._blacklist_local_op, args=(op, f"已加入黑名单：{target}"), daemon=True).start()
+
+    def _blacklist_delete(self) -> None:
+        idx = self._get_selected_blacklist_index()
+        if idx is None:
+            return
+        if self._backend_is_running():
+            threading.Thread(
+                target=self._blacklist_backend_op,
+                args=("/api/blacklist/delete", {"index": idx}, f"已删除第{idx}个黑名单用户"),
+                daemon=True,
+            ).start()
+            return
+
+        def op(entries):
+            if 1 <= idx <= len(entries):
+                entries.pop(idx - 1)
+            return entries
+
+        threading.Thread(target=self._blacklist_local_op, args=(op, f"已删除第{idx}个黑名单用户"), daemon=True).start()
+
+    def _blacklist_clear(self) -> None:
+        import time
+        now = time.time()
+        if self._blacklist_clear_click_time > 0 and now - self._blacklist_clear_click_time <= 5.0:
+            self._blacklist_clear_click_time = 0.0
+            if self._backend_is_running():
+                threading.Thread(
+                    target=self._blacklist_backend_op,
+                    args=("/api/blacklist/clear", {}, "黑名单已清空"),
+                    daemon=True,
+                ).start()
+            else:
+                threading.Thread(target=self._blacklist_local_op, args=(lambda _entries: [], "黑名单已清空"), daemon=True).start()
+        else:
+            self._blacklist_clear_click_time = now
+            self._append_log("[GUI] 确认清空黑名单？请在 5 秒内再次点击「一键清空」")
 
     # ── 队列操作辅助 ──────────────────────────────────────────────────────
 
@@ -1098,6 +1345,7 @@ class ControlPanelApp:
             ("admin",       "管理员（拥有除新增/删除管理员以外的所有权限）"),
             ("jianzhang",   "舰长（仅拥有插队命令权限）"),
             ("member",      "成员（普通观众，仅自助排队/取消/修改）"),
+            ("blacklist",   "黑名单（禁止触发任何弹幕指令，也不能同时是管理员/最高管理员）"),
         ]
         for row_idx, (key, label) in enumerate(levels):
             ttk.Label(frame, text=label).grid(row=row_idx * 2, column=0, sticky="w", pady=(8, 2))
@@ -1185,9 +1433,10 @@ class ControlPanelApp:
                 "admin": "管理员：拥有除新增/删除管理员以外的所有操作权限",
                 "jianzhang": "舰长：仅拥有「插队」命令权限",
                 "member": "成员：普通观众",
+                "blacklist": "黑名单：禁止触发任何弹幕指令，且不能同时是最高管理员/管理员",
             }
             lines: list[str] = ["# 权限配置\n"]
-            for key in ("super_admin", "admin", "jianzhang", "member"):
+            for key in ("super_admin", "admin", "jianzhang", "member", "blacklist"):
                 lines.append(f"# {labels.get(key, key)}\n{key}:\n")
                 for item in payload.get(key, []):
                     escaped = str(item).replace('"', '\\"')
@@ -1237,11 +1486,11 @@ class ControlPanelApp:
             backend_server.save_kaiguan(payload)
         except Exception:
             comments = {
-                "paidui": "普通排队（排队 / 排队 xxx）",
-                "guanfu_paidui": "官服排队",
-                "bfu_paidui": "B服排队",
-                "chaoji_paidui": "超级排队",
-                "mifu_paidui": "米服排队",
+                "paidui": "排队总开关：关闭后普通/官服/B服/超级/米服排队全部关闭",
+                "guanfu_paidui": "官服排队（需总开关开启）",
+                "bfu_paidui": "B服排队（需总开关开启）",
+                "chaoji_paidui": "超级排队（需总开关开启）",
+                "mifu_paidui": "米服排队（需总开关开启）",
                 "quxiao_paidui": "取消排队",
                 "xiugai_paidui": "修改/替换排队内容",
                 "jianzhang_chadui": "舰长插队",

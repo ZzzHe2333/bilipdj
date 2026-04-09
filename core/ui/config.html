@@ -102,17 +102,17 @@
 
             <div class="row">
                 <label>管理员</label>
-                <textarea v-model="form.myjs.admins_text" placeholder="一行一个用户名，对应 myjs.js 的 admins"></textarea>
+                <textarea v-model="form.myjs.admins_text" placeholder="一行一个用户名，对应 quanxian.admin"></textarea>
             </div>
 
             <div class="row">
                 <label>黑名单</label>
-                <textarea v-model="form.myjs.ban_admins_text" placeholder="一行一个用户名，对应 myjs.js 的 ban_admins"></textarea>
+                <textarea v-model="form.myjs.ban_admins_text" placeholder="一行一个用户名，对应 quanxian.blacklist"></textarea>
             </div>
 
             <div class="row">
                 <label>舰长名单</label>
-                <textarea v-model="form.myjs.jianzhang_text" placeholder="一行一个用户名，对应 myjs.js 的 jianzhang"></textarea>
+                <textarea v-model="form.myjs.jianzhang_text" placeholder="一行一个用户名，对应 quanxian.jianzhang"></textarea>
             </div>
         </div>
 
@@ -186,9 +186,9 @@
                         this.form.roomid = cfg.roomid || "";
                         this.form.uid = cfg.uid || "";
                         this.form.cookie = cfg.cookie || "";
-                        this.form.myjs.admins_text = this.formatUserList(cfg?.myjs?.admins);
-                        this.form.myjs.ban_admins_text = this.formatUserList(cfg?.myjs?.ban_admins);
-                        this.form.myjs.jianzhang_text = this.formatUserList(cfg?.myjs?.jianzhang);
+                        this.form.myjs.admins_text = this.formatUserList(cfg?.quanxian?.admin || cfg?.myjs?.admins);
+                        this.form.myjs.ban_admins_text = this.formatUserList(cfg?.quanxian?.blacklist || cfg?.myjs?.ban_admins);
+                        this.form.myjs.jianzhang_text = this.formatUserList(cfg?.quanxian?.jianzhang || cfg?.myjs?.jianzhang);
                         this.form.callback = Object.assign(
                             { enabled: false, url: "", auth_token: "", timeout_seconds: 5 },
                             cfg.callback || {}
@@ -208,6 +208,11 @@
                             myjs: {
                                 admins: this.parseUserList(this.form.myjs.admins_text),
                                 ban_admins: this.parseUserList(this.form.myjs.ban_admins_text),
+                                jianzhang: this.parseUserList(this.form.myjs.jianzhang_text)
+                            },
+                            quanxian: {
+                                admin: this.parseUserList(this.form.myjs.admins_text),
+                                blacklist: this.parseUserList(this.form.myjs.ban_admins_text),
                                 jianzhang: this.parseUserList(this.form.myjs.jianzhang_text)
                             },
                             callback: {
@@ -235,6 +240,10 @@
                             this.form.myjs.admins_text = this.formatUserList(result.myjs.admins);
                             this.form.myjs.ban_admins_text = this.formatUserList(result.myjs.ban_admins);
                             this.form.myjs.jianzhang_text = this.formatUserList(result.myjs.jianzhang);
+                        } else if (result?.quanxian) {
+                            this.form.myjs.admins_text = this.formatUserList(result.quanxian.admin);
+                            this.form.myjs.ban_admins_text = this.formatUserList(result.quanxian.blacklist);
+                            this.form.myjs.jianzhang_text = this.formatUserList(result.quanxian.jianzhang);
                         }
 
                         const resolvedName = typeof result?.uname === "string" ? result.uname.trim() : "";
