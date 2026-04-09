@@ -17,19 +17,44 @@
     </div>
 
     <script src="pako.min.js"></script>
+    <script>
+    (function() {
+        fetch('/api/style').then(function(r){ return r.json(); }).then(function(s) {
+            var rs = document.documentElement.style;
+            if (s.bg1) rs.setProperty('--bg1', s.bg1);
+            if (s.bg2) rs.setProperty('--bg2', s.bg2);
+            if (s.bg3) rs.setProperty('--bg3', s.bg3);
+            if (s.text_color) rs.setProperty('--text-color', s.text_color);
+            if (s.queue_font_size) rs.setProperty('--queue-font-size', s.queue_font_size + 'px');
+            if (s.text_grad_start) rs.setProperty('--text-grad-start', s.text_grad_start);
+            if (s.text_grad_end) rs.setProperty('--text-grad-end', s.text_grad_end);
+            if (s.text_stroke_color) rs.setProperty('--text-stroke', s.text_stroke_color);
+        }).catch(function(){});
+    })();
+    </script>
     <script src="myjs.js"></script>
 
     <style type="text/css">
-        body { margin: 0; background: radial-gradient(circle at 20% 20%, #0e2036 0%, #060b14 42%, #020409 100%); color: #eaf6ff; }
+        :root {
+            --bg1: #0e2036;
+            --bg2: #060b14;
+            --bg3: #020409;
+            --text-color: #eaf6ff;
+            --queue-font-size: 50px;
+            --text-grad-start: #f7f7f7;
+            --text-grad-end: rgba(255,255,255,0.589);
+            --text-stroke: #000000;
+        }
+        body { margin: 0; background: radial-gradient(circle at 20% 20%, var(--bg1) 0%, var(--bg2) 42%, var(--bg3) 100%); color: var(--text-color); }
 
         .wk{ width: 100%; height: 80%; text-overflow:ellipsis; white-space: nowrap; }
-        .div { width: 60%; height: 90%; line-height:1.3; font-size: 50px; font-weight:700; font-style:oblique; float: left; margin-top: 5%; text-align:left; overflow: hidden; text-decoration:underline(to right, rgb(64, 211, 15), rgb(201, 61, 61)); }
-        .div span { background: linear-gradient(to right, rgb(247, 247, 247), rgba(255, 255, 255, 0.589)); -webkit-text-stroke: 2px black; -webkit-background-clip: text; color: transparent; }
+        .div { width: 60%; height: 90%; line-height:1.3; font-size: var(--queue-font-size); font-weight:700; font-style:oblique; float: left; margin-top: 5%; text-align:left; overflow: hidden; text-decoration:underline(to right, rgb(64, 211, 15), rgb(201, 61, 61)); }
+        .div span { background: linear-gradient(to right, var(--text-grad-start), var(--text-grad-end)); -webkit-text-stroke: 2px var(--text-stroke); -webkit-background-clip: text; color: transparent; }
         .div span.pdj-confirm-pending { animation: pdjPendingBlink 0.8s infinite alternate; filter: brightness(1.35); }
         @keyframes pdjPendingBlink { from { opacity: 1; transform: scale(1); } to { opacity: 0.5; transform: scale(1.02); } }
-        .vText { float: left; width: 10%; height: 100%; overflow: hidden; white-space: nowrap; font-weight:900; text-align:center; font-size: 50px; }
+        .vText { float: left; width: 10%; height: 100%; overflow: hidden; white-space: nowrap; font-weight:900; text-align:center; font-size: var(--queue-font-size); }
         .vText div{ height: 20%; padding-top: 20%; writing-mode:tb-rl; display: inline-block; }
-        .vText span { background: linear-gradient( rgb(247, 247, 247), rgba(255, 255, 255, 0.589)); -webkit-text-stroke: 3px black; -webkit-background-clip: text; color: transparent; }
+        .vText span { background: linear-gradient(var(--text-grad-start), var(--text-grad-end)); -webkit-text-stroke: 3px var(--text-stroke); -webkit-background-clip: text; color: transparent; }
     </style>
 </body>
 </html>

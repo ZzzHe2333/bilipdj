@@ -1,0 +1,10 @@
+{
+  "bg1": "#0e2036",
+  "bg2": "#060b14",
+  "bg3": "#020409",
+  "text_color": "#eaf6ff",
+  "queue_font_size": 50,
+  "text_grad_start": "#f7f7f7",
+  "text_grad_end": "rgba(255,255,255,0.6)",
+  "text_stroke_color": "#000000"
+}

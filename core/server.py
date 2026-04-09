@@ -51,6 +51,7 @@ PD_DIR = APP_DIR / "core" / "cd"
 QUEUE_STATE_PATH = PD_DIR / "queue_archive_state.json"
 QUANXIAN_PATH = _YAML_DIR / "quanxian.yaml"
 KAIGUAN_PATH = _YAML_DIR / "kaiguan.yaml"
+STYLE_PATH = _YAML_DIR / "style.json"
 
 WS_MAGIC_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 MAX_SAFE_INTEGER = (1 << 53) - 1
@@ -344,7 +345,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "callback": {"enabled": False, "url": "", "auth_token": "", "timeout_seconds": 5},
     "myjs": {},
     "ui": {"startup_splash_seconds": 5},
-    "logging": {"level": "INFO", "retention_days": 15},
+    "logging": {"level": "INFO", "retention_days": 7},
     "queue_archive": {"enabled": True, "slots": MAX_QUEUE_ARCHIVE_SLOTS, "active_slot": 1},
 }
 
@@ -444,7 +445,7 @@ logging:
   # 支持 DEBUG / INFO / WARNING / ERROR / CRITICAL
   level: {str(logging_cfg.get('level', 'INFO')).upper()}
   # 每次启动默认清理多少天前日志
-  retention_days: {int(logging_cfg.get('retention_days', 15))}
+  retention_days: {int(logging_cfg.get('retention_days', 7))}
 
 queue_archive:
   enabled: {'true' if bool(queue_archive.get('enabled', True)) else 'false'}
@@ -474,7 +475,7 @@ def _cleanup_old_logs(retention_days: int) -> None:
 
 def setup_logging(config: dict[str, Any]) -> logging.Logger:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    retention_days = int(config.get("logging", {}).get("retention_days", 15))
+    retention_days = int(config.get("logging", {}).get("retention_days", 7))
     _cleanup_old_logs(retention_days)
 
     level_name = str(config.get("logging", {}).get("level", "INFO")).upper()
@@ -706,6 +707,49 @@ class QueueManager:
         except OSError:
             pass
 
+    def delete_item(self, index: int) -> list[str]:
+        """删除第 index 项（1-based），越界静默忽略。"""
+        with self._lock:
+            if 1 <= index <= len(self._persons):
+                self._persons.pop(index - 1)
+        self._broadcast_and_archive("gui", f"delete_{index}")
+        return self.get_queue()
+
+    def move_item(self, index: int, direction: str) -> list[str]:
+        """上移或下移第 index 项（1-based）。direction: 'up' | 'down'。"""
+        with self._lock:
+            n = len(self._persons)
+            if direction == "up" and 2 <= index <= n:
+                self._persons[index - 2], self._persons[index - 1] = (
+                    self._persons[index - 1],
+                    self._persons[index - 2],
+                )
+            elif direction == "down" and 1 <= index <= n - 1:
+                self._persons[index - 1], self._persons[index] = (
+                    self._persons[index],
+                    self._persons[index - 1],
+                )
+        self._broadcast_and_archive("gui", f"move_{direction}_{index}")
+        return self.get_queue()
+
+    def insert_item(self, after_index: int, entry: str) -> list[str]:
+        """在 after_index 之后插入 entry（after_index=0 插到最前面）。"""
+        entry = entry.strip()
+        if not entry:
+            return self.get_queue()
+        with self._lock:
+            pos = max(0, min(after_index, len(self._persons)))
+            self._persons.insert(pos, entry)
+        self._broadcast_and_archive("gui", f"insert_{after_index}")
+        return self.get_queue()
+
+    def clear_queue(self) -> list[str]:
+        """清空队列。"""
+        with self._lock:
+            self._persons.clear()
+        self._broadcast_and_archive("gui", "clear")
+        return []
+
     def switch_to_slot(self, slot: int) -> list[str]:
         """Load queue from a specific archive slot, update in-memory queue, and broadcast."""
         self._queue_archive.set_active_slot(slot)
@@ -777,16 +821,16 @@ class QueueManager:
         if not uname or not msg:
             return
 
-        self._logger.debug("[queue] 弹幕 uname=%r uid=%s msg=%r", uname, uid, msg)
+        # 所有弹幕打印到 INFO
+        perm = "主播" if is_anchor else ("super_admin" if uname in self._super_admins else ("管理员" if uname in self._admins or (is_admin_flag and self._fangguan_can_doing) else ("舰长" if is_guard else "普通用户")))
+        self._logger.info("[弹幕] %s(%s): %s", uname, perm, msg)
 
         modified = self._process(uname, msg, is_anchor, is_admin_flag, is_guard, guard_level)
         if modified:
             self._broadcast_and_archive(uname, msg)
-            self._logger.debug(
-                "[queue] Updated by %s (msg=%.20r), size=%s",
-                uname,
-                msg,
-                len(self._persons),
+            self._logger.info(
+                "[触发指令] uname=%s 权限=%s msg=%r → 队列变更，当前 %s 人",
+                uname, perm, msg, len(self._persons),
             )
 
     def _process(
@@ -1024,6 +1068,37 @@ def save_kaiguan(config: dict[str, bool]) -> None:
         comment = comments.get(key, key)
         lines.append(f"{key}: {value_str}              # {comment}\n")
     KAIGUAN_PATH.write_text("".join(lines), encoding="utf-8")
+
+
+DEFAULT_STYLE: dict[str, Any] = {
+    "bg1": "#0e2036",
+    "bg2": "#060b14",
+    "bg3": "#020409",
+    "text_color": "#eaf6ff",
+    "queue_font_size": 50,
+    "text_grad_start": "#f7f7f7",
+    "text_grad_end": "rgba(255,255,255,0.6)",
+    "text_stroke_color": "#000000",
+}
+
+
+def load_style() -> dict[str, Any]:
+    if STYLE_PATH.exists():
+        try:
+            data = json.loads(STYLE_PATH.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                result = dict(DEFAULT_STYLE)
+                result.update(data)
+                return result
+        except (json.JSONDecodeError, OSError):
+            pass
+    return dict(DEFAULT_STYLE)
+
+
+def save_style(data: dict[str, Any]) -> None:
+    merged = dict(DEFAULT_STYLE)
+    merged.update(data)
+    STYLE_PATH.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def load_model() -> dict[str, Any]:
@@ -1390,26 +1465,7 @@ class BilibiliDanmuRelay(threading.Thread):
             return
 
         if cmd.startswith("DANMU_MSG"):
-            info = payload.get("info", [])
-            message = ""
-            uname = ""
-            uid = 0
-            if isinstance(info, list):
-                if len(info) > 1 and isinstance(info[1], str):
-                    message = info[1]
-                if len(info) > 2 and isinstance(info[2], list):
-                    user_info = info[2]
-                    if len(user_info) > 0:
-                        uid = _to_int(user_info[0], 0)
-                    if len(user_info) > 1 and isinstance(user_info[1], str):
-                        uname = user_info[1]
-            self.logger.debug(
-                "Danmu received cmd=%s uname=%r uid=%s msg=%r",
-                cmd,
-                uname,
-                uid,
-                message,
-            )
+            # 弹幕由 QueueManager.process_danmu_json 负责打印，此处跳过
             return
 
         if cmd in self._seen_event_cmds:
@@ -1981,19 +2037,8 @@ class ApiHandler(BaseHTTPRequestHandler):
     server_version = "DanmujiBackend/0.3"
 
     def log_message(self, format: str, *args: Any) -> None:
-        path = urlparse(getattr(self, "path", "")).path
         message = "%s - %s" % (self.address_string(), format % args)
-        if path in {
-            "/api/runtime-status",
-            "/api/queue/state",
-            "/api/queue/switch",
-            "/api/queue/log",
-            "/favicon.ico",
-            "/.well-known/appspecific/com.chrome.devtools.json",
-        }:
-            self.server.logger.debug(message)
-            return
-        self.server.logger.info(message)
+        self.server.logger.debug(message)
 
     def _write_json(self, payload: dict[str, Any], status: int = HTTPStatus.OK) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -2229,6 +2274,10 @@ class ApiHandler(BaseHTTPRequestHandler):
             self._write_json({"status": "ok", **kaiguan})
             return
 
+        if parsed.path == "/api/style":
+            self._write_json({"status": "ok", **load_style()})
+            return
+
         if parsed.path == "/api/bili/qr/start":
             try:
                 payload = _bilibili_qr_generate()
@@ -2339,6 +2388,55 @@ class ApiHandler(BaseHTTPRequestHandler):
                     "myjs": updated.get("myjs", {}),
                 }
             )
+            return
+
+        if parsed.path == "/api/queue/reload":
+            if hasattr(self.server, "queue_manager"):
+                self.server.queue_manager.restore_from_archive()
+                current = self.server.queue_manager.get_queue()
+                self.server.queue_manager._broadcast_and_archive("gui", "reload")
+            else:
+                current = []
+            self._write_json({"status": "ok", "queue": current, "size": len(current)})
+            return
+
+        if parsed.path in {"/api/queue/delete", "/api/queue/move", "/api/queue/insert", "/api/queue/clear"}:
+            length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(length).decode("utf-8", errors="replace") if length > 0 else "{}"
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                payload = {}
+            qm = getattr(self.server, "queue_manager", None)
+            if qm is None:
+                self._write_json({"status": "error", "message": "queue_manager not ready"})
+                return
+            if parsed.path == "/api/queue/delete":
+                idx = _to_int(payload.get("index", 0), 0)
+                current = qm.delete_item(idx)
+            elif parsed.path == "/api/queue/move":
+                idx = _to_int(payload.get("index", 0), 0)
+                direction = str(payload.get("direction", "up"))
+                current = qm.move_item(idx, direction)
+            elif parsed.path == "/api/queue/insert":
+                after = _to_int(payload.get("after", 0), 0)
+                entry = str(payload.get("entry", ""))
+                current = qm.insert_item(after, entry)
+            else:  # /api/queue/clear
+                current = qm.clear_queue()
+            self._write_json({"status": "ok", "queue": current, "size": len(current)})
+            return
+
+        if parsed.path == "/api/style":
+            length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(length).decode("utf-8", errors="replace") if length > 0 else "{}"
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                payload = {}
+            if isinstance(payload, dict):
+                save_style(payload)
+            self._write_json({"status": "ok"})
             return
 
         if parsed.path == "/api/queue/switch":
@@ -2576,6 +2674,23 @@ def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
     logger.info("Backend config page: http://127.0.0.1:%s/config", port)
     logger.info("Index page: http://127.0.0.1:%s/index", port)
     logger.info("WebSocket: ws://127.0.0.1:%s/ws (alias: /danmu/sub)", port)
+
+    # 打印非敏感配置
+    srv_cfg = runtime_config.get("server", {})
+    api_cfg = runtime_config.get("api", {})
+    log_cfg = runtime_config.get("logging", {})
+    qa_cfg = runtime_config.get("queue_archive", {})
+    logger.info(
+        "[config] server=%s:%s  roomid=%s  uid=%s  log_level=%s  retention=%sd  "
+        "archive_enabled=%s  active_slot=%s",
+        srv_cfg.get("host", host), srv_cfg.get("port", port),
+        api_cfg.get("roomid", 0),
+        api_cfg.get("uid", 0),
+        log_cfg.get("level", "INFO"),
+        log_cfg.get("retention_days", 7),
+        qa_cfg.get("enabled", True),
+        cfg_active_slot,
+    )
     try:
         httpd.serve_forever()
     finally:
