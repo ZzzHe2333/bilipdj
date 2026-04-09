@@ -668,7 +668,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "ban_admins": [],
         "jianzhang": [],
     },
-    "ui": {"startup_splash_seconds": 5, "auto_start_backend": False, "language": "中文"},
+    "ui": {
+        "startup_splash_seconds": 5,
+        "auto_start_backend": False,
+        "language": "中文",
+        "overlay_window": {"width": 860, "height": 420, "scale": 100},
+    },
     "logging": {"level": "INFO", "retention_days": 7},
     "queue_archive": {"enabled": True, "slots": MAX_QUEUE_ARCHIVE_SLOTS, "active_slot": 1},
 }
@@ -708,6 +713,7 @@ def save_config(config: dict[str, Any]) -> None:
     callback_cfg = config.get("callback", {})
     myjs_cfg = config.get("myjs", {})
     ui_cfg = config.get("ui", {})
+    overlay_cfg = ui_cfg.get("overlay_window", {}) if isinstance(ui_cfg, dict) else {}
     logging_cfg = config.get("logging", {})
     queue_archive = config.get("queue_archive", {})
     quanxian_cfg = config.get("quanxian", {})
@@ -775,6 +781,9 @@ def save_config(config: dict[str, Any]) -> None:
     qr_cookie = _yaml_quote_string(qr_login.get("cookie", ""))
     callback_url = _yaml_quote_string(callback_cfg.get("url", ""))
     callback_auth_token = _yaml_quote_string(callback_cfg.get("auth_token", ""))
+    overlay_width = max(320, _to_int(overlay_cfg.get("width", 860), 860))
+    overlay_height = max(180, _to_int(overlay_cfg.get("height", 420), 420))
+    overlay_scale = max(40, min(250, _to_int(overlay_cfg.get("scale", 100), 100)))
 
     content = f"""# Danmuji 全局配置
 server:
@@ -805,6 +814,10 @@ ui:
   auto_start_backend: {'true' if bool(ui_cfg.get('auto_start_backend', False)) else 'false'}
   # GUI 当前语言
   language: {_yaml_quote_string(ui_cfg.get('language', '中文'))}
+  overlay_window:
+    width: {overlay_width}
+    height: {overlay_height}
+    scale: {overlay_scale}
 
 logging:
   # 支持 DEBUG / INFO / WARNING / ERROR / CRITICAL

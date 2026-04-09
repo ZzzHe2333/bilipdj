@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
+import os
 import queue
 import re
 import subprocess
@@ -15,6 +16,19 @@ import webbrowser
 from pathlib import Path
 from tkinter import messagebox, ttk
 from typing import Any
+
+if sys.platform == "win32":
+    import ctypes
+else:
+    ctypes = None
+
+try:
+    from PIL import Image, ImageColor, ImageDraw, ImageFont, ImageTk
+
+    PIL_AVAILABLE = True
+except Exception:  # noqa: BLE001
+    Image = ImageColor = ImageDraw = ImageFont = ImageTk = None
+    PIL_AVAILABLE = False
 
 REPO_DIR = Path(__file__).resolve().parents[1]
 CORE_DIR = Path(__file__).resolve().parent  # bilipdj/core/
@@ -31,6 +45,7 @@ CONFIG_PATH = _YAML_DIR / "config.yaml"
 QUANXIAN_PATH = _YAML_DIR / "quanxian.yaml"
 KAIGUAN_PATH = _YAML_DIR / "kaiguan.yaml"
 SERVER_PATH = BUNDLE_DIR / "core" / "server.py"
+APP_NAME = "弹幕排队姬"
 APP_VERSION = "0.4.0"
 LOG_LEVEL_OPTIONS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 _LEVEL_ORDER = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 4}
@@ -40,6 +55,16 @@ _LOG_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2} (\d{2}:\d{2}:\d{2}),\d+ \[(?:DEBUG|
 # 匹配面板显示格式 "HH:MM:SS 内容"
 _PANEL_TS_RE = re.compile(r"^(\d{2}:\d{2}:\d{2}) (.*)", re.DOTALL)
 MAX_QUEUE_ARCHIVE_SLOTS = 10
+OVERLAY_REFRESH_MS = 1200
+OVERLAY_TRANSPARENT_COLOR = "#010101"
+OVERLAY_RESIZE_MARGIN = 8
+OVERLAY_MIN_WIDTH = 320
+OVERLAY_MIN_HEIGHT = 180
+DEFAULT_OVERLAY_SETTINGS = {
+    "width": 860,
+    "height": 420,
+    "scale": 100,
+}
 KAIGUAN_LABELS = [
     ("paidui",           "排队总开关"),
     ("guanfu_paidui",    "官服排队"),
@@ -198,13 +223,26 @@ def save_config(path: Path, config: dict) -> None:
     server = config.get("server", {})
     api = config.get("api", {})
     ui_cfg = config.get("ui", {})
+    overlay_cfg = ui_cfg.get("overlay_window", {}) if isinstance(ui_cfg, dict) else {}
     logging_cfg = config.get("logging", {})
     queue_archive = config.get("queue_archive", {})
     slots = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(queue_archive.get("slots", 3))))
     active_slot = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(queue_archive.get("active_slot", 1))))
     escaped_cookie = str(api.get("cookie", "")).replace('"', '\\"')
+    try:
+        overlay_width = max(OVERLAY_MIN_WIDTH, int(overlay_cfg.get("width", DEFAULT_OVERLAY_SETTINGS["width"])))
+    except (TypeError, ValueError):
+        overlay_width = DEFAULT_OVERLAY_SETTINGS["width"]
+    try:
+        overlay_height = max(OVERLAY_MIN_HEIGHT, int(overlay_cfg.get("height", DEFAULT_OVERLAY_SETTINGS["height"])))
+    except (TypeError, ValueError):
+        overlay_height = DEFAULT_OVERLAY_SETTINGS["height"]
+    try:
+        overlay_scale = max(40, min(250, int(overlay_cfg.get("scale", DEFAULT_OVERLAY_SETTINGS["scale"]))))
+    except (TypeError, ValueError):
+        overlay_scale = DEFAULT_OVERLAY_SETTINGS["scale"]
 
-    content = f"""# Danmuji 全局配置
+    content = f"""# 弹幕排队姬 全局配置
 server:
   host: {server.get('host', '0.0.0.0')}
   port: {int(server.get('port', 9816))}
@@ -220,6 +258,10 @@ myjs:
 ui:
   auto_start_backend: {'true' if bool(ui_cfg.get('auto_start_backend', False)) else 'false'}
   language: {yaml_quote_string(ui_cfg.get('language', '中文'))}
+  overlay_window:
+    width: {overlay_width}
+    height: {overlay_height}
+    scale: {overlay_scale}
 
 logging:
   # 支持 DEBUG / INFO / WARNING / ERROR / CRITICAL
@@ -239,7 +281,8 @@ queue_archive:
 class ControlPanelApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title(f"Danmuji 控制台 v{APP_VERSION}")
+        self.root.title(f"{APP_NAME} 控制台 v{APP_VERSION}")
+        self._apply_root_icon()
         self.server_proc: subprocess.Popen[str] | None = None
         self.log_queue: queue.Queue[str] = queue.Queue()
         self.log_pump_running = False
@@ -259,12 +302,30 @@ class ControlPanelApp:
         self.queue_slot_choice_var = tk.IntVar(value=1)
         self.auto_start_var = tk.BooleanVar(value=False)
         self.language_var = tk.StringVar(value="中文")
+        self.overlay_width_var = tk.StringVar(value=str(DEFAULT_OVERLAY_SETTINGS["width"]))
+        self.overlay_height_var = tk.StringVar(value=str(DEFAULT_OVERLAY_SETTINGS["height"]))
+        self.overlay_scale_var = tk.StringVar(value=str(DEFAULT_OVERLAY_SETTINGS["scale"]))
         self.ws_light_var = tk.StringVar(value="●")
         self.ws_text_var = tk.StringVar(value="直播间链接状态：未连接")
 
         self._clear_click_time: float = 0.0
         self._blacklist_clear_click_time: float = 0.0
         self._prev_slot: int = self.queue_slot_choice_var.get()
+        self._overlay_window: tk.Toplevel | None = None
+        self._overlay_canvas: tk.Canvas | None = None
+        self._overlay_photo: Any | None = None
+        self._overlay_items: list[str] = []
+        self._overlay_style: dict[str, Any] = {}
+        self._overlay_refresh_running = False
+        self._overlay_topmost = True
+        self._overlay_drag_origin: tuple[int, int] | None = None
+        self._overlay_window_origin: tuple[int, int] | None = None
+        self._overlay_resize_mode = ""
+        self._overlay_resize_origin: tuple[int, int] | None = None
+        self._overlay_resize_geometry: tuple[int, int, int, int] | None = None
+        self._overlay_last_size: tuple[int, int] = (0, 0)
+        self._overlay_font_cache: dict[tuple[str, int], Any] = {}
+        self._overlay_font_path = self._detect_overlay_font_path()
 
         self._build_ui()
         self.load_from_file()
@@ -273,6 +334,22 @@ class ControlPanelApp:
             self.root.after(200, self.start_server)
         self.root.after(1000, self.refresh_runtime_status)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    def _apply_root_icon(self) -> None:
+        icon_candidates = (
+            CORE_DIR / "256x.ico",
+            APP_DIR / "core" / "256x.ico",
+            BUNDLE_DIR / "core" / "256x.ico",
+            APP_DIR / "256x.ico",
+        )
+        for icon_path in icon_candidates:
+            if not icon_path.exists():
+                continue
+            try:
+                self.root.iconbitmap(str(icon_path))
+                return
+            except tk.TclError:
+                continue
 
     def _build_ui(self) -> None:
         main = ttk.Frame(self.root, padding=12)
@@ -291,7 +368,8 @@ class ControlPanelApp:
         ttk.Button(btn_bar, text="启动后端", command=self.start_server).grid(row=0, column=0, padx=(0, 6))
         ttk.Button(btn_bar, text="停止后端", command=self.stop_server).grid(row=0, column=1, padx=(0, 6))
         ttk.Button(btn_bar, text="配置页", command=self.open_config).grid(row=0, column=2, padx=(0, 6))
-        ttk.Button(btn_bar, text="排队展示页", command=self.open_web).grid(row=0, column=3)
+        ttk.Button(btn_bar, text="排队展示页", command=self.open_web).grid(row=0, column=3, padx=(0, 6))
+        ttk.Button(btn_bar, text="透明弹窗", command=self.open_overlay_window).grid(row=0, column=4)
 
         ttk.Label(top, textvariable=self.status_var, foreground="#0b5").pack(side="left", padx=(16, 0))
 
@@ -415,6 +493,90 @@ class ControlPanelApp:
             item_id = parts[0].strip()
             content = parts[1].strip() if len(parts) > 1 else ""
             return item_id, content
+
+    @staticmethod
+    def _queue_entry_to_item(item_id: str, content: str) -> str:
+        try:
+            backend_server = load_backend_server_module()
+            return str(backend_server.queue_parts_to_item(item_id, content) or "").strip()
+        except Exception:
+            item_id_text = str(item_id or "").strip()
+            content_text = str(content or "").strip()
+            return f"{item_id_text} {content_text}".rstrip()
+
+    def _queue_entries_to_items(self, entries: list[dict[str, str]]) -> list[str]:
+        items: list[str] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            item = self._queue_entry_to_item(entry.get("id", ""), entry.get("content", ""))
+            if item:
+                items.append(item)
+        return items
+
+    def _load_style_data(self) -> dict[str, Any]:
+        style = dict(self._DEFAULT_STYLE)
+        try:
+            backend_server = load_backend_server_module()
+            data = backend_server.load_style()
+            if isinstance(data, dict):
+                style.update(data)
+        except Exception:
+            pass
+        return style
+
+    @staticmethod
+    def _detect_overlay_font_path() -> str:
+        if sys.platform != "win32":
+            return ""
+        fonts_dir = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+        candidates = (
+            "msyhbd.ttc",
+            "msyh.ttc",
+            "simhei.ttf",
+            "simsun.ttc",
+            "arial.ttf",
+        )
+        for candidate in candidates:
+            path = fonts_dir / candidate
+            if path.exists():
+                return str(path)
+        return ""
+
+    @staticmethod
+    def _sanitize_overlay_dimension(value: Any, default: int, minimum: int) -> int:
+        try:
+            parsed = int(str(value).strip() or default)
+        except (TypeError, ValueError):
+            parsed = default
+        return max(minimum, parsed)
+
+    @staticmethod
+    def _sanitize_overlay_scale(value: Any) -> int:
+        try:
+            parsed = int(str(value).strip() or DEFAULT_OVERLAY_SETTINGS["scale"])
+        except (TypeError, ValueError):
+            parsed = DEFAULT_OVERLAY_SETTINGS["scale"]
+        return max(40, min(250, parsed))
+
+    def _get_overlay_settings(self) -> dict[str, int]:
+        return {
+            "width": self._sanitize_overlay_dimension(self.overlay_width_var.get(), DEFAULT_OVERLAY_SETTINGS["width"], OVERLAY_MIN_WIDTH),
+            "height": self._sanitize_overlay_dimension(self.overlay_height_var.get(), DEFAULT_OVERLAY_SETTINGS["height"], OVERLAY_MIN_HEIGHT),
+            "scale": self._sanitize_overlay_scale(self.overlay_scale_var.get()),
+        }
+
+    def _set_overlay_settings(self, settings: dict[str, Any] | None) -> dict[str, int]:
+        raw = settings if isinstance(settings, dict) else {}
+        normalized = {
+            "width": self._sanitize_overlay_dimension(raw.get("width", DEFAULT_OVERLAY_SETTINGS["width"]), DEFAULT_OVERLAY_SETTINGS["width"], OVERLAY_MIN_WIDTH),
+            "height": self._sanitize_overlay_dimension(raw.get("height", DEFAULT_OVERLAY_SETTINGS["height"]), DEFAULT_OVERLAY_SETTINGS["height"], OVERLAY_MIN_HEIGHT),
+            "scale": self._sanitize_overlay_scale(raw.get("scale", DEFAULT_OVERLAY_SETTINGS["scale"])),
+        }
+        self.overlay_width_var.set(str(normalized["width"]))
+        self.overlay_height_var.set(str(normalized["height"]))
+        self.overlay_scale_var.set(str(normalized["scale"]))
+        return normalized
 
     def _backend_is_running(self) -> bool:
         return bool(self.server_proc and self.server_proc.poll() is None)
@@ -598,6 +760,537 @@ class ControlPanelApp:
     def _auto_refresh_queue(self) -> None:
         threading.Thread(target=self._refresh_queue_list, daemon=True).start()
         self.root.after(3000, self._auto_refresh_queue)
+
+    def _overlay_window_alive(self) -> bool:
+        return bool(self._overlay_window and self._overlay_window.winfo_exists())
+
+    def _overlay_default_geometry(self) -> str:
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        settings = self._get_overlay_settings()
+        width = min(screen_w - 48, settings["width"])
+        height = min(screen_h - 48, settings["height"])
+        x = max(24, screen_w - width - 80)
+        y = max(24, min(120, screen_h - height - 80))
+        return f"{width}x{height}+{x}+{y}"
+
+    def open_overlay_window(self) -> None:
+        if not PIL_AVAILABLE:
+            messagebox.showerror("缺少依赖", "透明弹窗需要 Pillow（PIL）支持。")
+            return
+
+        if self._overlay_window_alive():
+            self._overlay_window.deiconify()
+            self._overlay_window.lift()
+            return
+
+        window = tk.Toplevel(self.root)
+        window.title("排队透明弹窗")
+        window.overrideredirect(True)
+        window.resizable(True, True)
+        window.geometry(self._overlay_default_geometry())
+        window.configure(bg=OVERLAY_TRANSPARENT_COLOR)
+        try:
+            window.wm_attributes("-transparentcolor", OVERLAY_TRANSPARENT_COLOR)
+        except tk.TclError:
+            try:
+                window.wm_attributes("-alpha", 0.96)
+            except tk.TclError:
+                pass
+        try:
+            window.wm_attributes("-topmost", True)
+        except tk.TclError:
+            pass
+
+        canvas = tk.Canvas(
+            window,
+            bg=OVERLAY_TRANSPARENT_COLOR,
+            bd=0,
+            highlightthickness=0,
+            relief="flat",
+        )
+        canvas.pack(fill="both", expand=True)
+
+        window.bind("<Escape>", lambda _event: self._close_overlay_window())
+        window.bind("<Button-3>", lambda _event: self._close_overlay_window())
+        window.bind("<Double-Button-1>", lambda _event: self._toggle_overlay_topmost())
+        window.bind("<Configure>", self._on_overlay_window_configure)
+
+        canvas.bind("<Configure>", lambda _event: self._redraw_overlay())
+        canvas.bind("<Motion>", self._on_overlay_canvas_motion)
+        canvas.bind("<Leave>", lambda _event: canvas.configure(cursor=""))
+        canvas.bind("<ButtonPress-1>", self._begin_overlay_interaction)
+        canvas.bind("<B1-Motion>", self._perform_overlay_interaction)
+        canvas.bind("<ButtonRelease-1>", self._end_overlay_interaction)
+        canvas.bind("<Button-3>", lambda _event: self._close_overlay_window())
+        canvas.bind("<Double-Button-1>", lambda _event: self._toggle_overlay_topmost())
+
+        self._overlay_window = window
+        self._overlay_canvas = canvas
+        self._overlay_photo = None
+        self._overlay_items = []
+        self._overlay_style = self._load_style_data()
+        self._overlay_last_size = (0, 0)
+        self.root.update_idletasks()
+        self._apply_overlay_native_window_style()
+        self._append_log("[GUI] 透明弹窗已打开：中间拖动，边框缩放，双击切换置顶，右键关闭")
+        self._refresh_overlay_async()
+
+    def _close_overlay_window(self) -> None:
+        if not self._overlay_window_alive():
+            self._overlay_window = None
+            self._overlay_canvas = None
+            self._overlay_photo = None
+            return
+        try:
+            self._overlay_window.destroy()
+        except tk.TclError:
+            pass
+        self._overlay_window = None
+        self._overlay_canvas = None
+        self._overlay_photo = None
+        self._overlay_refresh_running = False
+        self._overlay_resize_mode = ""
+        self._overlay_drag_origin = None
+        self._overlay_resize_origin = None
+
+    def _apply_overlay_native_window_style(self) -> None:
+        if sys.platform != "win32" or ctypes is None or not self._overlay_window_alive():
+            return
+        try:
+            hwnd = self._overlay_window.winfo_id()
+            GWL_EXSTYLE = -20
+            WS_EX_APPWINDOW = 0x00040000
+            WS_EX_TOOLWINDOW = 0x00000080
+            SWP_NOMOVE = 0x0002
+            SWP_NOSIZE = 0x0001
+            SWP_NOZORDER = 0x0004
+            SWP_FRAMECHANGED = 0x0020
+            exstyle = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            exstyle = (exstyle | WS_EX_APPWINDOW) & ~WS_EX_TOOLWINDOW
+            ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, exstyle)
+            ctypes.windll.user32.SetWindowPos(
+                hwnd,
+                0,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED,
+            )
+            self._overlay_window.withdraw()
+            self._overlay_window.after(10, self._restore_overlay_window)
+        except Exception as exc:  # noqa: BLE001
+            self._append_log(f"[GUI] 透明弹窗任务栏样式设置失败: {exc}")
+
+    def _restore_overlay_window(self) -> None:
+        if not self._overlay_window_alive():
+            return
+        self._overlay_window.deiconify()
+        self._overlay_window.lift()
+        try:
+            self._overlay_window.wm_attributes("-topmost", self._overlay_topmost)
+        except tk.TclError:
+            pass
+
+    @staticmethod
+    def _overlay_hit_test(x: int, y: int, width: int, height: int) -> str:
+        margin = OVERLAY_RESIZE_MARGIN
+        left = x <= margin
+        right = x >= width - margin
+        top = y <= margin
+        bottom = y >= height - margin
+        if top and left:
+            return "nw"
+        if top and right:
+            return "ne"
+        if bottom and left:
+            return "sw"
+        if bottom and right:
+            return "se"
+        if left:
+            return "w"
+        if right:
+            return "e"
+        if top:
+            return "n"
+        if bottom:
+            return "s"
+        return ""
+
+    @staticmethod
+    def _overlay_cursor_for_mode(mode: str) -> str:
+        return {
+            "n": "sb_v_double_arrow",
+            "s": "sb_v_double_arrow",
+            "e": "sb_h_double_arrow",
+            "w": "sb_h_double_arrow",
+            "ne": "size_ne_sw",
+            "sw": "size_ne_sw",
+            "nw": "size_nw_se",
+            "se": "size_nw_se",
+        }.get(mode, "")
+
+    def _set_overlay_cursor(self, cursor: str) -> None:
+        if self._overlay_canvas is None:
+            return
+        try:
+            self._overlay_canvas.configure(cursor=cursor)
+        except tk.TclError:
+            self._overlay_canvas.configure(cursor="")
+
+    def _on_overlay_canvas_motion(self, event) -> None:
+        if not self._overlay_window_alive() or self._overlay_canvas is None:
+            return
+        if self._overlay_drag_origin or self._overlay_resize_mode:
+            return
+        mode = self._overlay_hit_test(
+            int(event.x),
+            int(event.y),
+            self._overlay_canvas.winfo_width(),
+            self._overlay_canvas.winfo_height(),
+        )
+        self._set_overlay_cursor(self._overlay_cursor_for_mode(mode))
+
+    def _begin_overlay_interaction(self, event) -> None:
+        if not self._overlay_window_alive() or self._overlay_canvas is None:
+            return
+        mode = self._overlay_hit_test(
+            int(event.x),
+            int(event.y),
+            self._overlay_canvas.winfo_width(),
+            self._overlay_canvas.winfo_height(),
+        )
+        if mode:
+            self._overlay_resize_mode = mode
+            self._overlay_resize_origin = (event.x_root, event.y_root)
+            self._overlay_resize_geometry = (
+                self._overlay_window.winfo_x(),
+                self._overlay_window.winfo_y(),
+                self._overlay_window.winfo_width(),
+                self._overlay_window.winfo_height(),
+            )
+            self._set_overlay_cursor(self._overlay_cursor_for_mode(mode))
+            return
+        self._overlay_drag_origin = (event.x_root, event.y_root)
+        self._overlay_window_origin = (
+            self._overlay_window.winfo_x(),
+            self._overlay_window.winfo_y(),
+        )
+        self._set_overlay_cursor("fleur")
+
+    def _perform_overlay_interaction(self, event) -> None:
+        if not self._overlay_window_alive():
+            return
+        if self._overlay_resize_mode and self._overlay_resize_origin and self._overlay_resize_geometry:
+            dx = event.x_root - self._overlay_resize_origin[0]
+            dy = event.y_root - self._overlay_resize_origin[1]
+            x, y, width, height = self._overlay_resize_geometry
+            new_x, new_y, new_w, new_h = x, y, width, height
+            if "e" in self._overlay_resize_mode:
+                new_w = max(OVERLAY_MIN_WIDTH, width + dx)
+            if "s" in self._overlay_resize_mode:
+                new_h = max(OVERLAY_MIN_HEIGHT, height + dy)
+            if "w" in self._overlay_resize_mode:
+                new_w = max(OVERLAY_MIN_WIDTH, width - dx)
+                new_x = x + (width - new_w)
+            if "n" in self._overlay_resize_mode:
+                new_h = max(OVERLAY_MIN_HEIGHT, height - dy)
+                new_y = y + (height - new_h)
+            self._overlay_window.geometry(f"{new_w}x{new_h}+{new_x}+{new_y}")
+            return
+        if not self._overlay_drag_origin or not self._overlay_window_origin:
+            return
+        dx = event.x_root - self._overlay_drag_origin[0]
+        dy = event.y_root - self._overlay_drag_origin[1]
+        x = self._overlay_window_origin[0] + dx
+        y = self._overlay_window_origin[1] + dy
+        self._overlay_window.geometry(f"+{x}+{y}")
+
+    def _end_overlay_interaction(self, _event) -> None:
+        self._overlay_drag_origin = None
+        self._overlay_window_origin = None
+        self._overlay_resize_mode = ""
+        self._overlay_resize_origin = None
+        self._overlay_resize_geometry = None
+        self._set_overlay_cursor("")
+
+    def _on_overlay_window_configure(self, event) -> None:
+        if not self._overlay_window_alive():
+            return
+        if event.widget is not self._overlay_window:
+            return
+        current_size = (self._overlay_window.winfo_width(), self._overlay_window.winfo_height())
+        if current_size != self._overlay_last_size:
+            self._overlay_last_size = current_size
+            self.overlay_width_var.set(str(max(OVERLAY_MIN_WIDTH, current_size[0])))
+            self.overlay_height_var.set(str(max(OVERLAY_MIN_HEIGHT, current_size[1])))
+            self._redraw_overlay()
+
+    def _toggle_overlay_topmost(self) -> None:
+        if not self._overlay_window_alive():
+            return
+        self._overlay_topmost = not self._overlay_topmost
+        try:
+            self._overlay_window.wm_attributes("-topmost", self._overlay_topmost)
+        except tk.TclError:
+            pass
+        status = "开启" if self._overlay_topmost else "关闭"
+        self._append_log(f"[GUI] 透明弹窗置顶已{status}")
+
+    def _refresh_overlay_async(self) -> None:
+        if not self._overlay_window_alive():
+            self._overlay_refresh_running = False
+            return
+        if self._overlay_refresh_running:
+            return
+        self._overlay_refresh_running = True
+        threading.Thread(target=self._refresh_overlay_worker, daemon=True).start()
+
+    def _refresh_overlay_worker(self) -> None:
+        try:
+            entries = self._fetch_queue_entries_from_backend()
+            if entries is None:
+                entries = self._read_queue_entries_from_csv()
+            items = [
+                f"{str(entry.get('id', '')).strip()} {str(entry.get('content', '')).strip()}".rstrip()
+                for entry in entries
+                if isinstance(entry, dict) and str(entry.get("id", "") or entry.get("content", "")).strip()
+            ]
+            style = self._load_style_data()
+        except Exception:
+            items = []
+            style = dict(self._DEFAULT_STYLE)
+
+        def _apply() -> None:
+            if not self._overlay_window_alive():
+                self._overlay_refresh_running = False
+                return
+            changed = items != self._overlay_items or style != self._overlay_style
+            self._overlay_items = list(items)
+            self._overlay_style = dict(style)
+            self._overlay_refresh_running = False
+            if changed:
+                self._redraw_overlay()
+            self.root.after(OVERLAY_REFRESH_MS, self._refresh_overlay_async)
+
+        self.root.after(0, _apply)
+
+    def _overlay_get_font(self, size: int) -> Any:
+        size = max(12, int(size))
+        cache_key = (self._overlay_font_path, size)
+        cached = self._overlay_font_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        try:
+            if self._overlay_font_path:
+                font = ImageFont.truetype(self._overlay_font_path, size=size)
+            else:
+                font = ImageFont.load_default()
+        except Exception:  # noqa: BLE001
+            font = ImageFont.load_default()
+        self._overlay_font_cache[cache_key] = font
+        return font
+
+    @staticmethod
+    def _parse_overlay_color(value: Any, fallback: str) -> tuple[int, int, int, int]:
+        text = str(value or "").strip() or fallback
+        lowered = text.lower()
+        if lowered.startswith("rgba(") and lowered.endswith(")"):
+            parts = [part.strip() for part in lowered[5:-1].split(",")]
+            if len(parts) == 4:
+                try:
+                    red = max(0, min(255, int(float(parts[0]))))
+                    green = max(0, min(255, int(float(parts[1]))))
+                    blue = max(0, min(255, int(float(parts[2]))))
+                    alpha_raw = float(parts[3])
+                    alpha = int(max(0.0, min(1.0, alpha_raw)) * 255) if alpha_raw <= 1 else int(max(0, min(255, alpha_raw)))
+                    return red, green, blue, alpha
+                except ValueError:
+                    pass
+        if lowered.startswith("rgb(") and lowered.endswith(")"):
+            parts = [part.strip() for part in lowered[4:-1].split(",")]
+            if len(parts) == 3:
+                try:
+                    return (
+                        max(0, min(255, int(float(parts[0])))),
+                        max(0, min(255, int(float(parts[1])))),
+                        max(0, min(255, int(float(parts[2])))),
+                        255,
+                    )
+                except ValueError:
+                    pass
+        try:
+            red, green, blue = ImageColor.getrgb(text)
+        except Exception:  # noqa: BLE001
+            red, green, blue = ImageColor.getrgb(fallback)
+        return red, green, blue, 255
+
+    @staticmethod
+    def _make_overlay_gradient(size: tuple[int, int], start: tuple[int, int, int, int], end: tuple[int, int, int, int], horizontal: bool) -> Any:
+        width, height = size
+        gradient = Image.new("RGBA", (max(1, width), max(1, height)), start)
+        draw = ImageDraw.Draw(gradient)
+        span = (width - 1) if horizontal else (height - 1)
+        span = max(1, span)
+        for offset in range(span + 1):
+            ratio = offset / span
+            color = tuple(
+                int(start[idx] + (end[idx] - start[idx]) * ratio)
+                for idx in range(4)
+            )
+            if horizontal:
+                draw.line((offset, 0, offset, height), fill=color)
+            else:
+                draw.line((0, offset, width, offset), fill=color)
+        return gradient
+
+    def _wrap_overlay_text(self, text: str, font: Any, max_width: int) -> str:
+        content = str(text or "").strip()
+        if not content or max_width <= 24:
+            return content
+        probe = Image.new("RGBA", (4, 4), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(probe)
+        lines: list[str] = []
+        current = ""
+        for char in content:
+            candidate = f"{current}{char}"
+            try:
+                width = int(draw.textlength(candidate, font=font))
+            except Exception:  # noqa: BLE001
+                width = len(candidate) * 12
+            if current and width > max_width:
+                lines.append(current)
+                current = char
+            else:
+                current = candidate
+        if current:
+            lines.append(current)
+        return "\n".join(lines)
+
+    def _draw_overlay_gradient_text(
+        self,
+        image: Any,
+        text: str,
+        x: int,
+        y: int,
+        font: Any,
+        start_color: tuple[int, int, int, int],
+        end_color: tuple[int, int, int, int],
+        stroke_color: tuple[int, int, int, int],
+        *,
+        stroke_width: int,
+        horizontal: bool,
+        spacing: int = 4,
+    ) -> tuple[int, int]:
+        if not text:
+            return 0, 0
+        probe = Image.new("RGBA", (4, 4), (0, 0, 0, 0))
+        probe_draw = ImageDraw.Draw(probe)
+        bbox = probe_draw.multiline_textbbox(
+            (0, 0),
+            text,
+            font=font,
+            spacing=spacing,
+            stroke_width=stroke_width,
+        )
+        width = max(1, bbox[2] - bbox[0])
+        height = max(1, bbox[3] - bbox[1])
+        pad = stroke_width + 4
+        layer_size = (width + pad * 2, height + pad * 2)
+        text_pos = (pad - bbox[0], pad - bbox[1])
+
+        outline = Image.new("RGBA", layer_size, (0, 0, 0, 0))
+        outline_draw = ImageDraw.Draw(outline)
+        outline_draw.multiline_text(
+            text_pos,
+            text,
+            font=font,
+            fill=stroke_color,
+            spacing=spacing,
+            stroke_width=stroke_width,
+            stroke_fill=stroke_color,
+        )
+
+        fill_mask = Image.new("L", layer_size, 0)
+        fill_draw = ImageDraw.Draw(fill_mask)
+        fill_draw.multiline_text(
+            text_pos,
+            text,
+            font=font,
+            fill=255,
+            spacing=spacing,
+        )
+        gradient = self._make_overlay_gradient(layer_size, start_color, end_color, horizontal)
+        fill_layer = Image.new("RGBA", layer_size, (0, 0, 0, 0))
+        fill_layer.paste(gradient, (0, 0), fill_mask)
+        outline.alpha_composite(fill_layer)
+        image.alpha_composite(outline, (int(x), int(y)))
+        return width + pad * 2, height + pad * 2
+
+    def _redraw_overlay(self) -> None:
+        if not self._overlay_window_alive() or self._overlay_canvas is None or not PIL_AVAILABLE:
+            return
+        canvas = self._overlay_canvas
+        width = max(1, canvas.winfo_width())
+        height = max(1, canvas.winfo_height())
+        if width <= 1 or height <= 1:
+            return
+
+        style = dict(self._DEFAULT_STYLE)
+        style.update(self._overlay_style)
+        overlay_settings = self._get_overlay_settings()
+        try:
+            queue_font_size = int(str(style.get("queue_font_size", 50)).strip() or 50)
+        except ValueError:
+            queue_font_size = 50
+        queue_font_size = max(14, int(queue_font_size * overlay_settings["scale"] / 100))
+
+        grad_start = self._parse_overlay_color(style.get("text_grad_start", "#f7f7f7"), "#f7f7f7")
+        grad_end = self._parse_overlay_color(style.get("text_grad_end", "rgba(255,255,255,0.6)"), "rgba(255,255,255,0.6)")
+        stroke = self._parse_overlay_color(style.get("text_stroke_color", "#000000"), "#000000")
+        border_base = self._parse_overlay_color(style.get("text_color", "#eaf6ff"), "#eaf6ff")
+        border_color = (border_base[0], border_base[1], border_base[2], 110)
+
+        image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        border_px = 1
+        border_draw = ImageDraw.Draw(image)
+        for offset in range(border_px):
+            border_draw.rectangle(
+                (offset, offset, width - 1 - offset, height - 1 - offset),
+                outline=border_color,
+            )
+
+        queue_font = self._overlay_get_font(queue_font_size)
+        queue_x = 14
+        queue_y = 12
+        max_text_width = max(80, width - queue_x - 16)
+        line_gap = max(2, int(queue_font_size * 0.16))
+        stroke_width = max(2, int(queue_font_size * 0.05))
+        for item in self._overlay_items:
+            text = str(item or "").strip()
+            if not text:
+                continue
+            wrapped = self._wrap_overlay_text(text, queue_font, max_text_width)
+            _text_width, text_height = self._draw_overlay_gradient_text(
+                image,
+                wrapped,
+                queue_x,
+                queue_y,
+                queue_font,
+                grad_start,
+                grad_end,
+                stroke,
+                stroke_width=stroke_width,
+                horizontal=True,
+            )
+            queue_y += text_height + line_gap
+            if queue_y >= height - queue_font_size:
+                break
+
+        self._overlay_photo = ImageTk.PhotoImage(image)
+        canvas.delete("all")
+        canvas.create_image(0, 0, anchor="nw", image=self._overlay_photo)
 
     def _build_blacklist_tab(self, frame: ttk.Frame) -> None:
         frame.columnconfigure(0, weight=1)
@@ -1198,10 +1891,31 @@ class ControlPanelApp:
         import time as _t
         self._style_save_status_var.set(f"✓ 修改成功 {_t.strftime('%H:%M:%S')}")
         self._append_log("[GUI] 样式已保存，刷新排队展示页即可生效")
+        if self._overlay_window_alive():
+            self._overlay_style = dict(self._load_style_data())
+            self._redraw_overlay()
 
     def _reset_style(self) -> None:
         for key, var in self._style_vars.items():
             var.set(self._DEFAULT_STYLE.get(key, ""))
+
+    def _apply_overlay_settings_from_ui(self) -> None:
+        settings = self._set_overlay_settings(self._get_overlay_settings())
+        self._apply_overlay_settings_to_window(settings)
+        self._append_log(
+            f"[GUI] 透明窗口设置已应用：{settings['width']}x{settings['height']}，缩放 {settings['scale']}%"
+        )
+
+    def _apply_overlay_settings_to_window(self, settings: dict[str, int] | None = None) -> None:
+        if not self._overlay_window_alive():
+            return
+        normalized = self._set_overlay_settings(settings or self._get_overlay_settings())
+        current_x = self._overlay_window.winfo_x()
+        current_y = self._overlay_window.winfo_y()
+        self._overlay_window.geometry(
+            f"{normalized['width']}x{normalized['height']}+{current_x}+{current_y}"
+        )
+        self._redraw_overlay()
 
     def _build_log_tab(self, frame: ttk.Frame) -> None:
         frame.columnconfigure(0, weight=1)
@@ -1235,6 +1949,7 @@ class ControlPanelApp:
 
     def _build_settings_tab(self, frame: ttk.Frame) -> None:
         frame.columnconfigure(1, weight=1)
+        frame.columnconfigure(2, weight=1)
 
         row = 0
         for label, var, wide in [
@@ -1287,6 +2002,23 @@ class ControlPanelApp:
         ttk.Label(frame, text="语言").grid(row=row, column=0, sticky="w", pady=4)
         lang_cb = ttk.Combobox(frame, textvariable=self.language_var, values=["中文"], state="readonly", width=10)
         lang_cb.grid(row=row, column=1, sticky="w", pady=4)
+        row += 1
+
+        overlay_frame = ttk.LabelFrame(frame, text="透明窗口设置", padding=8)
+        overlay_frame.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(10, 6))
+        overlay_frame.columnconfigure(1, weight=1)
+        overlay_frame.columnconfigure(3, weight=1)
+        ttk.Label(overlay_frame, text="宽度(px)").grid(row=0, column=0, sticky="w", pady=4)
+        ttk.Entry(overlay_frame, textvariable=self.overlay_width_var, width=12).grid(row=0, column=1, sticky="w", pady=4)
+        ttk.Label(overlay_frame, text="高度(px)").grid(row=0, column=2, sticky="w", padx=(16, 0), pady=4)
+        ttk.Entry(overlay_frame, textvariable=self.overlay_height_var, width=12).grid(row=0, column=3, sticky="w", pady=4)
+        ttk.Label(overlay_frame, text="文字缩放(%)").grid(row=1, column=0, sticky="w", pady=4)
+        ttk.Entry(overlay_frame, textvariable=self.overlay_scale_var, width=12).grid(row=1, column=1, sticky="w", pady=4)
+        ttk.Label(
+            overlay_frame,
+            text="窗口支持任务栏显示、OBS 窗口捕获、拖动边框缩放；只显示“ID + 事情”。",
+        ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        ttk.Button(overlay_frame, text="应用到透明窗", command=self._apply_overlay_settings_from_ui).grid(row=1, column=3, sticky="e", pady=4)
         row += 1
 
         btn_bar = ttk.Frame(frame)
@@ -1355,7 +2087,7 @@ class ControlPanelApp:
         )
 
     def _build_about_tab(self, frame: ttk.Frame) -> None:
-        ttk.Label(frame, text="Danmuji 弹幕排队控制台", font=("Microsoft YaHei UI", 15, "bold") if sys.platform == "win32" else ("", 15, "bold")).pack(pady=(20, 6))
+        ttk.Label(frame, text=f"{APP_NAME} 控制台", font=("Microsoft YaHei UI", 15, "bold") if sys.platform == "win32" else ("", 15, "bold")).pack(pady=(20, 6))
         ttk.Label(frame, text=f"版本：v{APP_VERSION}").pack()
         ttk.Separator(frame, orient="horizontal").pack(fill="x", pady=12)
         ttk.Label(frame, text="Bilibili 直播弹幕排队管理工具").pack()
@@ -1558,8 +2290,13 @@ class ControlPanelApp:
         active_slot = self._set_queue_slot_selection(active_slot)
         self._prev_slot = active_slot
         ui_cfg = config.get("ui", {})
+        self._set_overlay_settings(ui_cfg.get("overlay_window", DEFAULT_OVERLAY_SETTINGS))
         self.auto_start_var.set(bool(ui_cfg.get("auto_start_backend", False)))
         self.language_var.set(str(ui_cfg.get("language", "中文")))
+        if self._overlay_window_alive():
+            self._apply_overlay_settings_to_window()
+            self._overlay_style = dict(self._load_style_data())
+            self._redraw_overlay()
         self.status_var.set("已加载配置")
         self._append_log("[GUI] 已加载配置")
 
@@ -1614,6 +2351,7 @@ class ControlPanelApp:
             "ui": {
                 "auto_start_backend": bool(self.auto_start_var.get()),
                 "language": self.language_var.get(),
+                "overlay_window": self._get_overlay_settings(),
             },
         }
 
@@ -1728,6 +2466,8 @@ class ControlPanelApp:
         except OSError as exc:
             messagebox.showerror("保存失败", str(exc))
             return
+        if self._overlay_window_alive():
+            self._apply_overlay_settings_to_window()
         self._switch_queue_slot()
 
     def _read_slot_csv(self, slot: int) -> list[dict[str, str]]:
@@ -1839,6 +2579,7 @@ class ControlPanelApp:
         webbrowser.open(f"http://127.0.0.1:{port}/index")
 
     def on_close(self) -> None:
+        self._close_overlay_window()
         if self.server_proc and self.server_proc.poll() is None:
             self.stop_server()
         self.root.destroy()
