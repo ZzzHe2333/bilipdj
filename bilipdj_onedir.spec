@@ -51,7 +51,8 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="bilipdj",
+    name="弹幕排队姬",
+    icon=str(project_root / "core" / "256x.ico"),
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -66,5 +67,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="bilipdj",
+    name="弹幕排队姬",
 )
