@@ -38,6 +38,7 @@ MANIFEST
 *.spec
 !bilipdj_onedir.spec
 !paiduijitm.spec
+core/ui/cdang_*.css
 
 # Installer logs
 pip-log.txt

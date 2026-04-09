@@ -53,6 +53,7 @@ BLACKLIST_PATH = PD_DIR / "blacklist.csv"
 QUANXIAN_PATH = _YAML_DIR / "quanxian.yaml"
 KAIGUAN_PATH = _YAML_DIR / "kaiguan.yaml"
 STYLE_PATH = _YAML_DIR / "style.json"
+LIVE_STYLE_CSS_PATH = UI_DIR / "moren.css"
 
 WS_MAGIC_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 MAX_SAFE_INTEGER = (1 << 53) - 1
@@ -67,6 +68,20 @@ try:
     import brotli
 except ImportError:  # pragma: no cover - 可选依赖
     brotli = None
+
+
+STYLE_CSS_VAR_MAP: dict[str, str] = {
+    "bg1": "--bg1",
+    "bg2": "--bg2",
+    "bg3": "--bg3",
+    "text_color": "--text-color",
+    "queue_font_size": "--queue-font-size",
+    "queue_font_weight": "--queue-font-weight",
+    "queue_font_style": "--queue-font-style",
+    "text_grad_start": "--text-grad-start",
+    "text_grad_end": "--text-grad-end",
+    "text_stroke_color": "--text-stroke",
+}
 
 
 class BackendServer(ThreadingHTTPServer):
@@ -697,6 +712,7 @@ def ensure_runtime_layout() -> None:
             ensure_queue_archive_row_timestamps(slot_file)
     if not BLACKLIST_PATH.exists():
         write_blacklist_entries(BLACKLIST_PATH, blacklist_names_to_entries(load_quanxian().get("blacklist", [])))
+    ensure_style_css_archives()
 
 
 def load_config() -> dict[str, Any]:
@@ -1399,7 +1415,10 @@ class QueueManager:
 
     def switch_to_slot(self, slot: int) -> list[str]:
         """Load queue from a specific archive slot, update in-memory queue, and broadcast."""
+        old_slot = self._queue_archive.get_active_slot()
+        reconcile_live_css_with_archive(old_slot)
         self._queue_archive.set_active_slot(slot)
+        apply_css_archive_to_live(slot, force=True)
         snapshot = self._queue_archive.read_snapshot_by_slot(slot)
         if snapshot is None:
             self._logger.info("[队列] 切换到槽位 %s：槽位文件不存在，保持当前队列不变", slot)
@@ -1410,6 +1429,10 @@ class QueueManager:
         self._logger.info(
             "[队列] 已切换到槽位 %s，加载 %s 人（存档时间：%s）",
             slot, len(items), snapshot.get("timestamp", "?"),
+        )
+        self._ws_hub.broadcast_json(
+            None,
+            {"type": "STYLE_UPDATE", "slot": slot, "css": LIVE_STYLE_CSS_PATH.name, "reason": "switch_slot"},
         )
         self._broadcast_and_archive("system", f"switch_slot_{slot}")
         return list(items)
@@ -1870,6 +1893,8 @@ DEFAULT_STYLE: dict[str, Any] = {
     "bg3": "#020409",
     "text_color": "#eaf6ff",
     "queue_font_size": 50,
+    "queue_font_weight": "700",
+    "queue_font_style": "italic",
     "text_grad_start": "#f7f7f7",
     "text_grad_end": "rgba(255,255,255,0.6)",
     "text_stroke_color": "#000000",
@@ -1880,24 +1905,164 @@ DEFAULT_CONFIG["kaiguan"] = dict(DEFAULT_KAIGUAN)
 DEFAULT_CONFIG["style"] = dict(DEFAULT_STYLE)
 
 
-def load_style() -> dict[str, Any]:
+def css_archive_path(slot: int) -> Path:
+    normalized = max(1, min(MAX_QUEUE_ARCHIVE_SLOTS, int(slot)))
+    return UI_DIR / f"cdang_{normalized}.css"
+
+
+def build_index_css(style: dict[str, Any] | None = None) -> str:
+    merged = dict(DEFAULT_STYLE)
+    if isinstance(style, dict):
+        merged.update(style)
+    try:
+        queue_font_size = max(8, int(merged.get("queue_font_size", 50)))
+    except (TypeError, ValueError):
+        queue_font_size = 50
+    queue_font_weight = str(merged.get("queue_font_weight", DEFAULT_STYLE["queue_font_weight"]) or DEFAULT_STYLE["queue_font_weight"]).strip()
+    queue_font_style = str(merged.get("queue_font_style", DEFAULT_STYLE["queue_font_style"]) or DEFAULT_STYLE["queue_font_style"]).strip()
+    return (
+        ":root {\n"
+        f"    --bg1: {merged.get('bg1', DEFAULT_STYLE['bg1'])};\n"
+        f"    --bg2: {merged.get('bg2', DEFAULT_STYLE['bg2'])};\n"
+        f"    --bg3: {merged.get('bg3', DEFAULT_STYLE['bg3'])};\n"
+        f"    --text-color: {merged.get('text_color', DEFAULT_STYLE['text_color'])};\n"
+        f"    --queue-font-size: {queue_font_size}px;\n"
+        f"    --queue-font-weight: {queue_font_weight};\n"
+        f"    --queue-font-style: {queue_font_style};\n"
+        f"    --text-grad-start: {merged.get('text_grad_start', DEFAULT_STYLE['text_grad_start'])};\n"
+        f"    --text-grad-end: {merged.get('text_grad_end', DEFAULT_STYLE['text_grad_end'])};\n"
+        f"    --text-stroke: {merged.get('text_stroke_color', DEFAULT_STYLE['text_stroke_color'])};\n"
+        "}\n"
+        "html, body { margin: 0; background: transparent !important; color: var(--text-color); }\n"
+        ".wk { width: 100%; height: 80%; text-overflow: ellipsis; white-space: nowrap; }\n"
+        ".div { width: 60%; height: 90%; line-height: 1.3; font-size: var(--queue-font-size); font-weight: var(--queue-font-weight); font-style: var(--queue-font-style); float: left; margin-top: 5%; text-align: left; overflow: hidden; }\n"
+        ".div span { -webkit-text-stroke: 2px var(--text-stroke); color: var(--text-color); }\n"
+        ".div span.pdj-confirm-pending { animation: pdjPendingBlink 0.8s infinite alternate; filter: brightness(1.35); }\n"
+        "@keyframes pdjPendingBlink { from { opacity: 1; transform: scale(1); } to { opacity: 0.5; transform: scale(1.02); } }\n"
+        ".vText { float: left; width: 10%; height: 100%; overflow: hidden; white-space: nowrap; font-weight: var(--queue-font-weight); font-style: var(--queue-font-style); text-align: center; font-size: var(--queue-font-size); }\n"
+        ".vText div { height: 20%; padding-top: 20%; writing-mode: tb-rl; display: inline-block; }\n"
+        ".vText span { -webkit-text-stroke: 3px var(--text-stroke); color: var(--text-color); }\n"
+    )
+
+
+def parse_style_from_css_text(css_text: str) -> dict[str, Any]:
+    if not css_text:
+        return {}
+    result: dict[str, Any] = {}
+    for key, css_var in STYLE_CSS_VAR_MAP.items():
+        pattern = re.compile(rf"{re.escape(css_var)}\s*:\s*([^;]+);")
+        match = pattern.search(css_text)
+        if not match:
+            continue
+        value = match.group(1).strip()
+        if key == "queue_font_size":
+            if value.lower().endswith("px"):
+                value = value[:-2].strip()
+            try:
+                result[key] = max(8, int(float(value)))
+            except ValueError:
+                continue
+        else:
+            result[key] = value
+    return result
+
+
+def ensure_style_css_archives() -> None:
+    UI_DIR.mkdir(parents=True, exist_ok=True)
+    seed_style = dict(DEFAULT_STYLE)
     raw_config = _read_raw_config()
+    config_style = raw_config.get("style", {})
+    if isinstance(config_style, dict):
+        seed_style.update(config_style)
+    if STYLE_PATH.exists():
+        try:
+            style_json = json.loads(STYLE_PATH.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            style_json = {}
+        if isinstance(style_json, dict):
+            seed_style.update(style_json)
+
+    default_css = build_index_css(seed_style)
+    if not LIVE_STYLE_CSS_PATH.exists():
+        LIVE_STYLE_CSS_PATH.write_text(default_css, encoding="utf-8")
+    live_css = LIVE_STYLE_CSS_PATH.read_text(encoding="utf-8")
+
+    for slot in range(1, MAX_QUEUE_ARCHIVE_SLOTS + 1):
+        archive_path = css_archive_path(slot)
+        if not archive_path.exists():
+            archive_path.write_text(live_css, encoding="utf-8")
+
+
+def _current_style_slot(raw_config: dict[str, Any] | None = None) -> int:
+    config = raw_config if isinstance(raw_config, dict) else _read_raw_config()
+    queue_archive = config.get("queue_archive", {})
+    try:
+        slot = int(queue_archive.get("active_slot", 1))
+    except (TypeError, ValueError):
+        slot = 1
+    return max(1, min(MAX_QUEUE_ARCHIVE_SLOTS, slot))
+
+
+def reconcile_live_css_with_archive(slot: int) -> str:
+    ensure_style_css_archives()
+    archive_path = css_archive_path(slot)
+    live_text = LIVE_STYLE_CSS_PATH.read_text(encoding="utf-8") if LIVE_STYLE_CSS_PATH.exists() else ""
+    archive_text = archive_path.read_text(encoding="utf-8") if archive_path.exists() else ""
+
+    if not live_text and archive_text:
+        LIVE_STYLE_CSS_PATH.write_text(archive_text, encoding="utf-8")
+        return "archive"
+    if live_text and not archive_text:
+        archive_path.write_text(live_text, encoding="utf-8")
+        return "live"
+    if live_text == archive_text:
+        return "same"
+
+    live_mtime = LIVE_STYLE_CSS_PATH.stat().st_mtime if LIVE_STYLE_CSS_PATH.exists() else 0.0
+    archive_mtime = archive_path.stat().st_mtime if archive_path.exists() else 0.0
+    if live_mtime >= archive_mtime:
+        archive_path.write_text(live_text, encoding="utf-8")
+        return "live"
+    LIVE_STYLE_CSS_PATH.write_text(archive_text, encoding="utf-8")
+    return "archive"
+
+
+def apply_css_archive_to_live(slot: int, *, force: bool = False) -> bool:
+    ensure_style_css_archives()
+    archive_path = css_archive_path(slot)
+    if not archive_path.exists():
+        archive_path.write_text(build_index_css(DEFAULT_STYLE), encoding="utf-8")
+    archive_text = archive_path.read_text(encoding="utf-8")
+    live_text = LIVE_STYLE_CSS_PATH.read_text(encoding="utf-8") if LIVE_STYLE_CSS_PATH.exists() else ""
+    if not force and live_text == archive_text:
+        return False
+    LIVE_STYLE_CSS_PATH.write_text(archive_text, encoding="utf-8")
+    return True
+
+
+def load_style() -> dict[str, Any]:
+    ensure_style_css_archives()
+    raw_config = _read_raw_config()
+    result = dict(DEFAULT_STYLE)
     config_section = raw_config.get("style", {})
-    if isinstance(config_section, dict) and config_section:
-        result = dict(DEFAULT_STYLE)
+    if isinstance(config_section, dict):
         result.update(config_section)
-        return result
 
     if STYLE_PATH.exists():
         try:
             data = json.loads(STYLE_PATH.read_text(encoding="utf-8"))
             if isinstance(data, dict):
-                result = dict(DEFAULT_STYLE)
                 result.update(data)
-                return result
         except (json.JSONDecodeError, OSError):
             pass
-    return dict(DEFAULT_STYLE)
+
+    try:
+        css_values = parse_style_from_css_text(LIVE_STYLE_CSS_PATH.read_text(encoding="utf-8"))
+    except OSError:
+        css_values = {}
+    if css_values:
+        result.update(css_values)
+    return result
 
 
 def save_style(data: dict[str, Any]) -> None:
@@ -1907,6 +2072,10 @@ def save_style(data: dict[str, Any]) -> None:
     current = _merge_config(DEFAULT_CONFIG, _read_raw_config())
     current["style"] = merged
     save_config(current)
+    css_text = build_index_css(merged)
+    ensure_style_css_archives()
+    LIVE_STYLE_CSS_PATH.write_text(css_text, encoding="utf-8")
+    css_archive_path(_current_style_slot(current)).write_text(css_text, encoding="utf-8")
 
 
 def load_model() -> dict[str, Any]:
@@ -2857,9 +3026,13 @@ class ApiHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _serve_static_file(self, file_path: Path) -> None:
+        if file_path.name in {"index.html", LIVE_STYLE_CSS_PATH.name}:
+            reconcile_live_css_with_archive(_current_style_slot())
         body = file_path.read_bytes()
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", _guess_content_type(file_path))
+        if file_path.suffix.lower() == ".css":
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -3358,6 +3531,11 @@ class ApiHandler(BaseHTTPRequestHandler):
             if isinstance(payload, dict):
                 save_style(payload)
                 self.server.runtime_config = _merge_config(self.server.runtime_config, {"style": load_style()})
+                active_slot = _current_style_slot()
+                self.server.ws_hub.broadcast_json(
+                    None,
+                    {"type": "STYLE_UPDATE", "slot": active_slot, "css": LIVE_STYLE_CSS_PATH.name, "reason": "save_style"},
+                )
             self._write_json({"status": "ok"})
             return
 
@@ -3376,6 +3554,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             else:
                 current = []
                 entries = []
+            self.server.runtime_config = load_config()
             self._write_json({"status": "ok", "slot": slot, "queue": current, "entries": entries, "size": len(current)})
             return
 
@@ -3582,6 +3761,7 @@ def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
     )
     cfg_active_slot = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(archive_cfg.get("active_slot", 1))))
     httpd.queue_archive.set_active_slot(cfg_active_slot)
+    reconcile_live_css_with_archive(cfg_active_slot)
     httpd.ws_hub = WebSocketHub(logger)
     httpd.queue_manager = QueueManager(
         ws_hub=httpd.ws_hub,

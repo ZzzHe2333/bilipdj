@@ -1785,11 +1785,12 @@ class ControlPanelApp:
     _DEFAULT_STYLE = {
         "bg1": "#0e2036", "bg2": "#060b14", "bg3": "#020409",
         "text_color": "#eaf6ff", "queue_font_size": "50",
+        "queue_font_weight": "700", "queue_font_style": "italic",
         "text_grad_start": "#f7f7f7", "text_grad_end": "rgba(255,255,255,0.6)",
         "text_stroke_color": "#000000",
     }
 
-    def _build_style_tab(self, frame: ttk.Frame) -> None:
+    def _build_style_tab_legacy(self, frame: ttk.Frame) -> None:
         from tkinter import colorchooser
         frame.columnconfigure(0, weight=0)
         frame.columnconfigure(1, weight=1)
@@ -1802,6 +1803,12 @@ class ControlPanelApp:
         right.grid(row=0, column=1, sticky="nsew")
         right.columnconfigure(0, weight=1)
         right.rowconfigure(0, weight=1)
+
+        ttk.Label(
+            left,
+            text="网页背景固定透明，透明窗口与网页共用以下字体样式。",
+            foreground="#666666",
+        ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 10))
 
         fields = [
             ("bg1",              "背景渐变色 1",   True),
@@ -1843,7 +1850,7 @@ class ControlPanelApp:
 
         self._load_style_into_ui()
 
-    def _redraw_style_preview(self) -> None:
+    def _redraw_style_preview_legacy(self) -> None:
         cv = self._style_preview_canvas
         w = cv.winfo_width()
         h = cv.winfo_height()
@@ -1894,6 +1901,13 @@ class ControlPanelApp:
             if val is not None:
                 var.set(str(val))
 
+    def _refresh_style_state(self) -> None:
+        self._load_style_into_ui()
+        self._redraw_style_preview()
+        if self._overlay_window_alive():
+            self._overlay_style = dict(self._load_style_data())
+            self._redraw_overlay()
+
     def _save_style(self) -> None:
         data: dict = {}
         for key, var in self._style_vars.items():
@@ -1933,6 +1947,159 @@ class ControlPanelApp:
     def _reset_style(self) -> None:
         for key, var in self._style_vars.items():
             var.set(self._DEFAULT_STYLE.get(key, ""))
+
+    def _build_style_tab(self, frame: ttk.Frame) -> None:
+        from tkinter import colorchooser
+
+        frame.columnconfigure(0, weight=0)
+        frame.columnconfigure(1, weight=1)
+        frame.rowconfigure(0, weight=1)
+
+        left = ttk.Frame(frame)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 16))
+
+        right = ttk.LabelFrame(frame, text="样式预览")
+        right.grid(row=0, column=1, sticky="nsew")
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(0, weight=1)
+
+        ttk.Label(
+            left,
+            text="网页背景固定透明，透明窗口与网页共用以下字体样式。",
+            foreground="#666666",
+        ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 10))
+
+        fields = [
+            ("text_color", "文字颜色", "color"),
+            ("text_stroke_color", "文字描边颜色", "color"),
+            ("queue_font_size", "队列字体大小(px)", "entry"),
+            ("queue_font_weight", "字体粗细", "combo"),
+            ("queue_font_style", "字体样式", "combo"),
+        ]
+        self._style_vars: dict[str, tk.StringVar] = {}
+        for row_idx, (key, label, field_type) in enumerate(fields, start=1):
+            ttk.Label(left, text=label, anchor="e", width=14).grid(
+                row=row_idx,
+                column=0,
+                sticky="e",
+                padx=(0, 6),
+                pady=3,
+            )
+            var = tk.StringVar(value=self._DEFAULT_STYLE.get(key, ""))
+            self._style_vars[key] = var
+            if field_type == "combo":
+                values = (
+                    ("400", "500", "600", "700", "800", "900")
+                    if key == "queue_font_weight"
+                    else ("normal", "italic", "oblique")
+                )
+                widget = ttk.Combobox(
+                    left,
+                    textvariable=var,
+                    values=values,
+                    width=17,
+                    state="readonly",
+                )
+            else:
+                widget = ttk.Entry(left, textvariable=var, width=20)
+            widget.grid(row=row_idx, column=1, sticky="w")
+
+            if field_type == "color":
+                def _pick(v=var):
+                    color = colorchooser.askcolor(
+                        color=v.get() if v.get().startswith("#") else "#ffffff",
+                        parent=frame,
+                    )
+                    if color and color[1]:
+                        v.set(color[1])
+
+                ttk.Button(left, text="取色", command=_pick, width=4).grid(
+                    row=row_idx,
+                    column=2,
+                    padx=(4, 0),
+                )
+
+        btn_bar = ttk.Frame(left)
+        btn_bar.grid(row=len(fields) + 1, column=0, columnspan=3, sticky="w", pady=(12, 0))
+        ttk.Button(btn_bar, text="保存样式", command=self._save_style).grid(row=0, column=0, padx=(0, 8))
+        ttk.Button(btn_bar, text="恢复默认", command=self._reset_style).grid(row=0, column=1)
+        self._style_save_status_var = tk.StringVar(value="")
+        ttk.Label(btn_bar, textvariable=self._style_save_status_var, foreground="#0a0").grid(row=0, column=2, padx=(12, 0))
+
+        self._style_preview_canvas = tk.Canvas(right, highlightthickness=0)
+        self._style_preview_canvas.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+        for var in self._style_vars.values():
+            var.trace_add("write", lambda *_: self.root.after(0, self._redraw_style_preview))
+        self._style_preview_canvas.bind("<Configure>", lambda *_: self._redraw_style_preview())
+
+        self._load_style_into_ui()
+
+    def _redraw_style_preview(self) -> None:
+        cv = self._style_preview_canvas
+        w = cv.winfo_width()
+        h = cv.winfo_height()
+        if w <= 1 or h <= 1:
+            return
+
+        def _safe_color(key: str, fallback: str) -> str:
+            value = self._style_vars.get(key, tk.StringVar()).get().strip()
+            return value if value.startswith("#") else fallback
+
+        def _font_tuple(size: int) -> tuple[str, int, str]:
+            try:
+                weight_value = int(str(self._style_vars["queue_font_weight"].get()).strip() or 700)
+            except (ValueError, KeyError):
+                weight_value = 700
+            style_value = str(
+                self._style_vars.get("queue_font_style", tk.StringVar(value="italic")).get()
+            ).strip().lower()
+            options: list[str] = []
+            if weight_value >= 600:
+                options.append("bold")
+            if style_value in {"italic", "oblique"}:
+                options.append("italic")
+            return (
+                "Microsoft YaHei UI" if sys.platform == "win32" else "",
+                size,
+                " ".join(options) if options else "normal",
+            )
+
+        text_color = _safe_color("text_color", "#eaf6ff")
+        stroke_color = _safe_color("text_stroke_color", "#000000")
+        try:
+            font_size_raw = int(self._style_vars["queue_font_size"].get().strip() or 50)
+        except (ValueError, KeyError):
+            font_size_raw = 50
+        font_size = max(8, int(font_size_raw * w / 1920 * 2.5))
+
+        cv.configure(bg="#d8d8d8")
+        cv.delete("all")
+
+        tile = 18
+        for top in range(0, h, tile):
+            for left in range(0, w, tile):
+                fill = "#f4f4f4" if ((left // tile) + (top // tile)) % 2 == 0 else "#e8e8e8"
+                cv.create_rectangle(left, top, left + tile, top + tile, fill=fill, outline="")
+        cv.create_rectangle(0, 0, w - 1, h - 1, outline="#98a7b3", width=1)
+        cv.create_text(
+            12,
+            10,
+            text="透明背景预览",
+            fill="#5a6772",
+            anchor="nw",
+            font=("Microsoft YaHei UI" if sys.platform == "win32" else "", 10),
+        )
+
+        font_main = _font_tuple(font_size)
+        sample = ["1001 主播点歌", "1002 舰长优先", "1003 房管处理"]
+        y = 34
+        for item in sample:
+            for dx, dy in ((-2, 0), (2, 0), (0, -2), (0, 2), (-1, -1), (1, -1), (-1, 1), (1, 1)):
+                cv.create_text(16 + dx, y + dy, text=item, fill=stroke_color, font=font_main, anchor="nw")
+            cv.create_text(16, y, text=item, fill=text_color, font=font_main, anchor="nw")
+            y += font_size + 6
+            if y > h - font_size:
+                break
 
     def _apply_overlay_settings_from_ui(self) -> None:
         settings = self._set_overlay_settings(self._get_overlay_settings())
@@ -2567,10 +2734,18 @@ class ControlPanelApp:
             new_count = result.get("size", new_count_csv)
             self._append_log(f"[GUI] 切换到存档槽位 {new_slot}，旧存档 {old_count} 人，新存档 {new_count} 人")
             self._prev_slot = new_slot
+            self.root.after(0, self._refresh_style_state)
             self.root.after(300, lambda: threading.Thread(target=self._refresh_queue_list, daemon=True).start())
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+            try:
+                backend_server = load_backend_server_module()
+                backend_server.reconcile_live_css_with_archive(old_slot)
+                backend_server.apply_css_archive_to_live(new_slot, force=True)
+            except Exception as exc:
+                self._append_log(f"[GUI] 切换 CSS 样式存档失败: {exc}")
             self._append_log(f"[GUI] 存档槽位已选择 {new_slot}，旧存档 {old_count} 人，新存档 {new_count_csv} 人（下次启动生效）")
             self._prev_slot = new_slot
+            self.root.after(0, self._refresh_style_state)
 
     def start_server(self) -> None:
         if self.server_proc and self.server_proc.poll() is None:
