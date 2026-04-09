@@ -39,7 +39,7 @@ _LOG_LEVEL_RE = re.compile(r"\[(DEBUG|INFO|WARNING|ERROR|CRITICAL)\]")
 _LOG_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2} (\d{2}:\d{2}:\d{2}),\d+ \[(?:DEBUG|INFO|WARNING|ERROR|CRITICAL)\] [^:]+: (.*)")
 # 匹配面板显示格式 "HH:MM:SS 内容"
 _PANEL_TS_RE = re.compile(r"^(\d{2}:\d{2}:\d{2}) (.*)", re.DOTALL)
-MAX_QUEUE_ARCHIVE_SLOTS = 5
+MAX_QUEUE_ARCHIVE_SLOTS = 10
 KAIGUAN_LABELS = [
     ("paidui",           "普通排队"),
     ("guanfu_paidui",    "官服排队"),
@@ -197,9 +197,11 @@ def yaml_quote_string(value) -> str:
 def save_config(path: Path, config: dict) -> None:
     server = config.get("server", {})
     api = config.get("api", {})
+    ui_cfg = config.get("ui", {})
     logging_cfg = config.get("logging", {})
     queue_archive = config.get("queue_archive", {})
     slots = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(queue_archive.get("slots", 3))))
+    active_slot = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(queue_archive.get("active_slot", 1))))
     escaped_cookie = str(api.get("cookie", "")).replace('"', '\\"')
 
     content = f"""# Danmuji 全局配置
@@ -215,6 +217,10 @@ api:
 # 前端 myjs.js 可覆盖配置（如需扩展可继续加键值）
 myjs:
 
+ui:
+  auto_start_backend: {'true' if bool(ui_cfg.get('auto_start_backend', False)) else 'false'}
+  language: {yaml_quote_string(ui_cfg.get('language', '中文'))}
+
 logging:
   # 支持 DEBUG / INFO / WARNING / ERROR / CRITICAL
   level: {str(logging_cfg.get('level', 'INFO')).upper()}
@@ -223,8 +229,9 @@ logging:
 
 queue_archive:
   enabled: {'true' if bool(queue_archive.get('enabled', True)) else 'false'}
-  # 存档位（1~5）
+  # 存档位（1~10）
   slots: {slots}
+  active_slot: {active_slot}
 """
     path.write_text(content, encoding="utf-8")
 
@@ -248,8 +255,8 @@ class ControlPanelApp:
         self.log_level_var = tk.StringVar(value="INFO")
         self.retention_days_var = tk.StringVar(value="7")
         self.queue_enabled_var = tk.BooleanVar(value=True)
-        self.queue_slots_var = tk.StringVar(value="3")
-        self.queue_slot_choice_var = tk.IntVar(value=3)
+        self.queue_slot_var = tk.StringVar(value="1")
+        self.queue_slot_choice_var = tk.IntVar(value=1)
         self.auto_start_var = tk.BooleanVar(value=False)
         self.language_var = tk.StringVar(value="中文")
         self.ws_light_var = tk.StringVar(value="●")
@@ -343,6 +350,16 @@ class ControlPanelApp:
         self.queue_status_var = tk.StringVar(value="")
         ttk.Label(top_bar, textvariable=self.queue_status_var, foreground="#0a0", width=28).pack(side="left", padx=(10, 0))
         ttk.Button(top_bar, text="刷新", command=lambda: threading.Thread(target=self._refresh_queue_list, daemon=True).start()).pack(side="right")
+        self.queue_slot_combo_top = ttk.Combobox(
+            top_bar,
+            textvariable=self.queue_slot_var,
+            values=[str(slot) for slot in range(1, MAX_QUEUE_ARCHIVE_SLOTS + 1)],
+            width=4,
+            state="readonly",
+        )
+        self.queue_slot_combo_top.pack(side="right", padx=(0, 6))
+        self.queue_slot_combo_top.bind("<<ComboboxSelected>>", self._on_queue_slot_selected)
+        ttk.Label(top_bar, text="存档").pack(side="right", padx=(0, 4))
 
         # 排队列表（Treeview + 滚动条）
         tree_frame = ttk.Frame(frame)
@@ -350,13 +367,13 @@ class ControlPanelApp:
         tree_frame.columnconfigure(0, weight=1)
         tree_frame.rowconfigure(0, weight=1)
 
-        columns = ("seq", "name", "content")
+        columns = ("seq", "item_id", "content")
         self.queue_tree = ttk.Treeview(tree_frame, columns=columns, show="headings", selectmode="browse")
         self.queue_tree.heading("seq", text="#")
-        self.queue_tree.heading("name", text="用户名")
+        self.queue_tree.heading("item_id", text="ID")
         self.queue_tree.heading("content", text="排队内容")
         self.queue_tree.column("seq", width=40, minwidth=30, anchor="center", stretch=False)
-        self.queue_tree.column("name", width=160, minwidth=80, anchor="w")
+        self.queue_tree.column("item_id", width=160, minwidth=80, anchor="w")
         self.queue_tree.column("content", width=300, minwidth=100, anchor="w")
 
         y_scroll = ttk.Scrollbar(tree_frame, orient="vertical", command=self.queue_tree.yview)
@@ -364,6 +381,7 @@ class ControlPanelApp:
 
         self.queue_tree.grid(row=0, column=0, sticky="nsew")
         y_scroll.grid(row=0, column=1, sticky="ns")
+        self.queue_tree.bind("<Double-1>", self._on_queue_double_click)
 
         # 操作按钮栏
         op_bar = ttk.Frame(frame)
@@ -379,98 +397,152 @@ class ControlPanelApp:
 
     @staticmethod
     def _parse_queue_item(item: str) -> tuple[str, str]:
-        """将排队条目解析为 (用户名, 排队内容)。
-
-        格式举例：
-          - "用户名"              -> ("用户名", "")
-          - "用户名 角色名"       -> ("用户名", "角色名")
-          - "G|用户名 角色名"     -> ("用户名", "[官服] 角色名")
-          - "B|用户名 角色名"     -> ("用户名", "[B服] 角色名")
-          - "S|用户名 角色名"     -> ("用户名", "[超级] 角色名")
-          - "M|用户名 角色名"     -> ("用户名", "[米服] 角色名")
-        """
-        PREFIX_MAP = {"G": "官服", "B": "B服", "S": "超级", "M": "米服"}
-        prefix_label = ""
-        text = item.strip()
-        if len(text) >= 3 and text[1] == "|" and text[0] in PREFIX_MAP:
-            prefix_label = f"[{PREFIX_MAP[text[0]]}] "
-            text = text[2:]
-
-        parts = text.split(" ", 1)
-        name = parts[0].strip()
-        content = prefix_label + (parts[1].strip() if len(parts) > 1 else "")
-        return name, content
+        """将原始排队条目解析为 (id, 内容)。"""
+        try:
+            backend_server = load_backend_server_module()
+            return backend_server.queue_item_to_parts(item)
+        except Exception:
+            text = str(item or "").strip()
+            if not text:
+                return "", ""
+            parts = text.split(" ", 1)
+            item_id = parts[0].strip()
+            content = parts[1].strip() if len(parts) > 1 else ""
+            return item_id, content
 
     def _backend_is_running(self) -> bool:
         return bool(self.server_proc and self.server_proc.poll() is None)
+
+    def _set_queue_slot_selection(self, slot: int) -> int:
+        slot = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(slot)))
+        self.queue_slot_choice_var.set(slot)
+        self.queue_slot_var.set(str(slot))
+        return slot
+
+    def _get_selected_slot(self) -> int:
+        try:
+            slot = int(str(self.queue_slot_var.get()).strip() or self.queue_slot_choice_var.get())
+        except (TypeError, ValueError, tk.TclError):
+            try:
+                slot = int(self.queue_slot_choice_var.get())
+            except (TypeError, ValueError, tk.TclError):
+                slot = 1
+        return self._set_queue_slot_selection(slot)
+
+    def _persist_active_slot_to_config(self, slot: int) -> bool:
+        try:
+            backend_server = load_backend_server_module()
+            config = backend_server.load_config()
+            updated = backend_server._merge_config(  # type: ignore[attr-defined]
+                config,
+                {
+                    "queue_archive": {
+                        "enabled": bool(config.get("queue_archive", {}).get("enabled", True)),
+                        "slots": MAX_QUEUE_ARCHIVE_SLOTS,
+                        "active_slot": slot,
+                    }
+                },
+            )
+            backend_server.save_config(updated)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            self.root.after(0, lambda: self._append_log(f"[GUI] 写入存档槽位配置失败: {exc}"))
+            return False
+
+    def _on_queue_slot_selected(self, _event=None) -> None:
+        slot = self._get_selected_slot()
+        if slot == self._prev_slot:
+            return
+        threading.Thread(target=self._apply_queue_slot_selection, args=(slot,), daemon=True).start()
+
+    def _apply_queue_slot_selection(self, slot: int) -> None:
+        self._persist_active_slot_to_config(slot)
+        self._switch_queue_slot(slot)
+
+    @staticmethod
+    def _build_queue_entry(item_id: Any, content: Any) -> dict[str, str]:
+        return {"id": str(item_id or "").strip(), "content": str(content or "").strip()}
+
+    def _normalize_queue_entries(self, items: list[str]) -> list[dict[str, str]]:
+        entries: list[dict[str, str]] = []
+        for item in items:
+            item_id, content = self._parse_queue_item(str(item))
+            entries.append(self._build_queue_entry(item_id, content))
+        return entries
+
+    def _extract_entries_from_payload(self, payload: Any) -> list[dict[str, str]]:
+        if isinstance(payload, dict):
+            raw_entries = payload.get("entries")
+            if isinstance(raw_entries, list):
+                entries: list[dict[str, str]] = []
+                for entry in raw_entries:
+                    if not isinstance(entry, dict):
+                        continue
+                    entries.append(self._build_queue_entry(entry.get("id", ""), entry.get("content", "")))
+                return entries
+            raw_queue = payload.get("queue")
+            if isinstance(raw_queue, list):
+                return self._normalize_queue_entries([str(item) for item in raw_queue])
+        return []
 
     def _active_slot_csv(self) -> "Path | None":
         """返回当前活跃存档槽位的 CSV 路径（可在后端未启动时使用）。"""
         try:
             bs = load_backend_server_module()
-            slot = self.queue_slot_choice_var.get()
+            slot = self._get_selected_slot()
             return bs.PD_DIR / f"queue_archive_slot_{slot}.csv"
         except Exception:
             return None
 
-    def _read_queue_from_csv(self) -> list[str]:
-        """直接从 CSV 文件读取队列条目（源头）。"""
-        import csv as _csv
+    def _read_queue_entries_from_csv(self) -> list[dict[str, str]]:
+        """直接从当前槽位 CSV 读取结构化队列条目。"""
         path = self._active_slot_csv()
         if path is None or not path.exists():
             return []
         try:
-            items: list[str] = []
-            with path.open("r", encoding="utf-8-sig", newline="") as f:
-                for row in _csv.reader(f):
-                    if row and row[0].strip().isdigit() and len(row) > 1:
-                        items.append(str(row[1]))
-            return items
+            bs = load_backend_server_module()
+            entries = bs.read_queue_archive_entries(path)
+            return [
+                self._build_queue_entry(entry.get("id", ""), entry.get("content", ""))
+                for entry in entries
+                if isinstance(entry, dict)
+            ]
         except Exception:
             return []
 
-    def _write_queue_to_csv(self, items: list[str]) -> bool:
-        """将条目列表写回当前活跃存档槽位的 CSV。"""
-        import csv as _csv
-        import datetime as _dt
+    def _write_queue_entries_to_csv(self, entries: list[dict[str, str]]) -> bool:
+        """将结构化条目列表写回当前活跃存档槽位的 CSV。"""
         path = self._active_slot_csv()
         if path is None:
             return False
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("w", encoding="utf-8-sig", newline="") as f:
-                w = _csv.writer(f)
-                w.writerow(["timestamp", _dt.datetime.now().isoformat(timespec="seconds")])
-                w.writerow(["actor", "gui"])
-                w.writerow(["message", "gui_edit"])
-                w.writerow([])
-                w.writerow(["position", "queue_item"])
-                for idx, item in enumerate(items, start=1):
-                    w.writerow([idx, item])
+            bs = load_backend_server_module()
+            bs.write_queue_archive_entries(path, entries)
             return True
         except Exception as exc:
             self.root.after(0, lambda: self._append_log(f"[GUI] CSV 写入失败: {exc}"))
             return False
 
-    def _notify_backend_reload(self) -> None:
-        """通知后端从 CSV 重新加载队列（如后端正在运行）。"""
+    def _fetch_queue_entries_from_backend(self) -> list[dict[str, str]] | None:
         if not self._backend_is_running():
-            return
+            return None
         port = self.port_var.get().strip() or "9816"
-        url = f"http://127.0.0.1:{port}/api/queue/reload"
-        req = urllib.request.Request(url, data=b"{}", headers={"Content-Type": "application/json"}, method="POST")
+        url = f"http://127.0.0.1:{port}/api/queue/state"
         try:
-            with urllib.request.urlopen(req, timeout=2):
-                pass
-        except (urllib.error.URLError, TimeoutError):
-            pass
+            with urllib.request.urlopen(url, timeout=2) as resp:
+                payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+            return self._extract_entries_from_payload(payload)
+        except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError):
+            return None
 
     def _refresh_queue_list(self) -> None:
-        """从 CSV 读取队列（始终以存档文件为准），UI 更新回主线程。"""
-        items = self._read_queue_from_csv()
-        self.root.after(0, lambda: self._update_queue_ui(items))
+        """后端运行时优先读取内存队列，否则读取当前槽位 CSV。"""
+        entries = self._fetch_queue_entries_from_backend()
+        if entries is None:
+            entries = self._read_queue_entries_from_csv()
+        self.root.after(0, lambda: self._update_queue_ui(entries))
 
-    def _update_queue_ui(self, items: list[str]) -> None:
+    def _update_queue_ui(self, entries: list[dict[str, str]]) -> None:
         # 记住当前选中序号，刷新后恢复
         sel = self.queue_tree.selection()
         prev_idx: int | None = None
@@ -483,11 +555,14 @@ class ControlPanelApp:
         for child in self.queue_tree.get_children():
             self.queue_tree.delete(child)
         iid_map: dict[int, str] = {}
-        for idx, raw_item in enumerate(items, start=1):
-            name, content = self._parse_queue_item(raw_item)
-            iid = self.queue_tree.insert("", "end", values=(idx, name, content))
+        for idx, entry in enumerate(entries, start=1):
+            iid = self.queue_tree.insert(
+                "",
+                "end",
+                values=(idx, str(entry.get("id", "")), str(entry.get("content", ""))),
+            )
             iid_map[idx] = iid
-        self.queue_count_var.set(f"当前排队：{len(items)} 人")
+        self.queue_count_var.set(f"当前排队：{len(entries)} 人")
 
         # 恢复选中
         if prev_idx is not None and prev_idx in iid_map:
@@ -511,69 +586,185 @@ class ControlPanelApp:
         except (IndexError, ValueError):
             return None
 
-    def _queue_csv_op(self, op, status_msg: str = "") -> None:
-        """在后台线程：读取 CSV → 执行 op(items) → 写回 CSV → 通知后端 → 刷新 UI。"""
-        items = self._read_queue_from_csv()
-        new_items = op(list(items))
-        if new_items is None:
-            new_items = items
-        if not self._write_queue_to_csv(new_items):
-            return
-        self._notify_backend_reload()
+    def _queue_backend_op(self, path: str, payload: dict[str, Any], status_msg: str = "") -> bool:
+        if not self._backend_is_running():
+            return False
+        port = self.port_var.get().strip() or "9816"
+        url = f"http://127.0.0.1:{port}{path}"
+        body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                result = json.loads(resp.read().decode("utf-8", errors="replace"))
+            entries = self._extract_entries_from_payload(result)
+        except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+            self.root.after(0, lambda: self._append_log(f"[GUI] 队列操作失败: {exc}"))
+            return False
+
         import time as _time
         ts = _time.strftime("%H:%M:%S")
         msg = f"{ts} {status_msg}" if status_msg else ts
-        self.root.after(0, lambda: (self._update_queue_ui(new_items), self.queue_status_var.set(msg)))
+        self.root.after(0, lambda: (self._update_queue_ui(entries), self.queue_status_var.set(msg)))
+        return True
+
+    def _queue_local_op(self, op, status_msg: str = "") -> None:
+        entries = self._read_queue_entries_from_csv()
+        new_entries = op([dict(entry) for entry in entries])
+        if new_entries is None:
+            new_entries = entries
+        if not self._write_queue_entries_to_csv(new_entries):
+            return
+        import time as _time
+        ts = _time.strftime("%H:%M:%S")
+        msg = f"{ts} {status_msg}" if status_msg else ts
+        self.root.after(0, lambda: (self._update_queue_ui(new_entries), self.queue_status_var.set(msg)))
+
+    def _get_selected_row_values(self) -> tuple[int, str, str] | None:
+        sel = self.queue_tree.selection()
+        if not sel:
+            return None
+        values = self.queue_tree.item(sel[0], "values")
+        try:
+            idx = int(values[0])
+        except (IndexError, ValueError):
+            return None
+        item_id = str(values[1]) if len(values) > 1 else ""
+        content = str(values[2]) if len(values) > 2 else ""
+        return idx, item_id, content
+
+    def _edit_selected_queue_content(self) -> None:
+        selected = self._get_selected_row_values()
+        if selected is None:
+            return
+        idx, item_id, current_content = selected
+        from tkinter import simpledialog
+
+        new_content = simpledialog.askstring(
+            "修改排队内容",
+            f"请修改 {item_id or '该条目'} 的排队内容：",
+            initialvalue=current_content,
+            parent=self.root,
+        )
+        if new_content is None:
+            return
+
+        normalized_content = new_content.strip()
+        if self._backend_is_running():
+            threading.Thread(
+                target=self._queue_backend_op,
+                args=("/api/queue/update", {"index": idx, "content": normalized_content}, f"已修改第{idx}位内容"),
+                daemon=True,
+            ).start()
+            return
+
+        def op(entries):
+            if 1 <= idx <= len(entries):
+                entries[idx - 1]["content"] = normalized_content
+            return entries
+
+        threading.Thread(target=self._queue_local_op, args=(op, f"已修改第{idx}位内容"), daemon=True).start()
+
+    def _on_queue_double_click(self, event) -> None:
+        row_id = self.queue_tree.identify_row(event.y)
+        if not row_id:
+            return
+        self.queue_tree.selection_set(row_id)
+        self._edit_selected_queue_content()
 
     def _queue_delete(self) -> None:
         idx = self._get_selected_index()
         if idx is None:
             return
-        def op(items):
-            if 1 <= idx <= len(items):
-                items.pop(idx - 1)
-            return items
-        threading.Thread(target=self._queue_csv_op, args=(op, f"已删除第{idx}位"), daemon=True).start()
+        if self._backend_is_running():
+            threading.Thread(
+                target=self._queue_backend_op,
+                args=("/api/queue/delete", {"index": idx}, f"已删除第{idx}位"),
+                daemon=True,
+            ).start()
+            return
+
+        def op(entries):
+            if 1 <= idx <= len(entries):
+                entries.pop(idx - 1)
+            return entries
+
+        threading.Thread(target=self._queue_local_op, args=(op, f"已删除第{idx}位"), daemon=True).start()
 
     def _queue_move_up(self) -> None:
         idx = self._get_selected_index()
         if idx is None:
             return
-        def op(items):
-            if 2 <= idx <= len(items):
-                items[idx - 2], items[idx - 1] = items[idx - 1], items[idx - 2]
-            return items
-        threading.Thread(target=self._queue_csv_op, args=(op, f"第{idx}位已上移"), daemon=True).start()
+        if self._backend_is_running():
+            threading.Thread(
+                target=self._queue_backend_op,
+                args=("/api/queue/move", {"index": idx, "direction": "up"}, f"第{idx}位已上移"),
+                daemon=True,
+            ).start()
+            return
+
+        def op(entries):
+            if 2 <= idx <= len(entries):
+                entries[idx - 2], entries[idx - 1] = entries[idx - 1], entries[idx - 2]
+            return entries
+
+        threading.Thread(target=self._queue_local_op, args=(op, f"第{idx}位已上移"), daemon=True).start()
 
     def _queue_move_down(self) -> None:
         idx = self._get_selected_index()
         if idx is None:
             return
-        def op(items):
-            if 1 <= idx <= len(items) - 1:
-                items[idx - 1], items[idx] = items[idx], items[idx - 1]
-            return items
-        threading.Thread(target=self._queue_csv_op, args=(op, f"第{idx}位已下移"), daemon=True).start()
+        if self._backend_is_running():
+            threading.Thread(
+                target=self._queue_backend_op,
+                args=("/api/queue/move", {"index": idx, "direction": "down"}, f"第{idx}位已下移"),
+                daemon=True,
+            ).start()
+            return
+
+        def op(entries):
+            if 1 <= idx <= len(entries) - 1:
+                entries[idx - 1], entries[idx] = entries[idx], entries[idx - 1]
+            return entries
+
+        threading.Thread(target=self._queue_local_op, args=(op, f"第{idx}位已下移"), daemon=True).start()
 
     def _queue_insert(self) -> None:
         idx = self._get_selected_index() or 0
         from tkinter import simpledialog
-        entry = simpledialog.askstring("在下方新增", "请输入排队内容（如：用户名 角色名 或 G|用户名 角色名）：", parent=self.root)
+        entry = simpledialog.askstring("在下方新增", "请输入排队内容（如：用户名 角色名）：", parent=self.root)
         if not entry or not entry.strip():
             return
         val = entry.strip()
-        def op(items):
-            pos = max(0, min(idx, len(items)))
-            items.insert(pos, val)
-            return items
-        threading.Thread(target=self._queue_csv_op, args=(op, f"已在第{idx}位后新增"), daemon=True).start()
+        if self._backend_is_running():
+            threading.Thread(
+                target=self._queue_backend_op,
+                args=("/api/queue/insert", {"after": idx, "entry": val}, f"已在第{idx}位后新增"),
+                daemon=True,
+            ).start()
+            return
+
+        item_id, content = self._parse_queue_item(val)
+
+        def op(entries):
+            pos = max(0, min(idx, len(entries)))
+            entries.insert(pos, self._build_queue_entry(item_id, content))
+            return entries
+
+        threading.Thread(target=self._queue_local_op, args=(op, f"已在第{idx}位后新增"), daemon=True).start()
 
     def _queue_clear(self) -> None:
         import time
         now = time.time()
         if self._clear_click_time > 0 and now - self._clear_click_time <= 5.0:
             self._clear_click_time = 0.0
-            threading.Thread(target=self._queue_csv_op, args=(lambda _: [], "已清空"), daemon=True).start()
+            if self._backend_is_running():
+                threading.Thread(
+                    target=self._queue_backend_op,
+                    args=("/api/queue/clear", {}, "已清空"),
+                    daemon=True,
+                ).start()
+            else:
+                threading.Thread(target=self._queue_local_op, args=(lambda _entries: [], "已清空"), daemon=True).start()
         else:
             self._clear_click_time = now
             self._append_log("[GUI] 确认清空？请在 5 秒内再次点击「一键清空」")
@@ -788,16 +979,16 @@ class ControlPanelApp:
         self.log_level_combo.grid(row=row, column=1, sticky="w", pady=4)
         row += 1
 
-        ttk.Label(frame, text="日志存档槽位").grid(row=row, column=0, sticky="w", pady=4)
-        slot_frame = ttk.Frame(frame)
-        slot_frame.grid(row=row, column=1, sticky="w", pady=4)
-        for slot in range(1, MAX_QUEUE_ARCHIVE_SLOTS + 1):
-            ttk.Radiobutton(
-                slot_frame,
-                text=f"槽位{slot}",
-                variable=self.queue_slot_choice_var,
-                value=slot,
-            ).grid(row=0, column=slot - 1, padx=(0, 8), sticky="w")
+        ttk.Label(frame, text="当前存档槽位").grid(row=row, column=0, sticky="w", pady=4)
+        self.queue_slot_combo_settings = ttk.Combobox(
+            frame,
+            textvariable=self.queue_slot_var,
+            values=[str(slot) for slot in range(1, MAX_QUEUE_ARCHIVE_SLOTS + 1)],
+            width=8,
+            state="readonly",
+        )
+        self.queue_slot_combo_settings.grid(row=row, column=1, sticky="w", pady=4)
+        self.queue_slot_combo_settings.bind("<<ComboboxSelected>>", self._on_queue_slot_selected)
         row += 1
 
         ttk.Checkbutton(frame, text="启用排队存档", variable=self.queue_enabled_var).grid(
@@ -951,8 +1142,12 @@ class ControlPanelApp:
                 items = [x for x in data.get(key, []) if x]
                 widget.insert("end", "\n".join(items))
         except Exception:
-            # 后端未运行时从本地文件读
-            raw = load_simple_yaml(QUANXIAN_PATH)
+            # 后端未运行时从本地配置读（优先 config.yaml，兼容 quanxian.yaml）
+            try:
+                backend_server = load_backend_server_module()
+                raw = backend_server.load_quanxian()
+            except Exception:
+                raw = load_simple_yaml(QUANXIAN_PATH)
             for key, widget in self._quanxian_text.items():
                 widget.delete("1.0", "end")
                 items = [x for x in raw.get(key, []) if x]
@@ -976,25 +1171,29 @@ class ControlPanelApp:
                 pass
             self._append_log("[GUI] 权限配置已保存并生效")
         except Exception:
-            # 后端未运行时直接写文件
+            # 后端未运行时写本地配置（同步写入 config.yaml）
             self._write_quanxian_local(payload)
             self._append_log("[GUI] 权限配置已保存到本地（后端未运行，下次启动生效）")
 
     def _write_quanxian_local(self, payload: dict[str, list[str]]) -> None:
-        labels = {
-            "super_admin": "最高管理员：拥有所有权限，包括新增/删除管理员",
-            "admin": "管理员：拥有除新增/删除管理员以外的所有操作权限",
-            "jianzhang": "舰长：仅拥有「插队」命令权限",
-            "member": "成员：普通观众",
-        }
-        lines: list[str] = ["# 权限配置\n"]
-        for key in ("super_admin", "admin", "jianzhang", "member"):
-            lines.append(f"# {labels.get(key, key)}\n{key}:\n")
-            for item in payload.get(key, []):
-                escaped = str(item).replace('"', '\\"')
-                lines.append(f'  - "{escaped}"\n')
-            lines.append("\n")
-        QUANXIAN_PATH.write_text("".join(lines), encoding="utf-8")
+        try:
+            backend_server = load_backend_server_module()
+            backend_server.save_quanxian(payload)
+        except Exception:
+            labels = {
+                "super_admin": "最高管理员：拥有所有权限，包括新增/删除管理员",
+                "admin": "管理员：拥有除新增/删除管理员以外的所有操作权限",
+                "jianzhang": "舰长：仅拥有「插队」命令权限",
+                "member": "成员：普通观众",
+            }
+            lines: list[str] = ["# 权限配置\n"]
+            for key in ("super_admin", "admin", "jianzhang", "member"):
+                lines.append(f"# {labels.get(key, key)}\n{key}:\n")
+                for item in payload.get(key, []):
+                    escaped = str(item).replace('"', '\\"')
+                    lines.append(f'  - "{escaped}"\n')
+                lines.append("\n")
+            QUANXIAN_PATH.write_text("".join(lines), encoding="utf-8")
 
     def _load_kaiguan(self) -> None:
         port = self.port_var.get().strip() or "9816"
@@ -1004,7 +1203,11 @@ class ControlPanelApp:
             for key, var in self._kaiguan_vars.items():
                 var.set(bool(data.get(key, DEFAULT_KAIGUAN_GUI.get(key, True))))
         except Exception:
-            raw = load_simple_yaml(KAIGUAN_PATH)
+            try:
+                backend_server = load_backend_server_module()
+                raw = backend_server.load_kaiguan()
+            except Exception:
+                raw = load_simple_yaml(KAIGUAN_PATH)
             for key, var in self._kaiguan_vars.items():
                 default = DEFAULT_KAIGUAN_GUI.get(key, True)
                 val = raw.get(key, default)
@@ -1029,23 +1232,27 @@ class ControlPanelApp:
             self._append_log("[GUI] 功能开关已保存到本地（后端未运行，下次启动生效）")
 
     def _write_kaiguan_local(self, payload: dict[str, bool]) -> None:
-        comments = {
-            "paidui": "普通排队（排队 / 排队 xxx）",
-            "guanfu_paidui": "官服排队",
-            "bfu_paidui": "B服排队",
-            "chaoji_paidui": "超级排队",
-            "mifu_paidui": "米服排队",
-            "quxiao_paidui": "取消排队",
-            "xiugai_paidui": "修改/替换排队内容",
-            "jianzhang_chadui": "舰长插队",
-            "fangguan_op": "允许B站房管执行管理员命令",
-        }
-        lines: list[str] = ["# 功能开关（true=启用，false=禁用）\n"]
-        for key, _ in KAIGUAN_LABELS:
-            value = payload.get(key, DEFAULT_KAIGUAN_GUI.get(key, True))
-            value_str = "true" if value else "false"
-            lines.append(f"{key}: {value_str}              # {comments.get(key, key)}\n")
-        KAIGUAN_PATH.write_text("".join(lines), encoding="utf-8")
+        try:
+            backend_server = load_backend_server_module()
+            backend_server.save_kaiguan(payload)
+        except Exception:
+            comments = {
+                "paidui": "普通排队（排队 / 排队 xxx）",
+                "guanfu_paidui": "官服排队",
+                "bfu_paidui": "B服排队",
+                "chaoji_paidui": "超级排队",
+                "mifu_paidui": "米服排队",
+                "quxiao_paidui": "取消排队",
+                "xiugai_paidui": "修改/替换排队内容",
+                "jianzhang_chadui": "舰长插队",
+                "fangguan_op": "允许B站房管执行管理员命令",
+            }
+            lines: list[str] = ["# 功能开关（true=启用，false=禁用）\n"]
+            for key, _ in KAIGUAN_LABELS:
+                value = payload.get(key, DEFAULT_KAIGUAN_GUI.get(key, True))
+                value_str = "true" if value else "false"
+                lines.append(f"{key}: {value_str}              # {comments.get(key, key)}\n")
+            KAIGUAN_PATH.write_text("".join(lines), encoding="utf-8")
 
     def load_from_file(self) -> None:
         config = load_simple_yaml(CONFIG_PATH)
@@ -1063,10 +1270,8 @@ class ControlPanelApp:
         self.retention_days_var.set(str(logging_cfg.get("retention_days", 7)))
         self.queue_enabled_var.set(bool(queue_archive.get("enabled", True)))
         active_slot = int(queue_archive.get("active_slot", 1))
-        active_slot = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, active_slot))
-        self.queue_slot_choice_var.set(active_slot)
+        active_slot = self._set_queue_slot_selection(active_slot)
         self._prev_slot = active_slot
-        self.queue_slots_var.set(str(MAX_QUEUE_ARCHIVE_SLOTS))
         ui_cfg = config.get("ui", {})
         self.auto_start_var.set(bool(ui_cfg.get("auto_start_backend", False)))
         self.language_var.set(str(ui_cfg.get("language", "中文")))
@@ -1119,7 +1324,7 @@ class ControlPanelApp:
             "queue_archive": {
                 "enabled": bool(self.queue_enabled_var.get()),
                 "slots": MAX_QUEUE_ARCHIVE_SLOTS,
-                "active_slot": min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(self.queue_slot_choice_var.get()))),
+                "active_slot": self._get_selected_slot(),
             },
             "ui": {
                 "auto_start_backend": bool(self.auto_start_var.get()),
@@ -1240,9 +1445,8 @@ class ControlPanelApp:
             return
         self._switch_queue_slot()
 
-    def _read_slot_csv(self, slot: int) -> list[str]:
-        """读取指定槽位 CSV 的队列条目。"""
-        import csv as _csv
+    def _read_slot_csv(self, slot: int) -> list[dict[str, str]]:
+        """读取指定槽位 CSV 的结构化队列条目。"""
         try:
             bs = load_backend_server_module()
             path = bs.PD_DIR / f"queue_archive_slot_{slot}.csv"
@@ -1251,18 +1455,20 @@ class ControlPanelApp:
         if not path.exists():
             return []
         try:
-            items: list[str] = []
-            with path.open("r", encoding="utf-8-sig", newline="") as f:
-                for row in _csv.reader(f):
-                    if row and row[0].strip().isdigit() and len(row) > 1:
-                        items.append(str(row[1]))
-            return items
+            entries = bs.read_queue_archive_entries(path)
+            return [
+                self._build_queue_entry(entry.get("id", ""), entry.get("content", ""))
+                for entry in entries
+                if isinstance(entry, dict)
+            ]
         except Exception:
             return []
 
-    def _switch_queue_slot(self) -> None:
-        new_slot = self.queue_slot_choice_var.get()
+    def _switch_queue_slot(self, slot: int | None = None) -> None:
+        new_slot = self._set_queue_slot_selection(slot) if slot is not None else self._get_selected_slot()
         old_slot = self._prev_slot
+        if new_slot == old_slot:
+            return
         # 切换前读取旧槽位人数（以 CSV 为准）
         old_count = len(self._read_slot_csv(old_slot))
         # 读取新槽位 CSV 人数
