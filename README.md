@@ -12,7 +12,7 @@
 - 排队存档：支持 `1~10` 槽位，支持切换、恢复、清空
 - 每条排队记录保留独立的“最后操作时间”
 - GUI 控制台：日志、当前排队、黑名单、设置、权限、开关、样式等标签页
-- 透明弹窗（无边框）：支持任务栏显示、OBS 窗口捕获、拖拽缩放，仅显示“ID + 事情”
+- 透明弹窗（无边框）：支持任务栏显示、OBS 窗口捕获、拖拽缩放，仅显示”ID + 事情”；置顶 / 关闭由主控制台统一管控
 
 ## 目录结构（主要）
 
@@ -37,21 +37,32 @@ python core/control_panel.py
 
 启动后可在 GUI 顶部按钮打开：
 
-- 配置页：`http://127.0.0.1:9816/config`
+- 配置页（扫码登录）：`http://127.0.0.1:9816/config`，也可在设置页 Cookie 字段旁点击「获取」直接打开
 - 展示页：`http://127.0.0.1:9816/index`
+
+透明弹窗（OBS 捕获）：在 OBS 中添加「窗口捕获」，按标题 **排队透明弹窗** 选择窗口，勾选「允许透明」即可获得透明叠加效果。
 
 ## 打包说明（Windows）
 
-项目已配置 `bilipdj_onedir.spec`：
+项目包含两个 spec：
+
+| spec | 说明 | 产物 |
+|------|------|------|
+| `bilipdj_onedir.spec` | 主程序（onedir） | `dist\bilipdj\bilipdj.exe` |
+| `paiduijitm.spec` | 透明弹窗独立进程（onefile） | `dist\paiduijitm.exe` |
 
 - 软件名称：`弹幕排队姬`
 - 打包图标：`core/256x.ico`（256x256）
 
-执行示例：
+打包时需依次执行两个 spec，并将 `paiduijitm.exe` 放至主程序同级目录：
 
 ```bash
-pyinstaller bilipdj_onedir.spec
+pyinstaller --noconfirm --clean bilipdj_onedir.spec
+pyinstaller --noconfirm --clean paiduijitm.spec
+copy dist\paiduijitm.exe dist\bilipdj\paiduijitm.exe
 ```
+
+CI（`package-windows-x64.yml`）会自动完成上述步骤并打包成 zip 发布。
 
 ## 配置说明（简要）
 

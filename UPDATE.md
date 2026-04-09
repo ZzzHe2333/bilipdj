@@ -2,6 +2,41 @@
 
 ---
 
+## 2026-04-09 UTC+08:00
+
+### 透明弹窗 OBS 兼容 + GUI 操控 + 打包修复 + 配置页简化
+
+**core/overlay_host.py**
+- 移除右键关闭（`<Button-3>`）和双击切换置顶（`<Double-Button-1>`）的快捷绑定，改由主 GUI 统一管控
+- Windows 下不再使用 `overrideredirect(True)`，改为保留普通 HWND 并通过 Win32 API 移除 `WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME`，使窗口在 OBS 「窗口捕获」按标题 "排队透明弹窗" 可正常被发现和捕获
+- 启动时立即调用 `withdraw()` 隐藏窗口，Win32 样式调整完成后再 `deiconify()`，避免装饰帧闪烁
+- 新增 CLI 参数 `--no-topmost`，供主控制台在重启时传入置顶状态
+
+**core/control_panel.py**
+- 透明窗口设置区新增控制按钮行：**关闭弹窗 / 置顶 / 取消置顶**
+- 新增 `_set_overlay_topmost(topmost)` 方法：更新置顶状态，若弹窗正在运行则自动重启并传入 `--no-topmost` 标志
+- `_build_overlay_command()` 在 `self._overlay_topmost == False` 时追加 `--no-topmost` 参数
+- 设置页 Cookie 字段右侧新增 **获取** 按钮，点击调用 `open_config()` 直接打开浏览器配置页
+- 提示文案更新为 OBS 窗口捕获操作引导
+
+**core/ui/config.html**
+- 去除「权限用户」和「扫码回调」两个 section，配置页仅保留 UID、Cookie 字段及扫码获取入口
+- 标题改为「弹幕排队姬 - 登录」
+- 移除 `readLocalCookie`、`formatUserList`、`parseUserList` 等无关方法
+- `saveConfig` 保持回传 `roomid` 和 `callback`（不展示但防止覆盖已有配置）
+
+**bilipdj_onedir.spec**
+- 修复高危 bug：`name` 字段恢复为 ASCII `"bilipdj"`，解决 CI 路径失配（`dist\bilipdj\bilipdj.exe`）和非 ASCII 产物名乱码问题
+
+**paiduijitm.spec**
+- 从 onedir（含 COLLECT，产物为目录）改为 **onefile**（直接打进 EXE），产物为单文件 `dist\paiduijitm.exe`，与主程序同级放置时可被 `APP_DIR / "paiduijitm.exe"` 直接找到
+
+**.github/workflows/package-windows-x64.yml**
+- 新增 `pyinstaller --noconfirm --clean paiduijitm.spec` 构建步骤
+- 构建完成后将 `dist\paiduijitm.exe` 复制至 `dist\bilipdj\`，随主包一同发布，确保线上包透明弹窗功能完整
+
+---
+
 ## 2026-04-08 （二次修订）UTC+08:00
 
 ### 性能优化、打包修复、体验改善
