@@ -1,50 +1,47 @@
 from __future__ import annotations
 
 import base64
+import copy
 import csv
 import datetime as dt
 import hashlib
-import io
 import json
 import logging
 import os
 import random
 import re
 import socket
-import ssl
 import struct
 import sys
 import threading
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
-import zlib
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse
 
-try:
-    import qrcode
-except ImportError:  # pragma: no cover - 运行时环境可选依赖
-    qrcode = None
+if __package__:
+    from . import bilibili_protocol
+else:
+    import bilibili_protocol
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 9816
 MAX_QUEUE_ARCHIVE_SLOTS = 10
-DANMU_HEARTBEAT_INTERVAL_SECONDS = 30
-DANMU_IDLE_RECONNECT_SECONDS = 90
+DEFAULT_PLATFORM = "bilibili"
 
 REPO_DIR = Path(__file__).resolve().parents[1]
 CORE_DIR = Path(__file__).resolve().parent  # bilipdj/core/
 BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", REPO_DIR))
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else REPO_DIR
 _YAML_DIR = APP_DIR if getattr(sys, "frozen", False) else CORE_DIR
-
-MODEL_JSON_PATH = BUNDLE_DIR / "core" / "danmuji_initial_model.json"
-UI_DIR = BUNDLE_DIR / "core" / "ui"
+BUNDLE_CORE_DIR = BUNDLE_DIR / "core"
+RUNTIME_CORE_DIR = APP_DIR / "core" if getattr(sys, "frozen", False) else CORE_DIR
+BUNDLE_UI_DIR = BUNDLE_CORE_DIR / "ui"
+UI_DIR = RUNTIME_CORE_DIR / "ui"
 CONFIG_PATH = _YAML_DIR / "config.yaml"
 LOG_DIR = APP_DIR / "log"
 PD_DIR = APP_DIR / "core" / "cd"
@@ -53,20 +50,24 @@ BLACKLIST_PATH = PD_DIR / "blacklist.csv"
 QUANXIAN_PATH = _YAML_DIR / "quanxian.yaml"
 KAIGUAN_PATH = _YAML_DIR / "kaiguan.yaml"
 STYLE_PATH = _YAML_DIR / "style.json"
+LIVE_STYLE_CSS_PATH = UI_DIR / "moren.css"
 
 WS_MAGIC_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-MAX_SAFE_INTEGER = (1 << 53) - 1
-BILIBILI_QR_GENERATE_URL = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
-BILIBILI_QR_POLL_URL = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
-BILIBILI_NAV_URL = "https://api.bilibili.com/x/web-interface/nav"
-BILIBILI_DANMU_CONF_URL = "https://api.live.bilibili.com/room/v1/Danmu/getConf"
-BILIBILI_DANMU_INFO_URL = "https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo"
-BILIBILI_ROOM_INIT_URL = "https://api.live.bilibili.com/room/v1/Room/room_init"
 
-try:
-    import brotli
-except ImportError:  # pragma: no cover - 可选依赖
-    brotli = None
+
+STYLE_CSS_VAR_MAP: dict[str, str] = {
+    "bg1": "--bg1",
+    "bg2": "--bg2",
+    "bg3": "--bg3",
+    "text_color": "--text-color",
+    "queue_font_size": "--queue-font-size",
+    "queue_font_weight": "--queue-font-weight",
+    "queue_font_style": "--queue-font-style",
+    "text_grad_start": "--text-grad-start",
+    "text_grad_end": "--text-grad-end",
+    "text_stroke_color": "--text-stroke",
+    "text_stroke_enabled": "--text-stroke-enabled",
+}
 
 
 class BackendServer(ThreadingHTTPServer):
@@ -145,18 +146,6 @@ def _ws_send_text(conn: socket.socket, text: str, opcode: int = 0x1) -> None:
 
     conn.sendall(bytes(header) + payload)
 
-
-def _ws_recv_exact(conn: socket.socket, size: int) -> bytes | None:
-    chunks = bytearray()
-    while len(chunks) < size:
-        try:
-            chunk = conn.recv(size - len(chunks))
-        except (TimeoutError, socket.timeout):
-            raise TimeoutError("socket recv timeout")
-        if not chunk:
-            return None
-        chunks.extend(chunk)
-    return bytes(chunks)
 
 
 def _parse_scalar(value: str) -> Any:
@@ -546,17 +535,8 @@ def read_queue_archive_entries(path: Path) -> list[dict[str, str]]:
 
 def write_queue_archive_entries(path: Path, entries: list[dict[str, Any]], meta: dict[str, Any] | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    merged_meta = {"actor": "", "message": ""}
-    if isinstance(meta, dict):
-        merged_meta["actor"] = str(meta.get("actor", "") or "").strip()
-        merged_meta["message"] = str(meta.get("message", "") or "").strip()
-
     with path.open("w", encoding="utf-8-sig", newline="") as f:
         writer = csv.writer(f)
-        if merged_meta["actor"]:
-            writer.writerow([ARCHIVE_META_ACTOR, merged_meta["actor"]])
-        if merged_meta["message"]:
-            writer.writerow([ARCHIVE_META_MESSAGE, merged_meta["message"]])
         writer.writerow([ARCHIVE_HEADER_SEQ, ARCHIVE_HEADER_ID, ARCHIVE_HEADER_CONTENT, ARCHIVE_HEADER_LAST_OPERATION_AT])
         for idx, entry in enumerate(entries, start=1):
             normalized = queue_item_to_entry(entry)
@@ -650,7 +630,29 @@ def ensure_queue_archive_row_timestamps(path: Path) -> None:
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "server": {"host": DEFAULT_HOST, "port": DEFAULT_PORT},
-    "api": {"roomid": 3049445, "uid": 0, "cookie": ""},
+    "platform": DEFAULT_PLATFORM,
+    "bilibili": {"roomid": 3049445, "uid": 0, "cookie": ""},
+    "douyin": {
+        "enabled": False,
+        "live_id": "",
+        "cookie": "",
+        "signature": "",
+        "bootstrap": {"cursor": "", "internal_ext": ""},
+        "ws": {
+            "auto_reconnect": True,
+            "heartbeat_interval_seconds": 5.0,
+            "reconnect_delay_seconds": 2.0,
+        },
+        "live_info": {
+            "room_id": "",
+            "user_id": "",
+            "user_unique_id": "",
+            "anchor_id": "",
+            "sec_uid": "",
+            "ttwid": "",
+        },
+        "extra_query": {},
+    },
     "qr_login": {
         "last_success_at": "",
         "qrcode_key": "",
@@ -676,7 +678,305 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "logging": {"level": "INFO", "retention_days": 7},
     "queue_archive": {"enabled": True, "slots": MAX_QUEUE_ARCHIVE_SLOTS, "active_slot": 1},
+    "platform_config_archive": {"slots": MAX_QUEUE_ARCHIVE_SLOTS, "active_slot": 1},
 }
+
+
+def _get_bilibili_config(config: dict[str, Any] | None) -> dict[str, Any]:
+    defaults = dict(DEFAULT_CONFIG.get("bilibili", {}))
+    if not isinstance(config, dict):
+        return defaults
+
+    merged = dict(defaults)
+    legacy_api_cfg = config.get("api", {})
+    bilibili_cfg = config.get("bilibili", {})
+    if isinstance(legacy_api_cfg, dict):
+        if "roomid" in legacy_api_cfg:
+            merged["roomid"] = _to_int(legacy_api_cfg.get("roomid", merged.get("roomid", 0)), merged["roomid"])
+        if "uid" in legacy_api_cfg:
+            merged["uid"] = _to_int(legacy_api_cfg.get("uid", merged.get("uid", 0)), merged["uid"])
+        if "cookie" in legacy_api_cfg:
+            merged["cookie"] = str(legacy_api_cfg.get("cookie", merged.get("cookie", "")) or "")
+
+    if isinstance(bilibili_cfg, dict):
+        if "roomid" in bilibili_cfg:
+            bilibili_roomid = _to_int(bilibili_cfg.get("roomid", defaults.get("roomid", 0)), defaults.get("roomid", 0))
+            if bilibili_roomid != defaults.get("roomid", 0) or merged["roomid"] == defaults.get("roomid", 0) or not isinstance(legacy_api_cfg, dict) or "roomid" not in legacy_api_cfg:
+                merged["roomid"] = bilibili_roomid
+        if "uid" in bilibili_cfg:
+            bilibili_uid = _to_int(bilibili_cfg.get("uid", defaults.get("uid", 0)), defaults.get("uid", 0))
+            if bilibili_uid != defaults.get("uid", 0) or merged["uid"] == defaults.get("uid", 0) or not isinstance(legacy_api_cfg, dict) or "uid" not in legacy_api_cfg:
+                merged["uid"] = bilibili_uid
+        if "cookie" in bilibili_cfg:
+            bilibili_cookie = str(bilibili_cfg.get("cookie", defaults.get("cookie", "")) or "")
+            if bilibili_cookie != str(defaults.get("cookie", "") or "") or not str(merged.get("cookie", "") or "").strip() or not isinstance(legacy_api_cfg, dict) or "cookie" not in legacy_api_cfg:
+                merged["cookie"] = bilibili_cookie
+    return merged
+
+
+def _normalize_bilibili_config(config: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(config)
+    bilibili_cfg = _get_bilibili_config(normalized)
+    normalized["bilibili"] = bilibili_cfg
+    normalized["api"] = dict(bilibili_cfg)
+    return normalized
+
+
+def _normalize_platform_name(value: Any) -> str:
+    platform = str(value or DEFAULT_PLATFORM).strip().lower()
+    if platform not in {"bilibili", "douyin"}:
+        return DEFAULT_PLATFORM
+    return platform
+
+
+def _get_douyin_config(config: dict[str, Any] | None) -> dict[str, Any]:
+    defaults = copy.deepcopy(DEFAULT_CONFIG.get("douyin", {}))
+    if not isinstance(config, dict):
+        return defaults
+
+    douyin_cfg = config.get("douyin", {})
+    if not isinstance(douyin_cfg, dict):
+        return defaults
+
+    merged = _merge_config(defaults, douyin_cfg)
+    bootstrap_cfg = merged.get("bootstrap", {})
+    ws_cfg = merged.get("ws", {})
+    live_info_cfg = merged.get("live_info", {})
+    extra_query_cfg = merged.get("extra_query", {})
+
+    merged["enabled"] = bool(merged.get("enabled", defaults.get("enabled", False)))
+    merged["live_id"] = str(merged.get("live_id", defaults.get("live_id", "")) or "")
+    merged["cookie"] = str(merged.get("cookie", defaults.get("cookie", "")) or "")
+    merged["signature"] = str(merged.get("signature", defaults.get("signature", "")) or "")
+    merged["bootstrap"] = {
+        "cursor": str(bootstrap_cfg.get("cursor", defaults["bootstrap"].get("cursor", "")) or ""),
+        "internal_ext": str(bootstrap_cfg.get("internal_ext", defaults["bootstrap"].get("internal_ext", "")) or ""),
+    }
+    merged["ws"] = {
+        "auto_reconnect": bool(ws_cfg.get("auto_reconnect", defaults["ws"].get("auto_reconnect", True))),
+        "heartbeat_interval_seconds": float(ws_cfg.get("heartbeat_interval_seconds", defaults["ws"].get("heartbeat_interval_seconds", 5.0)) or 5.0),
+        "reconnect_delay_seconds": float(ws_cfg.get("reconnect_delay_seconds", defaults["ws"].get("reconnect_delay_seconds", 2.0)) or 2.0),
+    }
+    merged["live_info"] = {
+        "room_id": str(live_info_cfg.get("room_id", defaults["live_info"].get("room_id", "")) or ""),
+        "user_id": str(live_info_cfg.get("user_id", defaults["live_info"].get("user_id", "")) or ""),
+        "user_unique_id": str(live_info_cfg.get("user_unique_id", defaults["live_info"].get("user_unique_id", "")) or ""),
+        "anchor_id": str(live_info_cfg.get("anchor_id", defaults["live_info"].get("anchor_id", "")) or ""),
+        "sec_uid": str(live_info_cfg.get("sec_uid", defaults["live_info"].get("sec_uid", "")) or ""),
+        "ttwid": str(live_info_cfg.get("ttwid", defaults["live_info"].get("ttwid", "")) or ""),
+    }
+    merged["extra_query"] = dict(extra_query_cfg) if isinstance(extra_query_cfg, dict) else {}
+    return merged
+
+
+def _get_platform_config_archive(config: dict[str, Any] | None) -> dict[str, int]:
+    defaults = dict(DEFAULT_CONFIG.get("platform_config_archive", {}))
+    if not isinstance(config, dict):
+        return defaults
+    raw = config.get("platform_config_archive", {})
+    if not isinstance(raw, dict):
+        raw = {}
+    active_slot = max(1, min(MAX_QUEUE_ARCHIVE_SLOTS, _to_int(raw.get("active_slot", defaults.get("active_slot", 1)), defaults.get("active_slot", 1))))
+    return {
+        "slots": MAX_QUEUE_ARCHIVE_SLOTS,
+        "active_slot": active_slot,
+    }
+
+
+def _normalize_runtime_platform_config(config: dict[str, Any]) -> dict[str, Any]:
+    normalized = _normalize_bilibili_config(config)
+    normalized["platform"] = _normalize_platform_name(normalized.get("platform", DEFAULT_PLATFORM))
+    normalized["douyin"] = _get_douyin_config(normalized)
+    normalized["platform_config_archive"] = _get_platform_config_archive(normalized)
+    return normalized
+
+
+def _needs_bilibili_config_migration(raw_config: dict[str, Any] | None) -> bool:
+    if not isinstance(raw_config, dict):
+        return False
+    legacy_api_cfg = raw_config.get("api")
+    return isinstance(legacy_api_cfg, dict)
+
+
+def _should_preserve_legacy_api_schema(raw_config: dict[str, Any] | None) -> bool:
+    if not isinstance(raw_config, dict):
+        return False
+    legacy_api_cfg = raw_config.get("api")
+    bilibili_cfg = raw_config.get("bilibili")
+    return isinstance(legacy_api_cfg, dict) and not isinstance(bilibili_cfg, dict)
+
+
+def _migrate_legacy_bilibili_config_if_needed(
+    config: dict[str, Any],
+    *,
+    logger: logging.Logger | None = None,
+) -> bool:
+    raw_config = _read_raw_config()
+    if not _needs_bilibili_config_migration(raw_config):
+        return False
+    try:
+        save_config(config, preserve_legacy_api_schema=False)
+    except OSError as exc:
+        if logger is not None:
+            logger.warning("Failed to migrate legacy api config to bilibili config: %s", exc)
+        return False
+    if logger is not None:
+        logger.info("Migrated legacy api config to bilibili config")
+    return True
+
+
+_ARCHIVE_SEED_NAMES = (
+    "小艾",
+    "阿星",
+    "北海",
+    "夜雨",
+    "清风",
+    "团子",
+    "阿九",
+    "若白",
+    "南栀",
+    "流云",
+    "初夏",
+    "长安",
+)
+
+_ARCHIVE_SEED_TASKS = (
+    "修城墙",
+    "清理仓库",
+    "搬运补给",
+    "巡逻东门",
+    "整理账本",
+    "训练新兵",
+    "制作药剂",
+    "检查农田",
+    "准备晚饭",
+    "修理马车",
+    "统计材料",
+    "加固护栏",
+)
+
+
+def _build_seed_archive_entries(slot: int) -> list[dict[str, str]]:
+    rng = random.SystemRandom()
+    names = list(rng.sample(_ARCHIVE_SEED_NAMES, 3))
+    tasks = list(rng.sample(_ARCHIVE_SEED_TASKS, 3))
+    base_time = dt.datetime.now().replace(microsecond=0) - dt.timedelta(minutes=max(0, slot - 1) * 7)
+    entries: list[dict[str, str]] = []
+    for idx, (name, task) in enumerate(zip(names, tasks, strict=False)):
+        timestamp = _format_archive_timestamp(base_time - dt.timedelta(minutes=idx))
+        entries.append(build_queue_entry(name, task, timestamp))
+    return entries
+
+
+def platform_config_path(slot: int) -> Path:
+    normalized = max(1, min(MAX_QUEUE_ARCHIVE_SLOTS, int(slot)))
+    return PD_DIR / f"pingtai_config_{normalized}.yaml"
+
+
+def _default_platform_slot_payload(seed: dict[str, Any] | None = None) -> dict[str, Any]:
+    base = {
+        "platform": DEFAULT_PLATFORM,
+        "bilibili": copy.deepcopy(DEFAULT_CONFIG.get("bilibili", {})),
+        "douyin": copy.deepcopy(DEFAULT_CONFIG.get("douyin", {})),
+    }
+    merged_seed = _merge_config(base, seed) if isinstance(seed, dict) else base
+    normalized = _normalize_runtime_platform_config(merged_seed)
+    return {
+        "platform": normalized["platform"],
+        "bilibili": dict(normalized["bilibili"]),
+        "douyin": copy.deepcopy(normalized["douyin"]),
+    }
+
+
+def _render_platform_slot_yaml(payload: dict[str, Any]) -> str:
+    normalized = _default_platform_slot_payload(payload)
+    bilibili_cfg = normalized.get("bilibili", {})
+    douyin_cfg = normalized.get("douyin", {})
+    douyin_bootstrap_cfg = douyin_cfg.get("bootstrap", {}) if isinstance(douyin_cfg, dict) else {}
+    douyin_ws_cfg = douyin_cfg.get("ws", {}) if isinstance(douyin_cfg, dict) else {}
+    douyin_live_info_cfg = douyin_cfg.get("live_info", {}) if isinstance(douyin_cfg, dict) else {}
+    douyin_extra_query_cfg = douyin_cfg.get("extra_query", {}) if isinstance(douyin_cfg, dict) else {}
+
+    douyin_extra_query_lines: list[str] = []
+    if isinstance(douyin_extra_query_cfg, dict):
+        for key, value in douyin_extra_query_cfg.items():
+            if not isinstance(key, str):
+                continue
+            if isinstance(value, bool):
+                rendered = "true" if value else "false"
+            elif isinstance(value, (int, float)):
+                rendered = str(value)
+            elif value is None:
+                rendered = "null"
+            else:
+                rendered = _yaml_quote_string(value)
+            douyin_extra_query_lines.append(f"    {key}: {rendered}")
+    douyin_extra_query_block = "\n".join(douyin_extra_query_lines)
+
+    return f"""platform: {normalized.get('platform', DEFAULT_PLATFORM)}
+bilibili:
+  roomid: {int(bilibili_cfg.get('roomid', 0))}
+  uid: {int(bilibili_cfg.get('uid', 0))}
+  cookie: {_yaml_quote_string(bilibili_cfg.get('cookie', ''))}
+
+douyin:
+  enabled: {'true' if bool(douyin_cfg.get('enabled', False)) else 'false'}
+  live_id: {_yaml_quote_string(douyin_cfg.get('live_id', ''))}
+  cookie: {_yaml_quote_string(douyin_cfg.get('cookie', ''))}
+  signature: {_yaml_quote_string(douyin_cfg.get('signature', ''))}
+  bootstrap:
+    cursor: {_yaml_quote_string(douyin_bootstrap_cfg.get('cursor', ''))}
+    internal_ext: {_yaml_quote_string(douyin_bootstrap_cfg.get('internal_ext', ''))}
+  ws:
+    auto_reconnect: {'true' if bool(douyin_ws_cfg.get('auto_reconnect', True)) else 'false'}
+    heartbeat_interval_seconds: {float(douyin_ws_cfg.get('heartbeat_interval_seconds', 5.0) or 5.0)}
+    reconnect_delay_seconds: {float(douyin_ws_cfg.get('reconnect_delay_seconds', 2.0) or 2.0)}
+  live_info:
+    room_id: {_yaml_quote_string(douyin_live_info_cfg.get('room_id', ''))}
+    user_id: {_yaml_quote_string(douyin_live_info_cfg.get('user_id', ''))}
+    user_unique_id: {_yaml_quote_string(douyin_live_info_cfg.get('user_unique_id', ''))}
+    anchor_id: {_yaml_quote_string(douyin_live_info_cfg.get('anchor_id', ''))}
+    sec_uid: {_yaml_quote_string(douyin_live_info_cfg.get('sec_uid', ''))}
+    ttwid: {_yaml_quote_string(douyin_live_info_cfg.get('ttwid', ''))}
+  extra_query:
+{douyin_extra_query_block if douyin_extra_query_block else '    # optional websocket query overrides'}
+"""
+
+
+def ensure_platform_config_archives() -> None:
+    PD_DIR.mkdir(parents=True, exist_ok=True)
+    raw_config = _normalize_runtime_platform_config(_merge_config(DEFAULT_CONFIG, _read_raw_config()))
+    seed_payload = _default_platform_slot_payload(raw_config)
+    archive_paths = [platform_config_path(slot) for slot in range(1, MAX_QUEUE_ARCHIVE_SLOTS + 1)]
+    has_any_archive = any(path.exists() for path in archive_paths)
+
+    if not has_any_archive:
+        for slot_path in archive_paths:
+            slot_path.write_text(_render_platform_slot_yaml(seed_payload), encoding="utf-8")
+        return
+
+    for slot_path in archive_paths:
+        try:
+            if slot_path.exists() and slot_path.read_text(encoding="utf-8").strip():
+                continue
+        except OSError:
+            pass
+        slot_path.write_text(_render_platform_slot_yaml(seed_payload), encoding="utf-8")
+
+
+def load_platform_config_slot(slot: int) -> dict[str, Any]:
+    ensure_platform_config_archives()
+    path = platform_config_path(slot)
+    raw = load_simple_yaml(path)
+    return _default_platform_slot_payload(raw)
+
+
+def save_platform_config_slot(slot: int, data: dict[str, Any]) -> dict[str, Any]:
+    normalized = _default_platform_slot_payload(data)
+    PD_DIR.mkdir(parents=True, exist_ok=True)
+    path = platform_config_path(slot)
+    path.write_text(_render_platform_slot_yaml(normalized), encoding="utf-8")
+    return normalized
 
 
 def ensure_runtime_layout() -> None:
@@ -685,30 +985,60 @@ def ensure_runtime_layout() -> None:
     if not CONFIG_PATH.exists():
         save_config(DEFAULT_CONFIG)
     if not QUANXIAN_PATH.exists():
-        save_quanxian(DEFAULT_QUANXIAN)
+        _write_quanxian_file(_normalize_quanxian_config(DEFAULT_QUANXIAN))
     if not KAIGUAN_PATH.exists():
-        save_kaiguan(DEFAULT_KAIGUAN)
+        _write_kaiguan_file(dict(DEFAULT_KAIGUAN))
 
-    for slot in range(1, MAX_QUEUE_ARCHIVE_SLOTS + 1):
-        slot_file = PD_DIR / f"queue_archive_slot_{slot}.csv"
-        if not slot_file.exists():
-            write_queue_archive_entries(slot_file, [])
-        else:
-            ensure_queue_archive_row_timestamps(slot_file)
+    raw_config = _merge_config(DEFAULT_CONFIG, _read_raw_config())
+    queue_archive_cfg = raw_config.get("queue_archive", {})
+    active_slot = max(1, min(MAX_QUEUE_ARCHIVE_SLOTS, int(queue_archive_cfg.get("active_slot", 1) or 1)))
+    if not QUEUE_STATE_PATH.exists():
+        QUEUE_STATE_PATH.write_text(
+            json.dumps({"next_slot": 1, "active_slot": active_slot}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    archive_paths = [PD_DIR / f"queue_archive_slot_{slot}.csv" for slot in range(1, MAX_QUEUE_ARCHIVE_SLOTS + 1)]
+    has_any_archive = any(path.exists() for path in archive_paths)
+    if not has_any_archive:
+        for slot, slot_file in enumerate(archive_paths, start=1):
+            write_queue_archive_entries(slot_file, _build_seed_archive_entries(slot))
+    else:
+        for slot_file in archive_paths:
+            if not slot_file.exists():
+                write_queue_archive_entries(slot_file, [])
+            else:
+                ensure_queue_archive_row_timestamps(slot_file)
     if not BLACKLIST_PATH.exists():
         write_blacklist_entries(BLACKLIST_PATH, blacklist_names_to_entries(load_quanxian().get("blacklist", [])))
+    ensure_platform_config_archives()
+    ensure_style_css_archives()
 
 
 def load_config() -> dict[str, Any]:
     ensure_runtime_layout()
-    merged = _merge_config(DEFAULT_CONFIG, _read_raw_config())
+    raw_config = _read_raw_config()
+    merged = _normalize_runtime_platform_config(_merge_config(DEFAULT_CONFIG, raw_config))
+    platform_archive_cfg = merged.get("platform_config_archive", {})
+    active_platform_slot = max(1, min(MAX_QUEUE_ARCHIVE_SLOTS, _to_int(platform_archive_cfg.get("active_slot", 1), 1)))
+    slot_payload = load_platform_config_slot(active_platform_slot)
+    merged["platform"] = slot_payload["platform"]
+    merged["bilibili"] = dict(slot_payload["bilibili"])
+    merged["douyin"] = copy.deepcopy(slot_payload["douyin"])
+    merged["api"] = dict(slot_payload["bilibili"])
+    merged["platform_config_archive"] = {"slots": MAX_QUEUE_ARCHIVE_SLOTS, "active_slot": active_platform_slot}
     merged["myjs"] = _normalize_myjs_config(merged.get("myjs", {}))
     return merged
 
 
-def save_config(config: dict[str, Any]) -> None:
+def save_config(config: dict[str, Any], *, preserve_legacy_api_schema: bool | None = None) -> None:
+    config = _normalize_runtime_platform_config(config)
+    if preserve_legacy_api_schema is None:
+        preserve_legacy_api_schema = _should_preserve_legacy_api_schema(_read_raw_config())
     server = config.get("server", {})
-    api = config.get("api", {})
+    platform_name = _normalize_platform_name(config.get("platform", DEFAULT_PLATFORM))
+    bilibili_cfg = config.get("bilibili", {})
+    douyin_cfg = config.get("douyin", {})
     qr_login = config.get("qr_login", {})
     callback_cfg = config.get("callback", {})
     myjs_cfg = config.get("myjs", {})
@@ -716,6 +1046,7 @@ def save_config(config: dict[str, Any]) -> None:
     overlay_cfg = ui_cfg.get("overlay_window", {}) if isinstance(ui_cfg, dict) else {}
     logging_cfg = config.get("logging", {})
     queue_archive = config.get("queue_archive", {})
+    platform_archive = config.get("platform_config_archive", {})
     quanxian_cfg = config.get("quanxian", {})
     kaiguan_cfg = config.get("kaiguan", {})
     style_cfg = config.get("style", {})
@@ -774,7 +1105,37 @@ def save_config(config: dict[str, Any]) -> None:
                 style_lines.append(f"  {key}: {_yaml_quote_string(value)}")
     style_block = "\n".join(style_lines) if style_lines else "  # 样式配置"
 
-    cookie_text = _yaml_quote_string(api.get("cookie", ""))
+    cookie_text = _yaml_quote_string(bilibili_cfg.get("cookie", ""))
+    douyin_bootstrap_cfg = douyin_cfg.get("bootstrap", {}) if isinstance(douyin_cfg, dict) else {}
+    douyin_ws_cfg = douyin_cfg.get("ws", {}) if isinstance(douyin_cfg, dict) else {}
+    douyin_live_info_cfg = douyin_cfg.get("live_info", {}) if isinstance(douyin_cfg, dict) else {}
+    douyin_extra_query_cfg = douyin_cfg.get("extra_query", {}) if isinstance(douyin_cfg, dict) else {}
+    douyin_extra_query_lines: list[str] = []
+    if isinstance(douyin_extra_query_cfg, dict):
+        for key, value in douyin_extra_query_cfg.items():
+            if not isinstance(key, str):
+                continue
+            if isinstance(value, bool):
+                rendered = "true" if value else "false"
+            elif isinstance(value, (int, float)):
+                rendered = str(value)
+            elif value is None:
+                rendered = "null"
+            else:
+                rendered = _yaml_quote_string(value)
+            douyin_extra_query_lines.append(f"    {key}: {rendered}")
+    douyin_extra_query_block = "\n".join(douyin_extra_query_lines)
+    douyin_live_id = _yaml_quote_string(douyin_cfg.get("live_id", "") if isinstance(douyin_cfg, dict) else "")
+    douyin_cookie = _yaml_quote_string(douyin_cfg.get("cookie", "") if isinstance(douyin_cfg, dict) else "")
+    douyin_signature = _yaml_quote_string(douyin_cfg.get("signature", "") if isinstance(douyin_cfg, dict) else "")
+    douyin_cursor = _yaml_quote_string(douyin_bootstrap_cfg.get("cursor", "") if isinstance(douyin_bootstrap_cfg, dict) else "")
+    douyin_internal_ext = _yaml_quote_string(douyin_bootstrap_cfg.get("internal_ext", "") if isinstance(douyin_bootstrap_cfg, dict) else "")
+    douyin_room_id = _yaml_quote_string(douyin_live_info_cfg.get("room_id", "") if isinstance(douyin_live_info_cfg, dict) else "")
+    douyin_user_id = _yaml_quote_string(douyin_live_info_cfg.get("user_id", "") if isinstance(douyin_live_info_cfg, dict) else "")
+    douyin_user_unique_id = _yaml_quote_string(douyin_live_info_cfg.get("user_unique_id", "") if isinstance(douyin_live_info_cfg, dict) else "")
+    douyin_anchor_id = _yaml_quote_string(douyin_live_info_cfg.get("anchor_id", "") if isinstance(douyin_live_info_cfg, dict) else "")
+    douyin_sec_uid = _yaml_quote_string(douyin_live_info_cfg.get("sec_uid", "") if isinstance(douyin_live_info_cfg, dict) else "")
+    douyin_ttwid = _yaml_quote_string(douyin_live_info_cfg.get("ttwid", "") if isinstance(douyin_live_info_cfg, dict) else "")
     qr_last_success_at = _yaml_quote_string(qr_login.get("last_success_at", ""))
     qr_qrcode_key = _yaml_quote_string(qr_login.get("qrcode_key", ""))
     qr_message = _yaml_quote_string(qr_login.get("message", ""))
@@ -785,15 +1146,41 @@ def save_config(config: dict[str, Any]) -> None:
     overlay_height = max(180, _to_int(overlay_cfg.get("height", 420), 420))
     overlay_scale = max(40, min(250, _to_int(overlay_cfg.get("scale", 100), 100)))
 
+    bilibili_section_name = "api" if preserve_legacy_api_schema else "bilibili"
+
     content = f"""# Danmuji 全局配置
 server:
   host: {server.get('host', DEFAULT_HOST)}
   port: {int(server.get('port', DEFAULT_PORT))}
 
-api:
-  roomid: {int(api.get('roomid', 0))}
-  uid: {int(api.get('uid', 0))}
+platform: {platform_name}
+
+{bilibili_section_name}:
+  roomid: {int(bilibili_cfg.get('roomid', 0))}
+  uid: {int(bilibili_cfg.get('uid', 0))}
   cookie: {cookie_text}
+
+douyin:
+  enabled: {'true' if bool(douyin_cfg.get('enabled', False)) else 'false'}
+  live_id: {douyin_live_id}
+  cookie: {douyin_cookie}
+  signature: {douyin_signature}
+  bootstrap:
+    cursor: {douyin_cursor}
+    internal_ext: {douyin_internal_ext}
+  ws:
+    auto_reconnect: {'true' if bool(douyin_ws_cfg.get('auto_reconnect', True)) else 'false'}
+    heartbeat_interval_seconds: {float(douyin_ws_cfg.get('heartbeat_interval_seconds', 5.0) or 5.0)}
+    reconnect_delay_seconds: {float(douyin_ws_cfg.get('reconnect_delay_seconds', 2.0) or 2.0)}
+  live_info:
+    room_id: {douyin_room_id}
+    user_id: {douyin_user_id}
+    user_unique_id: {douyin_user_unique_id}
+    anchor_id: {douyin_anchor_id}
+    sec_uid: {douyin_sec_uid}
+    ttwid: {douyin_ttwid}
+  extra_query:
+{douyin_extra_query_block if douyin_extra_query_block else '    # optional websocket query overrides'}
 
 qr_login:
   # 最近一次扫码成功信息（由 /api/bili/qr/poll 自动写入）
@@ -831,6 +1218,10 @@ queue_archive:
   slots: {MAX_QUEUE_ARCHIVE_SLOTS}
   # 当前活动存档槽（1~{MAX_QUEUE_ARCHIVE_SLOTS}，由 GUI 写入）
   active_slot: {min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(queue_archive.get('active_slot', 1))))}
+
+platform_config_archive:
+  slots: {MAX_QUEUE_ARCHIVE_SLOTS}
+  active_slot: {min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(platform_archive.get('active_slot', 1))))}
 
 callback:
   enabled: {'true' if bool(callback_cfg.get('enabled', False)) else 'false'}
@@ -1399,7 +1790,10 @@ class QueueManager:
 
     def switch_to_slot(self, slot: int) -> list[str]:
         """Load queue from a specific archive slot, update in-memory queue, and broadcast."""
+        old_slot = self._queue_archive.get_active_slot()
+        reconcile_live_css_with_archive(old_slot)
         self._queue_archive.set_active_slot(slot)
+        apply_css_archive_to_live(slot, force=True)
         snapshot = self._queue_archive.read_snapshot_by_slot(slot)
         if snapshot is None:
             self._logger.info("[队列] 切换到槽位 %s：槽位文件不存在，保持当前队列不变", slot)
@@ -1410,6 +1804,10 @@ class QueueManager:
         self._logger.info(
             "[队列] 已切换到槽位 %s，加载 %s 人（存档时间：%s）",
             slot, len(items), snapshot.get("timestamp", "?"),
+        )
+        self._ws_hub.broadcast_json(
+            None,
+            {"type": "STYLE_UPDATE", "slot": slot, "css": LIVE_STYLE_CSS_PATH.name, "reason": "switch_slot"},
         )
         self._broadcast_and_archive("system", f"switch_slot_{slot}")
         return list(items)
@@ -1794,9 +2192,7 @@ def load_quanxian() -> dict[str, Any]:
     return _normalize_quanxian_config(result)
 
 
-def save_quanxian(config: dict[str, Any]) -> None:
-    normalized = _normalize_quanxian_config(config)
-
+def _write_quanxian_file(normalized: dict[str, Any]) -> None:
     labels = {
         "super_admin": "最高管理员：拥有所有权限，包括新增/删除管理员",
         "admin": "管理员：拥有除新增/删除管理员以外的所有操作权限",
@@ -1813,6 +2209,11 @@ def save_quanxian(config: dict[str, Any]) -> None:
         lines.append("\n")
     QUANXIAN_PATH.write_text("".join(lines), encoding="utf-8")
     write_blacklist_entries(BLACKLIST_PATH, blacklist_names_to_entries(normalized.get("blacklist", [])))
+
+
+def save_quanxian(config: dict[str, Any]) -> None:
+    normalized = _normalize_quanxian_config(config)
+    _write_quanxian_file(normalized)
 
     current = _merge_config(DEFAULT_CONFIG, _read_raw_config())
     current["quanxian"] = normalized
@@ -1832,13 +2233,7 @@ def load_kaiguan() -> dict[str, bool]:
             result[key] = raw_file[key]
     return result
 
-
-def save_kaiguan(config: dict[str, bool]) -> None:
-    normalized: dict[str, bool] = dict(DEFAULT_KAIGUAN)
-    for key in DEFAULT_KAIGUAN:
-        if isinstance(config.get(key), bool):
-            normalized[key] = bool(config.get(key))
-
+def _write_kaiguan_file(normalized: dict[str, bool]) -> None:
     comments = {
         "paidui": "排队总开关：关闭后普通/官服/B服/超级/米服排队全部关闭",
         "guanfu_paidui": "官服排队（需总开关开启）",
@@ -1858,6 +2253,15 @@ def save_kaiguan(config: dict[str, bool]) -> None:
         lines.append(f"{key}: {value_str}              # {comment}\n")
     KAIGUAN_PATH.write_text("".join(lines), encoding="utf-8")
 
+
+def save_kaiguan(config: dict[str, bool]) -> None:
+    normalized: dict[str, bool] = dict(DEFAULT_KAIGUAN)
+    for key in DEFAULT_KAIGUAN:
+        if isinstance(config.get(key), bool):
+            normalized[key] = bool(config.get(key))
+
+    _write_kaiguan_file(normalized)
+
     current = _merge_config(DEFAULT_CONFIG, _read_raw_config())
     current["kaiguan"] = normalized
     current["myjs"] = _sync_kaiguan_to_myjs(current.get("myjs", {}), normalized)
@@ -1870,9 +2274,12 @@ DEFAULT_STYLE: dict[str, Any] = {
     "bg3": "#020409",
     "text_color": "#eaf6ff",
     "queue_font_size": 50,
+    "queue_font_weight": "700",
+    "queue_font_style": "italic",
     "text_grad_start": "#f7f7f7",
     "text_grad_end": "rgba(255,255,255,0.6)",
     "text_stroke_color": "#000000",
+    "text_stroke_enabled": True,
 }
 
 DEFAULT_CONFIG["quanxian"] = {key: list(values) for key, values in DEFAULT_QUANXIAN.items()}
@@ -1880,24 +2287,231 @@ DEFAULT_CONFIG["kaiguan"] = dict(DEFAULT_KAIGUAN)
 DEFAULT_CONFIG["style"] = dict(DEFAULT_STYLE)
 
 
-def load_style() -> dict[str, Any]:
+def css_archive_path(slot: int) -> Path:
+    normalized = max(1, min(MAX_QUEUE_ARCHIVE_SLOTS, int(slot)))
+    return PD_DIR / f"cdang_{normalized}.css"
+
+
+def _unique_paths(*paths: Path) -> list[Path]:
+    result: list[Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        key = os.path.normcase(str(path))
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(path)
+    return result
+
+
+def _legacy_css_archive_paths(slot: int) -> list[Path]:
+    normalized = max(1, min(MAX_QUEUE_ARCHIVE_SLOTS, int(slot)))
+    name = f"cdang_{normalized}.css"
+    return _unique_paths(
+        UI_DIR / name,
+        BUNDLE_UI_DIR / name,
+        CORE_DIR / "ui" / name,
+    )
+
+
+def _load_text_from_candidates(paths: list[Path]) -> str:
+    for path in paths:
+        try:
+            if path.exists():
+                return path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+    return ""
+
+
+def _resolve_static_file(relative_path: str) -> Path | None:
+    relative = Path(relative_path)
+    for base_dir in _unique_paths(UI_DIR, BUNDLE_UI_DIR):
+        target = (base_dir / relative).resolve()
+        try:
+            target.relative_to(base_dir.resolve())
+        except ValueError:
+            continue
+        if target.is_file():
+            return target
+    return None
+
+
+def build_index_css(style: dict[str, Any] | None = None) -> str:
+    merged = dict(DEFAULT_STYLE)
+    if isinstance(style, dict):
+        merged.update(style)
+    stroke_enabled = str(merged.get("text_stroke_enabled", True)).strip().lower() not in {"0", "false", "no", "off"}
+    try:
+        queue_font_size = max(8, int(merged.get("queue_font_size", 50)))
+    except (TypeError, ValueError):
+        queue_font_size = 50
+    queue_font_weight = str(merged.get("queue_font_weight", DEFAULT_STYLE["queue_font_weight"]) or DEFAULT_STYLE["queue_font_weight"]).strip()
+    queue_font_style = str(merged.get("queue_font_style", DEFAULT_STYLE["queue_font_style"]) or DEFAULT_STYLE["queue_font_style"]).strip()
+    text_stroke = merged.get("text_stroke_color", DEFAULT_STYLE["text_stroke_color"]) if stroke_enabled else "transparent"
+    return (
+        ":root {\n"
+        f"    --bg1: {merged.get('bg1', DEFAULT_STYLE['bg1'])};\n"
+        f"    --bg2: {merged.get('bg2', DEFAULT_STYLE['bg2'])};\n"
+        f"    --bg3: {merged.get('bg3', DEFAULT_STYLE['bg3'])};\n"
+        f"    --text-color: {merged.get('text_color', DEFAULT_STYLE['text_color'])};\n"
+        f"    --queue-font-size: {queue_font_size}px;\n"
+        f"    --queue-font-weight: {queue_font_weight};\n"
+        f"    --queue-font-style: {queue_font_style};\n"
+        f"    --text-grad-start: {merged.get('text_grad_start', DEFAULT_STYLE['text_grad_start'])};\n"
+        f"    --text-grad-end: {merged.get('text_grad_end', DEFAULT_STYLE['text_grad_end'])};\n"
+        f"    --text-stroke: {text_stroke};\n"
+        f"    --text-stroke-enabled: {1 if stroke_enabled else 0};\n"
+        "}\n"
+        "html, body { margin: 0; background: transparent !important; color: var(--text-color); }\n"
+        ".wk { width: 100%; height: 80%; text-overflow: ellipsis; white-space: nowrap; }\n"
+        ".div { width: 60%; height: 90%; line-height: 1.3; font-size: var(--queue-font-size); font-weight: var(--queue-font-weight); font-style: var(--queue-font-style); float: left; margin-top: 5%; text-align: left; overflow: hidden; }\n"
+        ".div span { -webkit-text-stroke: 2px var(--text-stroke); color: var(--text-color); }\n"
+        ".div span.pdj-confirm-pending { animation: pdjPendingBlink 0.8s infinite alternate; filter: brightness(1.35); }\n"
+        "@keyframes pdjPendingBlink { from { opacity: 1; transform: scale(1); } to { opacity: 0.5; transform: scale(1.02); } }\n"
+        ".vText { float: left; width: 10%; height: 100%; overflow: hidden; white-space: nowrap; font-weight: var(--queue-font-weight); font-style: var(--queue-font-style); text-align: center; font-size: var(--queue-font-size); }\n"
+        ".vText div { height: 20%; padding-top: 20%; writing-mode: tb-rl; display: inline-block; }\n"
+        ".vText span { -webkit-text-stroke: 3px var(--text-stroke); color: var(--text-color); }\n"
+    )
+
+
+def parse_style_from_css_text(css_text: str) -> dict[str, Any]:
+    if not css_text:
+        return {}
+    result: dict[str, Any] = {}
+    for key, css_var in STYLE_CSS_VAR_MAP.items():
+        pattern = re.compile(rf"{re.escape(css_var)}\s*:\s*([^;]+);")
+        match = pattern.search(css_text)
+        if not match:
+            continue
+        value = match.group(1).strip()
+        if key == "queue_font_size":
+            if value.lower().endswith("px"):
+                value = value[:-2].strip()
+            try:
+                result[key] = max(8, int(float(value)))
+            except ValueError:
+                continue
+        elif key == "text_stroke_enabled":
+            result[key] = str(value).strip() not in {"0", "false", "False", "no", "off"}
+        else:
+            result[key] = value
+    return result
+
+
+def ensure_style_css_archives() -> None:
+    UI_DIR.mkdir(parents=True, exist_ok=True)
+    PD_DIR.mkdir(parents=True, exist_ok=True)
+    seed_style = dict(DEFAULT_STYLE)
     raw_config = _read_raw_config()
+    config_style = raw_config.get("style", {})
+    if isinstance(config_style, dict):
+        seed_style.update(config_style)
+    if STYLE_PATH.exists():
+        try:
+            style_json = json.loads(STYLE_PATH.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            style_json = {}
+        if isinstance(style_json, dict):
+            seed_style.update(style_json)
+
+    active_slot = _current_style_slot(raw_config)
+    active_archive_path = css_archive_path(active_slot)
+    default_css = (
+        _load_text_from_candidates([active_archive_path, *_legacy_css_archive_paths(active_slot)])
+        or _load_text_from_candidates([BUNDLE_UI_DIR / LIVE_STYLE_CSS_PATH.name, CORE_DIR / "ui" / LIVE_STYLE_CSS_PATH.name])
+        or build_index_css(seed_style)
+    )
+    if not LIVE_STYLE_CSS_PATH.exists():
+        LIVE_STYLE_CSS_PATH.write_text(default_css, encoding="utf-8")
+    live_css = LIVE_STYLE_CSS_PATH.read_text(encoding="utf-8")
+
+    for slot in range(1, MAX_QUEUE_ARCHIVE_SLOTS + 1):
+        archive_path = css_archive_path(slot)
+        if not archive_path.exists():
+            for legacy_path in _legacy_css_archive_paths(slot):
+                if not legacy_path.exists():
+                    continue
+                archive_path.write_text(legacy_path.read_text(encoding="utf-8"), encoding="utf-8")
+                try:
+                    legacy_path.unlink()
+                except OSError:
+                    pass
+                break
+        if not archive_path.exists():
+            archive_path.write_text(live_css, encoding="utf-8")
+
+
+def _current_style_slot(raw_config: dict[str, Any] | None = None) -> int:
+    config = raw_config if isinstance(raw_config, dict) else _read_raw_config()
+    queue_archive = config.get("queue_archive", {})
+    try:
+        slot = int(queue_archive.get("active_slot", 1))
+    except (TypeError, ValueError):
+        slot = 1
+    return max(1, min(MAX_QUEUE_ARCHIVE_SLOTS, slot))
+
+
+def reconcile_live_css_with_archive(slot: int) -> str:
+    ensure_style_css_archives()
+    archive_path = css_archive_path(slot)
+    live_text = LIVE_STYLE_CSS_PATH.read_text(encoding="utf-8") if LIVE_STYLE_CSS_PATH.exists() else ""
+    archive_text = archive_path.read_text(encoding="utf-8") if archive_path.exists() else ""
+
+    if not live_text and archive_text:
+        LIVE_STYLE_CSS_PATH.write_text(archive_text, encoding="utf-8")
+        return "archive"
+    if live_text and not archive_text:
+        archive_path.write_text(live_text, encoding="utf-8")
+        return "live"
+    if live_text == archive_text:
+        return "same"
+
+    live_mtime = LIVE_STYLE_CSS_PATH.stat().st_mtime if LIVE_STYLE_CSS_PATH.exists() else 0.0
+    archive_mtime = archive_path.stat().st_mtime if archive_path.exists() else 0.0
+    if live_mtime >= archive_mtime:
+        archive_path.write_text(live_text, encoding="utf-8")
+        return "live"
+    LIVE_STYLE_CSS_PATH.write_text(archive_text, encoding="utf-8")
+    return "archive"
+
+
+def apply_css_archive_to_live(slot: int, *, force: bool = False) -> bool:
+    ensure_style_css_archives()
+    archive_path = css_archive_path(slot)
+    if not archive_path.exists():
+        archive_path.write_text(build_index_css(DEFAULT_STYLE), encoding="utf-8")
+    archive_text = archive_path.read_text(encoding="utf-8")
+    live_text = LIVE_STYLE_CSS_PATH.read_text(encoding="utf-8") if LIVE_STYLE_CSS_PATH.exists() else ""
+    if not force and live_text == archive_text:
+        return False
+    LIVE_STYLE_CSS_PATH.write_text(archive_text, encoding="utf-8")
+    return True
+
+
+def load_style() -> dict[str, Any]:
+    ensure_style_css_archives()
+    raw_config = _read_raw_config()
+    result = dict(DEFAULT_STYLE)
     config_section = raw_config.get("style", {})
-    if isinstance(config_section, dict) and config_section:
-        result = dict(DEFAULT_STYLE)
+    if isinstance(config_section, dict):
         result.update(config_section)
-        return result
 
     if STYLE_PATH.exists():
         try:
             data = json.loads(STYLE_PATH.read_text(encoding="utf-8"))
             if isinstance(data, dict):
-                result = dict(DEFAULT_STYLE)
                 result.update(data)
-                return result
         except (json.JSONDecodeError, OSError):
             pass
-    return dict(DEFAULT_STYLE)
+
+    try:
+        css_values = parse_style_from_css_text(LIVE_STYLE_CSS_PATH.read_text(encoding="utf-8"))
+    except OSError:
+        css_values = {}
+    if css_values:
+        result.update(css_values)
+    return result
 
 
 def save_style(data: dict[str, Any]) -> None:
@@ -1907,21 +2521,15 @@ def save_style(data: dict[str, Any]) -> None:
     current = _merge_config(DEFAULT_CONFIG, _read_raw_config())
     current["style"] = merged
     save_config(current)
+    css_text = build_index_css(merged)
+    ensure_style_css_archives()
+    LIVE_STYLE_CSS_PATH.write_text(css_text, encoding="utf-8")
+    css_archive_path(_current_style_slot(current)).write_text(css_text, encoding="utf-8")
 
 
 def load_model() -> dict[str, Any]:
-    with MODEL_JSON_PATH.open("r", encoding="utf-8") as f:
-        return json.load(f)
+    return bilibili_protocol.get_initial_model()
 
-
-def _extract_cookie_string(set_cookie_headers: list[str]) -> str:
-    cookie_pairs: list[str] = []
-    for header in set_cookie_headers:
-        first_part = header.split(";", 1)[0].strip()
-        if "=" not in first_part:
-            continue
-        cookie_pairs.append(first_part)
-    return "; ".join(cookie_pairs)
 
 
 def _to_int(value: Any, default: int = 0) -> int:
@@ -1930,837 +2538,6 @@ def _to_int(value: Any, default: int = 0) -> int:
     except (TypeError, ValueError):
         return default
 
-
-def _parse_cookie_pairs(cookie_text: str) -> dict[str, str]:
-    pairs: dict[str, str] = {}
-    for item in str(cookie_text or "").split(";"):
-        part = item.strip()
-        if not part or "=" not in part:
-            continue
-        key, value = part.split("=", 1)
-        key = key.strip()
-        if not key:
-            continue
-        pairs[key] = value.strip()
-    return pairs
-
-
-def _extract_uid_from_cookie(cookie_text: str) -> int:
-    return _to_int(_parse_cookie_pairs(cookie_text).get("DedeUserID", 0))
-
-
-def _is_plausible_bilibili_uid(uid: int) -> bool:
-    return 0 < uid <= MAX_SAFE_INTEGER
-
-
-def _build_bilibili_www_headers(cookie: str = "") -> dict[str, str]:
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/135.0.0.0 Safari/537.36"
-        ),
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        "Referer": "https://www.bilibili.com/",
-        "Origin": "https://www.bilibili.com",
-    }
-    if cookie:
-        headers["Cookie"] = cookie
-    return headers
-
-
-def _build_bilibili_live_headers(roomid: int = 0, cookie: str = "") -> dict[str, str]:
-    referer = "https://live.bilibili.com/"
-    if roomid > 0:
-        referer = f"https://live.bilibili.com/{roomid}"
-
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/135.0.0.0 Safari/537.36"
-        ),
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        "Referer": referer,
-        "Origin": "https://live.bilibili.com",
-    }
-    if cookie:
-        headers["Cookie"] = cookie
-    return headers
-
-
-def _bilibili_qr_generate() -> dict[str, Any]:
-    req = urllib.request.Request(
-        BILIBILI_QR_GENERATE_URL,
-        headers={
-            "User-Agent": "Mozilla/5.0",
-            "Referer": "https://www.bilibili.com/",
-            "Origin": "https://www.bilibili.com",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        payload = json.loads(resp.read().decode("utf-8", errors="replace"))
-    return payload
-
-
-def _bilibili_qr_poll(qrcode_key: str) -> tuple[dict[str, Any], str]:
-    query = urllib.parse.urlencode({"qrcode_key": qrcode_key})
-    req = urllib.request.Request(
-        f"{BILIBILI_QR_POLL_URL}?{query}",
-        headers={
-            "User-Agent": "Mozilla/5.0",
-            "Referer": "https://www.bilibili.com/",
-            "Origin": "https://www.bilibili.com",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        payload = json.loads(resp.read().decode("utf-8", errors="replace"))
-        raw_cookie_headers = resp.headers.get_all("Set-Cookie") or []
-    return payload, _extract_cookie_string(raw_cookie_headers)
-
-
-def _bilibili_get_nav_info(cookie: str) -> dict[str, Any]:
-    req = urllib.request.Request(BILIBILI_NAV_URL, headers=_build_bilibili_www_headers(cookie))
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        return json.loads(resp.read().decode("utf-8", errors="replace"))
-
-
-def _resolve_bilibili_login(
-    cookie: str,
-    fallback_uid: int = 0,
-    logger: logging.Logger | None = None,
-) -> dict[str, Any]:
-    resolved_uid = max(0, _to_int(fallback_uid))
-    if not _is_plausible_bilibili_uid(resolved_uid):
-        resolved_uid = 0
-    resolved = {
-        "uid": resolved_uid,
-        "uname": "",
-        "is_login": False,
-        "uid_source": "config" if resolved_uid > 0 else "",
-    }
-
-    cookie_uid = _extract_uid_from_cookie(cookie)
-    if _is_plausible_bilibili_uid(cookie_uid):
-        resolved["uid"] = cookie_uid
-        resolved["uid_source"] = "cookie"
-    elif cookie_uid > 0 and logger is not None:
-        logger.warning("Ignoring implausible DedeUserID from cookie: %s", cookie_uid)
-
-    if not str(cookie or "").strip():
-        return resolved
-
-    try:
-        payload = _bilibili_get_nav_info(cookie)
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-        if logger is not None:
-            logger.warning("Bilibili nav 查询失败，将回退到本地 Cookie/UID: %s", exc)
-        return resolved
-
-    if _to_int(payload.get("code", -1), -1) != 0:
-        if logger is not None:
-            logger.warning("Bilibili nav 返回异常，将回退到本地 Cookie/UID: %s", payload)
-        return resolved
-
-    data = payload.get("data", {})
-    if not isinstance(data, dict):
-        return resolved
-
-    nav_uid = _to_int(data.get("mid", 0))
-    if _is_plausible_bilibili_uid(nav_uid):
-        resolved["uid"] = nav_uid
-        resolved["uid_source"] = "nav"
-    elif nav_uid > 0 and logger is not None:
-        logger.warning("Ignoring implausible Bilibili nav uid: %s", nav_uid)
-    resolved["uname"] = str(data.get("uname", "") or "")
-    resolved["is_login"] = bool(data.get("isLogin", False))
-    return resolved
-
-
-def _build_qr_png_base64(text: str) -> tuple[str, str]:
-    if not text:
-        return "", "二维码内容为空"
-    if qrcode is None:
-        return "", "缺少依赖 qrcode，请先安装：pip install qrcode[pil]"
-
-    qr = qrcode.QRCode(version=1, box_size=10, border=2)
-    qr.add_data(text)
-    qr.make(fit=True)
-    img = qr.make_image(fill_color="black", back_color="white")
-
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    encoded = base64.b64encode(buf.getvalue()).decode("ascii")
-    return encoded, ""
-
-
-def _bilibili_get_danmu_info(roomid: int, cookie: str = "") -> dict[str, Any]:
-    query = urllib.parse.urlencode({"id": roomid, "type": 0})
-    req = urllib.request.Request(
-        f"{BILIBILI_DANMU_INFO_URL}?{query}",
-        headers=_build_bilibili_live_headers(roomid, cookie),
-    )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        return json.loads(resp.read().decode("utf-8", errors="replace"))
-
-
-def _bilibili_room_init(roomid: int, cookie: str = "") -> dict[str, Any]:
-    query = urllib.parse.urlencode({"id": roomid})
-    req = urllib.request.Request(
-        f"{BILIBILI_ROOM_INIT_URL}?{query}",
-        headers=_build_bilibili_live_headers(roomid, cookie),
-    )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        return json.loads(resp.read().decode("utf-8", errors="replace"))
-
-
-def _bilibili_get_danmu_conf(roomid: int, cookie: str = "") -> dict[str, Any]:
-    query = urllib.parse.urlencode({"room_id": roomid, "platform": "pc", "player": "web"})
-    req = urllib.request.Request(
-        f"{BILIBILI_DANMU_CONF_URL}?{query}",
-        headers=_build_bilibili_live_headers(roomid, cookie),
-    )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        return json.loads(resp.read().decode("utf-8", errors="replace"))
-
-
-def _bilibili_get_danmu_server_info(roomid: int, cookie: str = "") -> dict[str, Any]:
-    payload = _bilibili_get_danmu_conf(roomid, cookie)
-    if _to_int(payload.get("code", -1), -1) == 0:
-        return payload
-
-    legacy_payload = _bilibili_get_danmu_info(roomid, cookie)
-    if _to_int(legacy_payload.get("code", -1), -1) != 0:
-        return payload
-
-    legacy_data = legacy_payload.get("data", {}) if isinstance(legacy_payload, dict) else {}
-    if not isinstance(legacy_data, dict):
-        return payload
-
-    normalized_data = dict(legacy_data)
-    if "host_server_list" not in normalized_data and isinstance(normalized_data.get("host_list"), list):
-        normalized_data["host_server_list"] = normalized_data.get("host_list", [])
-    return {"code": 0, "msg": "ok", "message": "ok", "data": normalized_data}
-
-
-class BilibiliDanmuRelay(threading.Thread):
-    def __init__(self, server: BackendServer) -> None:
-        super().__init__(name="bilibili-danmu-relay", daemon=True)
-        self.server = server
-        self.logger = server.logger
-        self._stop_event = threading.Event()
-        self._reconnect_event = threading.Event()
-        self._seen_event_cmds: set[str] = set()
-        self._status_lock = threading.Lock()
-        self._connected = False
-        self._last_packet_monotonic = 0.0
-        self._last_packet_at = ""
-        self._last_connect_at = ""
-        self._last_disconnect_at = ""
-        self._last_disconnect_reason = ""
-        self._current_roomid = 0
-        self._current_host = ""
-        self._current_port = 0
-        self._current_transport = ""
-        self._current_auth_uid = 0
-
-    def stop(self) -> None:
-        self._stop_event.set()
-        self._reconnect_event.set()
-
-    def request_reconnect(self) -> None:
-        self._reconnect_event.set()
-
-    def _emit_status(self, status: str, **extra: Any) -> None:
-        payload = {"type": "PDJ_STATUS", "status": status}
-        payload.update(extra)
-        self.server.ws_hub.broadcast_json(None, payload)
-
-    def _pack_packet(self, body: bytes, operation: int, version: int = 1) -> bytes:
-        header_len = 16
-        packet_len = header_len + len(body)
-        return struct.pack("!IHHII", packet_len, header_len, version, operation, 1) + body
-
-    def _send_auth(self, conn: socket.socket, roomid: int, uid: int, token: str) -> None:
-        protover = 3 if brotli is not None else 2
-        auth_payload = {
-            "uid": uid,
-            "roomid": roomid,
-            "protover": protover,
-            "platform": "web",
-            "type": 2,
-            "key": token,
-        }
-        body = json.dumps(auth_payload, ensure_ascii=False).encode("utf-8")
-        conn.sendall(self._pack_packet(body, operation=7, version=1))
-
-    def _send_heartbeat(self, conn: socket.socket) -> None:
-        conn.sendall(self._pack_packet(b"[object Object]", operation=2, version=1))
-
-    def _mark_packet(self) -> None:
-        with self._status_lock:
-            self._last_packet_monotonic = time.monotonic()
-            self._last_packet_at = dt.datetime.now(dt.timezone.utc).isoformat()
-
-    def _mark_connected(
-        self,
-        *,
-        roomid: int,
-        host: str,
-        port: int,
-        transport: str,
-        auth_uid: int,
-    ) -> None:
-        now = dt.datetime.now(dt.timezone.utc).isoformat()
-        with self._status_lock:
-            self._connected = True
-            self._last_connect_at = now
-            self._last_disconnect_reason = ""
-            self._current_roomid = roomid
-            self._current_host = host
-            self._current_port = port
-            self._current_transport = transport
-            self._current_auth_uid = auth_uid
-        self._mark_packet()
-
-    def _mark_disconnected(self, reason: str = "") -> None:
-        with self._status_lock:
-            self._connected = False
-            self._last_disconnect_at = dt.datetime.now(dt.timezone.utc).isoformat()
-            if reason:
-                self._last_disconnect_reason = reason
-
-    def get_runtime_status(self) -> dict[str, Any]:
-        with self._status_lock:
-            connected = self._connected
-            last_packet_monotonic = self._last_packet_monotonic
-            last_packet_at = self._last_packet_at
-            last_connect_at = self._last_connect_at
-            last_disconnect_at = self._last_disconnect_at
-            last_disconnect_reason = self._last_disconnect_reason
-            roomid = self._current_roomid
-            host = self._current_host
-            port = self._current_port
-            transport = self._current_transport
-            auth_uid = self._current_auth_uid
-        return {
-            "connected": connected,
-            "last_packet_at": last_packet_at,
-            "last_connect_at": last_connect_at,
-            "last_disconnect_at": last_disconnect_at,
-            "last_disconnect_reason": last_disconnect_reason,
-            "idle_seconds": max(0.0, time.monotonic() - last_packet_monotonic) if last_packet_monotonic else None,
-            "roomid": roomid,
-            "host": host,
-            "port": port,
-            "transport": transport,
-            "auth_uid": auth_uid,
-        }
-
-    def _log_business_message(self, text: str) -> None:
-        try:
-            payload = json.loads(text)
-        except json.JSONDecodeError:
-            return
-
-        if not isinstance(payload, dict):
-            return
-
-        cmd = str(payload.get("cmd", "") or "").strip()
-        if not cmd:
-            return
-
-        if cmd.startswith("DANMU_MSG"):
-            # 弹幕由 QueueManager.process_danmu_json 负责打印，此处跳过
-            return
-
-        if cmd in self._seen_event_cmds:
-            return
-        self._seen_event_cmds.add(cmd)
-
-        data = payload.get("data", {})
-        if isinstance(data, dict) and isinstance(data.get("pb"), str):
-            self.logger.info("收到直播间事件 cmd=%s（protobuf 格式）", cmd)
-            return
-
-        self.logger.info("收到直播间事件 cmd=%s", cmd)
-
-    def _iter_business_messages(self, packet_data: bytes) -> list[str]:
-        messages: list[str] = []
-        offset = 0
-        total = len(packet_data)
-        while offset + 16 <= total:
-            packet_len, header_len, version, operation, _ = struct.unpack(
-                "!IHHII", packet_data[offset : offset + 16]
-            )
-            if packet_len <= 0 or offset + packet_len > total:
-                break
-            body = packet_data[offset + header_len : offset + packet_len]
-            offset += packet_len
-
-            if operation != 5:
-                continue
-            if version == 0 or version == 1:
-                text = body.decode("utf-8", errors="replace").strip()
-                if text:
-                    messages.append(text)
-            elif version == 2:
-                try:
-                    messages.extend(self._iter_business_messages(zlib.decompress(body)))
-                except zlib.error:
-                    self.logger.debug("弹幕包 zlib 解压失败")
-            elif version == 3:
-                if brotli is None:
-                    self.logger.debug("收到 brotli 包，但环境未安装 brotli")
-                    continue
-                try:
-                    messages.extend(self._iter_business_messages(brotli.decompress(body)))
-                except Exception:
-                    self.logger.debug("弹幕包 brotli 解压失败")
-        return messages
-
-    def _wait_auth_result(self, conn: socket.socket) -> None:
-        header = _ws_recv_exact(conn, 16)
-        if not header:
-            raise ConnectionError("danmu auth connection closed")
-
-        packet_len, header_len, _, operation, _ = struct.unpack("!IHHII", header)
-        if packet_len < header_len or header_len < 16:
-            raise ConnectionError("invalid danmu auth packet")
-
-        body = _ws_recv_exact(conn, packet_len - 16)
-        if body is None:
-            raise ConnectionError("empty danmu auth packet")
-
-        if operation != 8:
-            raise ConnectionError(f"unexpected danmu auth op={operation}")
-
-        payload = json.loads(body.decode("utf-8", errors="replace") or "{}")
-        if _to_int(payload.get("code", -1), -1) != 0:
-            raise ConnectionError(f"danmu auth failed: {payload}")
-        self.logger.info("直播间鉴权成功")
-        self._emit_status("danmu_auth_ok")
-
-    def _iter_auth_uid_candidates(self, auth_uid: int, configured_uid: int) -> list[int]:
-        candidates: list[int] = []
-        for value in [auth_uid, configured_uid, 0]:
-            uid = _to_int(value, 0)
-            if uid < 0:
-                continue
-            if uid != 0 and not _is_plausible_bilibili_uid(uid):
-                continue
-            if uid not in candidates:
-                candidates.append(uid)
-        return candidates or [0]
-
-    def _normalize_host_candidates(self, data: dict[str, Any]) -> list[dict[str, Any]]:
-        candidates: list[dict[str, Any]] = []
-        seen: set[tuple[str, int, str]] = set()
-        for key in ("server_list", "host_server_list", "host_list"):
-            items = data.get(key, [])
-            if not isinstance(items, list):
-                continue
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-                host = str(item.get("host", "")).strip()
-                if not host:
-                    continue
-                for transport_key, transport_name in (("port", "tcp"), ("wss_port", "tls"), ("ws_port", "tcp")):
-                    port = _to_int(item.get(transport_key, 0), 0)
-                    if port <= 0:
-                        continue
-                    dedupe_key = (host, port, transport_name)
-                    if dedupe_key in seen:
-                        continue
-                    seen.add(dedupe_key)
-                    candidates.append({"host": host, "port": port, "transport": transport_name})
-
-        random.shuffle(candidates)
-        candidates.sort(
-            key=lambda item: (
-                0 if item.get("transport") == "tcp" else 1,
-                0 if _to_int(item.get("port", 0), 0) == 80 else 1,
-                0 if _to_int(item.get("port", 0), 0) == 443 else 1,
-            )
-        )
-        return candidates
-
-    def _open_danmu_socket(self, host: str, port: int, transport: str) -> socket.socket:
-        raw_conn = socket.create_connection((host, port), timeout=10)
-        raw_conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-        if transport == "tls":
-            context = ssl.create_default_context()
-            return context.wrap_socket(raw_conn, server_hostname=host)
-        return raw_conn
-
-    def _connect_and_stream_v2(
-        self,
-        *,
-        roomid: int,
-        configured_uid: int,
-        cookie: str,
-        initial_auth_uid: int,
-    ) -> None:
-        self.logger.info("开始获取弹幕服务器信息，roomid=%s", roomid)
-        real_room_id = roomid
-        for candidate_room_id, candidate_cookie, mode in [
-            (roomid, cookie, "room_init+cookie"),
-            (roomid, "", "room_init+no_cookie"),
-        ]:
-            try:
-                room_init_payload = _bilibili_room_init(candidate_room_id, candidate_cookie)
-            except Exception as exc:  # noqa: BLE001
-                self.logger.warning("room_init failed (%s): %s", mode, exc)
-                continue
-            room_init_data = room_init_payload.get("data", {}) if isinstance(room_init_payload, dict) else {}
-            init_real_room_id = _to_int(room_init_data.get("room_id", candidate_room_id), candidate_room_id)
-            if init_real_room_id > 0:
-                real_room_id = init_real_room_id
-                if real_room_id != roomid:
-                    self.logger.info("room_init resolved real room id: %s -> %s", roomid, real_room_id)
-                break
-
-        if cookie:
-            request_candidates: list[tuple[int, str, str]] = [(roomid, cookie, "id+cookie")]
-            if real_room_id != roomid:
-                request_candidates.append((real_room_id, cookie, "real_id+cookie"))
-            request_candidates.append((roomid, "", "id+no_cookie"))
-            if real_room_id != roomid:
-                request_candidates.append((real_room_id, "", "real_id+no_cookie"))
-        else:
-            request_candidates = [(roomid, "", "id+no_cookie")]
-            if real_room_id != roomid:
-                request_candidates.append((real_room_id, "", "real_id+no_cookie"))
-
-        payload: dict[str, Any] | None = None
-        discovery_candidates: list[dict[str, Any]] = []
-
-        for candidate_room_id, candidate_cookie, mode in request_candidates:
-            try:
-                payload = _bilibili_get_danmu_server_info(candidate_room_id, candidate_cookie)
-            except Exception as exc:  # noqa: BLE001
-                self.logger.warning("danmu server info request failed (%s): %s", mode, exc)
-                continue
-
-            data = payload.get("data", {}) if isinstance(payload, dict) else {}
-            code = _to_int(payload.get("code", -1), -1) if isinstance(payload, dict) else -1
-            candidate_token = str(data.get("token", "")) if isinstance(data, dict) else ""
-            candidate_hosts = self._normalize_host_candidates(data) if isinstance(data, dict) else []
-            if code == 0 and candidate_token and candidate_hosts:
-                discovery_candidates.append(
-                    {
-                        "token": candidate_token,
-                        "host_candidates": candidate_hosts,
-                        "room_id": _to_int(data.get("room_id", candidate_room_id), candidate_room_id),
-                        "mode": mode,
-                    }
-                )
-                continue
-            self.logger.warning("danmu server info failed (%s): %s", mode, payload)
-
-        if not discovery_candidates:
-            raise RuntimeError(f"danmu server info failed: {payload}")
-
-        auth_uid_candidates = self._iter_auth_uid_candidates(initial_auth_uid, configured_uid)
-        conn: socket.socket | None = None
-        host = ""
-        port = 0
-        transport = ""
-        last_error: Exception | None = None
-        selected_auth_uid = 0
-        selected_room_id = real_room_id
-
-        for discovery in discovery_candidates:
-            token = str(discovery.get("token", "") or "")
-            host_candidates = list(discovery.get("host_candidates", []))
-            selected_room_id = _to_int(discovery.get("room_id", real_room_id), real_room_id)
-            discovery_mode = str(discovery.get("mode", "") or "")
-
-            if discovery_mode.endswith("no_cookie"):
-                self.logger.warning("Danmu server discovery fell back to no-cookie mode")
-            else:
-                self.logger.info("Danmu server discovery using authenticated mode: %s", discovery_mode)
-
-            for candidate in host_candidates:
-                host = str(candidate.get("host", "")).strip()
-                port = _to_int(candidate.get("port", 0), 0)
-                transport = str(candidate.get("transport", "tcp") or "tcp")
-                if not host or port <= 0:
-                    continue
-
-                self._emit_status(
-                    "danmu_connecting",
-                    roomid=selected_room_id,
-                    host=host,
-                    port=port,
-                    transport=transport,
-                )
-
-                for candidate_auth_uid in auth_uid_candidates:
-                    try:
-                        self.logger.info(
-                            "Trying danmu server %s://%s:%s with auth uid=%s discovery=%s",
-                            transport,
-                            host,
-                            port,
-                            candidate_auth_uid,
-                            discovery_mode or "unknown",
-                        )
-                        conn = self._open_danmu_socket(host, port, transport)
-                        conn.settimeout(5.0)
-                        self._send_auth(conn, selected_room_id, candidate_auth_uid, token)
-                        self._wait_auth_result(conn)
-                        selected_auth_uid = candidate_auth_uid
-                        conn.settimeout(1.0)
-                        break
-                    except Exception as exc:  # noqa: BLE001
-                        last_error = exc
-                        self.logger.warning(
-                            "danmu connect/auth failed %s://%s:%s uid=%s discovery=%s: %s",
-                            transport,
-                            host,
-                            port,
-                            candidate_auth_uid,
-                            discovery_mode or "unknown",
-                            exc,
-                        )
-                        if conn is not None:
-                            try:
-                                conn.close()
-                            except OSError:
-                                pass
-                        conn = None
-                if conn is not None:
-                    break
-            if conn is not None:
-                break
-
-        if conn is None:
-            raise ConnectionError(f"all danmu server candidates failed: {last_error}")
-
-        try:
-            self._send_heartbeat(conn)
-            self._mark_connected(
-                roomid=selected_room_id,
-                host=host,
-                port=port,
-                transport=transport,
-                auth_uid=selected_auth_uid,
-            )
-            self._emit_status(
-                "danmu_connected",
-                roomid=selected_room_id,
-                host=host,
-                port=port,
-                transport=transport,
-                auth_uid=selected_auth_uid,
-            )
-            self.logger.info(
-                "Danmu connected roomid=%s transport=%s host=%s port=%s auth_uid=%s",
-                selected_room_id,
-                transport,
-                host,
-                port,
-                selected_auth_uid,
-            )
-            next_heartbeat = time.time() + DANMU_HEARTBEAT_INTERVAL_SECONDS
-
-            while not self._stop_event.is_set():
-                if self._reconnect_event.is_set():
-                    self._reconnect_event.clear()
-                    self.logger.info("Received reconnect signal; restarting danmu stream")
-                    break
-                if time.time() >= next_heartbeat:
-                    self._send_heartbeat(conn)
-                    next_heartbeat = time.time() + DANMU_HEARTBEAT_INTERVAL_SECONDS
-                ok = self._recv_and_handle(conn)
-                if not ok:
-                    self._mark_disconnected("danmu stream disconnected")
-                    raise ConnectionError("danmu stream disconnected")
-                idle_seconds = self.get_runtime_status().get("idle_seconds")
-                if idle_seconds is not None and idle_seconds >= DANMU_IDLE_RECONNECT_SECONDS:
-                    self._mark_disconnected(
-                        f"danmu stream idle timeout ({int(idle_seconds)}s without packets)"
-                    )
-                    raise ConnectionError(
-                        f"danmu stream idle timeout ({int(idle_seconds)}s without packets)"
-                    )
-        finally:
-            self._mark_disconnected("connection closed")
-            try:
-                conn.close()
-            except OSError:
-                pass
-
-    def _recv_and_handle(self, conn: socket.socket) -> bool:
-        try:
-            header = _ws_recv_exact(conn, 16)
-        except TimeoutError:
-            return True
-        if not header:
-            return False
-        packet_len, header_len, _, operation, _ = struct.unpack("!IHHII", header)
-        if packet_len < header_len or header_len < 16:
-            return False
-        try:
-            body = _ws_recv_exact(conn, packet_len - 16)
-        except TimeoutError:
-            return True
-        if body is None:
-            return False
-        packet_data = header + body
-        self._mark_packet()
-
-        if operation == 8:
-            self.logger.info("直播间弹幕鉴权成功")
-            self._emit_status("danmu_auth_ok")
-            return True
-        if operation == 3 and len(body) >= 4:
-            popularity = struct.unpack("!I", body[:4])[0]
-            self.logger.info("实时人气值：%s", popularity)
-            self._emit_status("popularity", popularity=popularity)
-            return True
-
-        for text in self._iter_business_messages(packet_data):
-            self._log_business_message(text)
-            self.server.ws_hub.mark_message()
-            try:
-                parsed_msg = json.loads(text)
-            except json.JSONDecodeError:
-                self.server.ws_hub.broadcast_text(None, text)
-                continue
-            cmd = str(parsed_msg.get("cmd", "") or "").strip() if isinstance(parsed_msg, dict) else ""
-            if cmd.startswith("DANMU_MSG"):
-                # Route through queue manager; QUEUE_UPDATE is broadcast on change
-                if hasattr(self.server, "queue_manager"):
-                    self.server.queue_manager.process_danmu_json(parsed_msg)
-            else:
-                self.server.ws_hub.broadcast_text(None, text)
-        return True
-
-    def _connect_and_stream(self) -> None:
-        cfg = self.server.runtime_config.get("api", {})
-        roomid = int(cfg.get("roomid", 0))
-        uid = int(cfg.get("uid", 0))
-        cookie = str(cfg.get("cookie", "")).strip()
-        login_state = _resolve_bilibili_login(cookie, fallback_uid=uid, logger=self.logger if cookie else None)
-        auth_uid = _to_int(login_state.get("uid", 0))
-        if cookie and auth_uid > 0 and auth_uid != uid:
-            cfg["uid"] = auth_uid
-            self.logger.info(
-                "Detected logged-in Bilibili UID=%s (source=%s); using it for danmu auth",
-                auth_uid,
-                login_state.get("uid_source", "unknown"),
-            )
-        elif cookie and auth_uid <= 0 and uid <= 0:
-            self.logger.warning("Cookie is configured but login UID could not be resolved; falling back to guest/default UID")
-        if roomid > 0:
-            return self._connect_and_stream_v2(
-                roomid=roomid,
-                configured_uid=uid,
-                cookie=cookie,
-                initial_auth_uid=auth_uid,
-            )
-        if roomid <= 0:
-            self.logger.info("直播间未配置（roomid=0），跳过弹幕连接")
-            self._emit_status("danmu_waiting_config", message="roomid 未配置")
-            time.sleep(3)
-            return
-
-        self.logger.info("开始获取直播间弹幕 ws 地址，roomid=%s", roomid)
-        real_room_id = roomid
-        try:
-            room_init_payload = _bilibili_room_init(roomid, cookie)
-            room_init_data = room_init_payload.get("data", {}) if isinstance(room_init_payload, dict) else {}
-            init_real_room_id = int(room_init_data.get("room_id", roomid) or roomid)
-            if init_real_room_id > 0:
-                real_room_id = init_real_room_id
-                if real_room_id != roomid:
-                    self.logger.info("room_init 已解析真实房间号：%s -> %s", roomid, real_room_id)
-        except Exception as exc:  # noqa: BLE001
-            self.logger.warning("room_init 查询失败，将使用原房间号继续: %s", exc)
-
-        request_candidates: list[tuple[int, str, str]] = [
-            (roomid, cookie, "id+cookie"),
-        ]
-        if real_room_id != roomid:
-            request_candidates.append((real_room_id, cookie, "real_id+cookie"))
-        if cookie:
-            request_candidates.append((roomid, "", "id+no_cookie"))
-            if real_room_id != roomid:
-                request_candidates.append((real_room_id, "", "real_id+no_cookie"))
-
-        payload: dict[str, Any] | None = None
-        token = ""
-        host_list: list[dict[str, Any]] = []
-        selected_room_id = real_room_id
-
-        for candidate_room_id, candidate_cookie, mode in request_candidates:
-            payload = _bilibili_get_danmu_info(candidate_room_id, candidate_cookie)
-            code = int(payload.get("code", -1)) if isinstance(payload, dict) else -1
-            data = payload.get("data", {}) if isinstance(payload, dict) else {}
-            candidate_token = str(data.get("token", ""))
-            candidate_hosts = data.get("host_list", [])
-            if code == 0 and candidate_token and isinstance(candidate_hosts, list) and candidate_hosts:
-                token = candidate_token
-                host_list = candidate_hosts
-                selected_room_id = int(data.get("room_id", candidate_room_id) or candidate_room_id)
-                if mode.endswith("no_cookie"):
-                    self.logger.warning("getDanmuInfo 在带 Cookie 模式失败，已回退到无 Cookie 模式")
-                break
-            self.logger.warning("getDanmuInfo 失败(%s): %s", mode, payload)
-
-        if not token or not host_list:
-            raise RuntimeError(f"getDanmuInfo 返回异常: {payload}")
-
-        candidate = random.choice(host_list)
-        host = str(candidate.get("host", "")).strip()
-        wss_port = int(candidate.get("wss_port", 443) or 443)
-        if not host:
-            raise RuntimeError(f"getDanmuInfo host 为空: {payload}")
-
-        self.logger.info("直播间弹幕服务地址：wss://%s:%s/sub", host, wss_port)
-        self._emit_status("danmu_connecting", roomid=selected_room_id, host=host, port=wss_port)
-
-        raw_conn = socket.create_connection((host, wss_port), timeout=10)
-        context = ssl.create_default_context()
-        conn = context.wrap_socket(raw_conn, server_hostname=host)
-        conn.settimeout(1.0)
-        try:
-            self._send_auth(conn, selected_room_id, auth_uid, token)
-            self._send_heartbeat(conn)
-            self._emit_status("danmu_connected", roomid=selected_room_id, host=host)
-            self.logger.info("已连接直播间弹幕流，roomid=%s", selected_room_id)
-            next_heartbeat = time.time() + 30
-
-            while not self._stop_event.is_set():
-                if self._reconnect_event.is_set():
-                    self._reconnect_event.clear()
-                    self.logger.info("收到重连信号，准备重新连接直播间弹幕流")
-                    break
-                if time.time() >= next_heartbeat:
-                    self._send_heartbeat(conn)
-                    next_heartbeat = time.time() + 30
-                ok = self._recv_and_handle(conn)
-                if not ok:
-                    raise ConnectionError("直播间弹幕连接中断")
-        finally:
-            try:
-                conn.close()
-            except OSError:
-                pass
-
-    def run(self) -> None:
-        while not self._stop_event.is_set():
-            try:
-                self._connect_and_stream()
-            except Exception as exc:  # noqa: BLE001
-                self.logger.warning("直播间弹幕连接异常：%s", exc)
-                self._emit_status("danmu_disconnected", error=str(exc))
-                time.sleep(2)
 
 
 def _dispatch_login_callback(
@@ -2816,16 +2593,11 @@ def _safe_static_path(request_path: str) -> Path | None:
         path = "/index.html"
     if path == "/cookie-login":
         path = "/cookie_login.html"
+    if path == f"/{LIVE_STYLE_CSS_PATH.name}":
+        ensure_style_css_archives()
+        return LIVE_STYLE_CSS_PATH
 
-    target = (UI_DIR / path.lstrip("/")).resolve()
-    try:
-        target.relative_to(UI_DIR.resolve())
-    except ValueError:
-        return None
-
-    if target.is_file():
-        return target
-    return None
+    return _resolve_static_file(path.lstrip("/"))
 
 
 def _guess_content_type(path: Path) -> str:
@@ -2857,9 +2629,15 @@ class ApiHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _serve_static_file(self, file_path: Path) -> None:
+        if file_path.name in {"index.html", LIVE_STYLE_CSS_PATH.name}:
+            reconcile_live_css_with_archive(_current_style_slot())
+            if file_path.name == LIVE_STYLE_CSS_PATH.name:
+                file_path = LIVE_STYLE_CSS_PATH
         body = file_path.read_bytes()
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", _guess_content_type(file_path))
+        if file_path.suffix.lower() == ".css":
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -2961,6 +2739,70 @@ class ApiHandler(BaseHTTPRequestHandler):
     def _ws_send_json(self, conn: socket.socket, payload: dict[str, Any]) -> None:
         self._ws_send_text(conn, json.dumps(payload, ensure_ascii=False))
 
+    def _build_basic_config_payload(self) -> dict[str, Any]:
+        cfg = self.server.runtime_config
+        bilibili_cfg = _get_bilibili_config(cfg)
+        return {
+            "roomid": int(bilibili_cfg.get("roomid", 0)),
+            "uid": int(bilibili_cfg.get("uid", 0)),
+            "bilibili": bilibili_cfg,
+        }
+
+    def _build_login_config_payload(self) -> dict[str, Any]:
+        payload = self._build_basic_config_payload()
+        payload["cookie"] = str(_get_bilibili_config(self.server.runtime_config).get("cookie", ""))
+        payload["qr_login"] = self.server.runtime_config.get("qr_login", {})
+        return payload
+
+    def _save_login_config(self, *, uid: int, cookie: str) -> dict[str, Any]:
+        login_state = bilibili_protocol.resolve_bilibili_login(
+            cookie,
+            fallback_uid=uid,
+            logger=self.server.logger if cookie else None,
+        )
+        resolved_uid = _to_int(login_state.get("uid", 0))
+        if cookie and resolved_uid > 0 and resolved_uid != uid:
+            self.server.logger.info(
+                "Auto-correcting Bilibili login UID during login save: %s -> %s (source=%s)",
+                uid,
+                resolved_uid,
+                login_state.get("uid_source", "unknown"),
+            )
+            uid = resolved_uid
+
+        updated = _merge_config(
+            self.server.runtime_config,
+            {
+                "bilibili": {
+                    "uid": uid,
+                    "cookie": cookie,
+                }
+            },
+        )
+        save_config(updated)
+        updated = load_config()
+        self.server.runtime_config = updated
+
+        if hasattr(self.server, "danmu_relay"):
+            self.server.danmu_relay.request_reconnect()
+        if hasattr(self.server, "queue_manager"):
+            self.server.queue_manager.load_config(
+                updated.get("myjs", {}),
+                anchor_uid=_to_int(_get_bilibili_config(updated).get("uid", 0)),
+            )
+            self.server.queue_manager.load_quanxian(updated.get("quanxian", {}))
+
+        self.server.logger.info("登录配置已更新，触发弹幕重连 uid=%s", uid)
+        return {
+            "status": "ok",
+            "roomid": int(_get_bilibili_config(updated).get("roomid", 0)),
+            "uid": uid,
+            "cookie": cookie,
+            "uname": str(login_state.get("uname", "") or ""),
+            "uid_source": str(login_state.get("uid_source", "") or ""),
+            "is_login": bool(login_state.get("is_login", False)),
+        }
+
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         if parsed.path in {"/ws", "/danmu/sub"}:
@@ -2981,11 +2823,11 @@ class ApiHandler(BaseHTTPRequestHandler):
             try:
                 model = load_model()
                 self._write_json({"status": "ok", "model": model})
-            except FileNotFoundError:
+            except FileNotFoundError as exc:
                 self._write_json(
                     {
                         "status": "error",
-                        "message": f"Model file not found: {MODEL_JSON_PATH}",
+                        "message": str(exc),
                     },
                     status=HTTPStatus.INTERNAL_SERVER_ERROR,
                 )
@@ -3010,13 +2852,21 @@ class ApiHandler(BaseHTTPRequestHandler):
             self._serve_static_file(static_path)
             return
 
+        if parsed.path == "/api/config/basic":
+            self._write_json(self._build_basic_config_payload())
+            return
+        if parsed.path == "/api/config/login":
+            self._write_json(self._build_login_config_payload())
+            return
         if parsed.path == "/api/config":
             cfg = self.server.runtime_config
+            bilibili_cfg = _get_bilibili_config(cfg)
             self._write_json(
                 {
-                    "roomid": int(cfg.get("api", {}).get("roomid", 0)),
-                    "uid": int(cfg.get("api", {}).get("uid", 0)),
-                    "cookie": str(cfg.get("api", {}).get("cookie", "")),
+                    "roomid": int(bilibili_cfg.get("roomid", 0)),
+                    "uid": int(bilibili_cfg.get("uid", 0)),
+                    "cookie": str(bilibili_cfg.get("cookie", "")),
+                    "bilibili": bilibili_cfg,
                     "qr_login": cfg.get("qr_login", {}),
                     "callback": cfg.get("callback", {}),
                     "myjs": cfg.get("myjs", {}),
@@ -3117,7 +2967,7 @@ class ApiHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/api/bili/qr/start":
             try:
-                payload = _bilibili_qr_generate()
+                payload = bilibili_protocol.bilibili_qr_generate()
             except urllib.error.URLError as exc:
                 self._write_json(
                     {"status": "error", "message": f"Bilibili 接口访问失败: {exc}"},
@@ -3134,7 +2984,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             data = payload.get("data", {})
             if isinstance(data, dict):
                 qr_url = str(data.get("url", "")).strip()
-                qr_base64, qr_error = _build_qr_png_base64(qr_url)
+                qr_base64, qr_error = bilibili_protocol.build_qr_png_base64(qr_url)
                 if qr_base64:
                     data["qr_image_base64"] = qr_base64
                 if qr_error:
@@ -3150,6 +3000,30 @@ class ApiHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path == "/api/config/login":
+            length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0:
+                self._write_json(
+                    {"status": "error", "message": "Empty request body"},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+
+            raw = self.rfile.read(length).decode("utf-8", errors="replace")
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                self._write_json(
+                    {"status": "error", "message": "Body must be valid JSON"},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+
+            uid = int(payload.get("uid", 0))
+            cookie = str(payload.get("cookie", "")).strip()
+            self._write_json(self._save_login_config(uid=uid, cookie=cookie))
+            return
+
         if parsed.path == "/api/config":
             length = int(self.headers.get("Content-Length", "0"))
             if length <= 0:
@@ -3198,7 +3072,11 @@ class ApiHandler(BaseHTTPRequestHandler):
                         "blacklist": myjs_payload.get("ban_admins", []),
                     }
                 )
-            login_state = _resolve_bilibili_login(cookie, fallback_uid=uid, logger=self.server.logger if cookie else None)
+            login_state = bilibili_protocol.resolve_bilibili_login(
+                cookie,
+                fallback_uid=uid,
+                logger=self.server.logger if cookie else None,
+            )
             resolved_uid = _to_int(login_state.get("uid", 0))
             if cookie and resolved_uid > 0 and resolved_uid != uid:
                 self.server.logger.info(
@@ -3212,7 +3090,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             updated = _merge_config(
                 self.server.runtime_config,
                 {
-                    "api": {"roomid": roomid, "uid": uid, "cookie": cookie},
+                    "bilibili": {"roomid": roomid, "uid": uid, "cookie": cookie},
                     "callback": {
                         "enabled": callback_enabled,
                         "url": callback_url,
@@ -3233,7 +3111,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             if hasattr(self.server, "queue_manager"):
                 self.server.queue_manager.load_config(
                     updated.get("myjs", {}),
-                    anchor_uid=_to_int(updated.get("api", {}).get("uid", 0)),
+                    anchor_uid=_to_int(_get_bilibili_config(updated).get("uid", 0)),
                 )
                 self.server.queue_manager.load_quanxian(updated.get("quanxian", {}))
             self.server.logger.info("配置已更新，触发直播间弹幕重连 roomid=%s uid=%s", roomid, uid)
@@ -3358,6 +3236,11 @@ class ApiHandler(BaseHTTPRequestHandler):
             if isinstance(payload, dict):
                 save_style(payload)
                 self.server.runtime_config = _merge_config(self.server.runtime_config, {"style": load_style()})
+                active_slot = _current_style_slot()
+                self.server.ws_hub.broadcast_json(
+                    None,
+                    {"type": "STYLE_UPDATE", "slot": active_slot, "css": LIVE_STYLE_CSS_PATH.name, "reason": "save_style"},
+                )
             self._write_json({"status": "ok"})
             return
 
@@ -3376,6 +3259,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             else:
                 current = []
                 entries = []
+            self.server.runtime_config = load_config()
             self._write_json({"status": "ok", "slot": slot, "queue": current, "entries": entries, "size": len(current)})
             return
 
@@ -3439,7 +3323,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                 return
 
             try:
-                bilibili_payload, cookie_text = _bilibili_qr_poll(qrcode_key)
+                bilibili_payload, cookie_text = bilibili_protocol.bilibili_qr_poll(qrcode_key)
             except urllib.error.URLError as exc:
                 self._write_json(
                     {"status": "error", "message": f"Bilibili 接口访问失败: {exc}"},
@@ -3464,9 +3348,9 @@ class ApiHandler(BaseHTTPRequestHandler):
                     poll_code = -1
 
                 if poll_code == 0 and cookie_text:
-                    login_state = _resolve_bilibili_login(
+                    login_state = bilibili_protocol.resolve_bilibili_login(
                         cookie_text,
-                        fallback_uid=int(self.server.runtime_config.get("api", {}).get("uid", 0)),
+                        fallback_uid=int(_get_bilibili_config(self.server.runtime_config).get("uid", 0)),
                         logger=self.server.logger,
                     )
                     resolved_uid = _to_int(login_state.get("uid", 0))
@@ -3478,13 +3362,13 @@ class ApiHandler(BaseHTTPRequestHandler):
                     data["uid_source"] = str(login_state.get("uid_source", "") or "")
                     data["is_login"] = bool(login_state.get("is_login", False))
                     success_time = dt.datetime.now(dt.timezone.utc).isoformat()
-                    api_update: dict[str, Any] = {"cookie": cookie_text}
+                    bilibili_update: dict[str, Any] = {"cookie": cookie_text}
                     if resolved_uid > 0:
-                        api_update["uid"] = resolved_uid
+                        bilibili_update["uid"] = resolved_uid
                     updated = _merge_config(
                         self.server.runtime_config,
                         {
-                            "api": api_update,
+                            "bilibili": bilibili_update,
                             "qr_login": {
                                 "last_success_at": success_time,
                                 "qrcode_key": qrcode_key,
@@ -3495,7 +3379,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                         },
                     )
                     save_config(updated)
-                    self.server.runtime_config = updated
+                    self.server.runtime_config = load_config()
                     if hasattr(self.server, "danmu_relay"):
                         self.server.danmu_relay.request_reconnect()
                     callback_ok, callback_message = _dispatch_login_callback(
@@ -3582,6 +3466,7 @@ def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
     )
     cfg_active_slot = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(archive_cfg.get("active_slot", 1))))
     httpd.queue_archive.set_active_slot(cfg_active_slot)
+    reconcile_live_css_with_archive(cfg_active_slot)
     httpd.ws_hub = WebSocketHub(logger)
     httpd.queue_manager = QueueManager(
         ws_hub=httpd.ws_hub,
@@ -3591,13 +3476,16 @@ def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
     )
     httpd.queue_manager.load_config(
         runtime_config.get("myjs", {}),
-        anchor_uid=_to_int(runtime_config.get("api", {}).get("uid", 0)),
+        anchor_uid=_to_int(_get_bilibili_config(runtime_config).get("uid", 0)),
     )
     httpd.queue_manager.load_quanxian(load_quanxian())
     httpd.queue_manager.load_kaiguan(load_kaiguan())
     httpd.queue_manager.restore_from_archive()
-    httpd.danmu_relay = BilibiliDanmuRelay(httpd)
+    httpd.danmu_relay = bilibili_protocol.BilibiliDanmuRelay(httpd)
     httpd.danmu_relay.start()
+    if _migrate_legacy_bilibili_config_if_needed(runtime_config, logger=logger):
+        runtime_config = load_config()
+        httpd.runtime_config = runtime_config
 
     logger.info("后端已启动，地址：http://%s:%s", host, port)
     logger.info("配置页：http://127.0.0.1:%s/config", port)
@@ -3606,15 +3494,15 @@ def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
 
     # 打印非敏感配置
     srv_cfg = runtime_config.get("server", {})
-    api_cfg = runtime_config.get("api", {})
+    bilibili_cfg = _get_bilibili_config(runtime_config)
     log_cfg = runtime_config.get("logging", {})
     qa_cfg = runtime_config.get("queue_archive", {})
     logger.info(
         "[config] server=%s:%s  roomid=%s  uid=%s  log_level=%s  retention=%sd  "
         "archive_enabled=%s  active_slot=%s",
         srv_cfg.get("host", host), srv_cfg.get("port", port),
-        api_cfg.get("roomid", 0),
-        api_cfg.get("uid", 0),
+        bilibili_cfg.get("roomid", 0),
+        bilibili_cfg.get("uid", 0),
         log_cfg.get("level", "INFO"),
         log_cfg.get("retention_days", 7),
         qa_cfg.get("enabled", True),

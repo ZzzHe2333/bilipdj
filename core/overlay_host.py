@@ -21,7 +21,11 @@ OVERLAY_MIN_WIDTH = 320
 OVERLAY_MIN_HEIGHT = 180
 DEFAULT_STYLE = {
     "text_color": "#eaf6ff",
+    "text_stroke_color": "#000000",
+    "text_stroke_enabled": True,
     "queue_font_size": 50,
+    "queue_font_weight": "700",
+    "queue_font_style": "italic",
 }
 
 
@@ -34,6 +38,36 @@ def _to_int(value: Any, default: int) -> int:
 
 def _clamp(value: int, low: int, high: int) -> int:
     return max(low, min(high, value))
+
+
+def _safe_color(value: Any, fallback: str) -> str:
+    text = str(value or "").strip()
+    return text if text.startswith("#") else fallback
+
+
+def _font_style_spec(weight_value: Any, style_value: Any) -> str:
+    try:
+        numeric_weight = int(str(weight_value).strip() or 700)
+    except (TypeError, ValueError):
+        numeric_weight = 700
+    normalized_style = str(style_value or "").strip().lower()
+    parts: list[str] = []
+    if numeric_weight >= 600:
+        parts.append("bold")
+    if normalized_style in {"italic", "oblique"}:
+        parts.append("italic")
+    return " ".join(parts) if parts else "normal"
+
+
+def _style_bool(value: Any, default: bool = True) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
 
 
 class OverlayHostApp:
@@ -318,7 +352,7 @@ class OverlayHostApp:
 
         next_style = dict(self.style)
         if isinstance(style_payload, dict):
-            for key in ("text_color", "queue_font_size"):
+            for key in ("text_color", "text_stroke_color", "text_stroke_enabled", "queue_font_size", "queue_font_weight", "queue_font_style"):
                 if key in style_payload:
                     next_style[key] = style_payload.get(key)
 
@@ -345,13 +379,41 @@ class OverlayHostApp:
 
         queue_font_size = _to_int(self.style.get("queue_font_size", 50), 50)
         queue_font_size = max(12, int(queue_font_size * self.scale / 100))
-        queue_text_color = str(self.style.get("text_color", "#eaf6ff") or "#eaf6ff")
-        text_font = ("Microsoft YaHei UI", queue_font_size, "bold")
+        queue_text_color = _safe_color(self.style.get("text_color", "#eaf6ff"), "#eaf6ff")
+        queue_stroke_color = _safe_color(self.style.get("text_stroke_color", "#000000"), "#000000")
+        stroke_enabled = _style_bool(self.style.get("text_stroke_enabled", True), True)
+        text_font = (
+            "Microsoft YaHei UI",
+            queue_font_size,
+            _font_style_spec(
+                self.style.get("queue_font_weight", "700"),
+                self.style.get("queue_font_style", "italic"),
+            ),
+        )
+        stroke_radius = max(1, int(queue_font_size * 0.06))
+        stroke_offsets = [
+            (dx, dy)
+            for dx in range(-stroke_radius, stroke_radius + 1)
+            for dy in range(-stroke_radius, stroke_radius + 1)
+            if dx != 0 or dy != 0
+        ]
 
         y = 12
         max_text_width = max(80, width - 28)
         line_gap = max(2, int(queue_font_size * 0.16))
         for text in self.items:
+            if stroke_enabled:
+                for dx, dy in stroke_offsets:
+                    canvas.create_text(
+                        14 + dx,
+                        y + dy,
+                        anchor="nw",
+                        text=text,
+                        fill=queue_stroke_color,
+                        font=text_font,
+                        width=max_text_width,
+                        justify="left",
+                    )
             draw_id = canvas.create_text(
                 14,
                 y,
@@ -364,9 +426,9 @@ class OverlayHostApp:
             )
             bbox = canvas.bbox(draw_id)
             if bbox is None:
-                y += queue_font_size + line_gap
+                y += queue_font_size + line_gap + stroke_radius
             else:
-                y = bbox[3] + line_gap
+                y = bbox[3] + line_gap + stroke_radius
             if y >= height - queue_font_size:
                 break
 

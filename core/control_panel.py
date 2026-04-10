@@ -41,11 +41,40 @@ import core.server as _backend_server_hint  # noqa: F401
 BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", REPO_DIR))
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else REPO_DIR
 _YAML_DIR = APP_DIR if getattr(sys, "frozen", False) else CORE_DIR
+BUNDLE_CORE_DIR = BUNDLE_DIR / "core"
+RUNTIME_CORE_DIR = APP_DIR / "core" if getattr(sys, "frozen", False) else CORE_DIR
+
+
+def _prefer_existing_path(*paths: Path) -> Path:
+    fallback: Path | None = None
+    seen: set[str] = set()
+    for path in paths:
+        if fallback is None:
+            fallback = path
+        key = os.path.normcase(str(path))
+        if key in seen:
+            continue
+        seen.add(key)
+        if path.exists():
+            return path
+    if fallback is None:
+        raise FileNotFoundError("No candidate paths were provided")
+    return fallback
+
+
 CONFIG_PATH = _YAML_DIR / "config.yaml"
 QUANXIAN_PATH = _YAML_DIR / "quanxian.yaml"
 KAIGUAN_PATH = _YAML_DIR / "kaiguan.yaml"
-SERVER_PATH = BUNDLE_DIR / "core" / "server.py"
-OVERLAY_HOST_SCRIPT = BUNDLE_DIR / "core" / "overlay_host.py"
+SERVER_PATH = _prefer_existing_path(
+    RUNTIME_CORE_DIR / "server.py",
+    BUNDLE_CORE_DIR / "server.py",
+    CORE_DIR / "server.py",
+)
+OVERLAY_HOST_SCRIPT = _prefer_existing_path(
+    RUNTIME_CORE_DIR / "overlay_host.py",
+    BUNDLE_CORE_DIR / "overlay_host.py",
+    CORE_DIR / "overlay_host.py",
+)
 OVERLAY_HOST_EXE_NAME = "paiduijitm.exe"
 APP_NAME = "弹幕排队姬"
 APP_VERSION = "0.4.0"
@@ -67,6 +96,12 @@ DEFAULT_OVERLAY_SETTINGS = {
     "height": 420,
     "scale": 100,
 }
+PLATFORM_LABEL_TO_VALUE = {
+    "B站": "bilibili",
+    "抖音": "douyin",
+}
+PLATFORM_VALUE_TO_LABEL = {value: key for key, value in PLATFORM_LABEL_TO_VALUE.items()}
+PLATFORM_LABELS = tuple(PLATFORM_LABEL_TO_VALUE.keys())
 KAIGUAN_LABELS = [
     ("paidui",           "排队总开关"),
     ("guanfu_paidui",    "官服排队"),
@@ -223,14 +258,14 @@ def yaml_quote_string(value) -> str:
 
 def save_config(path: Path, config: dict) -> None:
     server = config.get("server", {})
-    api = config.get("api", {})
+    bilibili = config.get("bilibili", config.get("api", {}))
     ui_cfg = config.get("ui", {})
     overlay_cfg = ui_cfg.get("overlay_window", {}) if isinstance(ui_cfg, dict) else {}
     logging_cfg = config.get("logging", {})
     queue_archive = config.get("queue_archive", {})
     slots = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(queue_archive.get("slots", 3))))
     active_slot = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(queue_archive.get("active_slot", 1))))
-    escaped_cookie = str(api.get("cookie", "")).replace('"', '\\"')
+    escaped_cookie = str(bilibili.get("cookie", "")).replace('"', '\\"')
     try:
         overlay_width = max(OVERLAY_MIN_WIDTH, int(overlay_cfg.get("width", DEFAULT_OVERLAY_SETTINGS["width"])))
     except (TypeError, ValueError):
@@ -249,9 +284,9 @@ server:
   host: {server.get('host', '0.0.0.0')}
   port: {int(server.get('port', 9816))}
 
-api:
-  roomid: {int(api.get('roomid', 0))}
-  uid: {int(api.get('uid', 0))}
+bilibili:
+  roomid: {int(bilibili.get('roomid', 0))}
+  uid: {int(bilibili.get('uid', 0))}
   cookie: \"{escaped_cookie}\"
 
 # 前端 myjs.js 可覆盖配置（如需扩展可继续加键值）
@@ -303,8 +338,27 @@ class ControlPanelApp:
         self.queue_enabled_var = tk.BooleanVar(value=True)
         self.queue_slot_var = tk.StringVar(value="1")
         self.queue_slot_choice_var = tk.IntVar(value=1)
+        self.platform_config_slot_var = tk.StringVar(value="1")
+        self.platform_config_slot_choice_var = tk.IntVar(value=1)
         self.auto_start_var = tk.BooleanVar(value=False)
         self.language_var = tk.StringVar(value="中文")
+        self.platform_var = tk.StringVar(value=PLATFORM_VALUE_TO_LABEL["bilibili"])
+        self.douyin_enabled_var = tk.BooleanVar(value=False)
+        self.douyin_live_id_var = tk.StringVar(value="")
+        self.douyin_cookie_var = tk.StringVar(value="")
+        self.douyin_signature_var = tk.StringVar(value="")
+        self.douyin_cursor_var = tk.StringVar(value="")
+        self.douyin_internal_ext_var = tk.StringVar(value="")
+        self.douyin_ws_auto_reconnect_var = tk.BooleanVar(value=True)
+        self.douyin_ws_heartbeat_var = tk.StringVar(value="5.0")
+        self.douyin_ws_reconnect_delay_var = tk.StringVar(value="2.0")
+        self.douyin_room_id_var = tk.StringVar(value="")
+        self.douyin_user_id_var = tk.StringVar(value="")
+        self.douyin_user_unique_id_var = tk.StringVar(value="")
+        self.douyin_anchor_id_var = tk.StringVar(value="")
+        self.douyin_sec_uid_var = tk.StringVar(value="")
+        self.douyin_ttwid_var = tk.StringVar(value="")
+        self.douyin_extra_query_var = tk.StringVar(value="{}")
         self.overlay_width_var = tk.StringVar(value=str(DEFAULT_OVERLAY_SETTINGS["width"]))
         self.overlay_height_var = tk.StringVar(value=str(DEFAULT_OVERLAY_SETTINGS["height"]))
         self.overlay_scale_var = tk.StringVar(value=str(DEFAULT_OVERLAY_SETTINGS["scale"]))
@@ -314,6 +368,7 @@ class ControlPanelApp:
         self._clear_click_time: float = 0.0
         self._blacklist_clear_click_time: float = 0.0
         self._prev_slot: int = self.queue_slot_choice_var.get()
+        self._prev_platform_config_slot: int = self.platform_config_slot_choice_var.get()
         self._overlay_window: tk.Toplevel | None = None
         self._overlay_canvas: tk.Canvas | None = None
         self._overlay_photo: Any | None = None
@@ -400,27 +455,32 @@ class ControlPanelApp:
         notebook.add(settings_tab, text="设置")
         self._build_settings_tab(settings_tab)
 
-        # Tab 4: 权限
+        # Tab 4: 透明窗口
+        overlay_tab = ttk.Frame(notebook, padding=8)
+        notebook.add(overlay_tab, text="透明窗口")
+        self._build_overlay_tab(overlay_tab)
+
+        # Tab 5: 权限
         quanxian_tab = ttk.Frame(notebook, padding=8)
         notebook.add(quanxian_tab, text="权限")
         self._build_quanxian_tab(quanxian_tab)
 
-        # Tab 5: 开关
+        # Tab 6: 开关
         kaiguan_tab = ttk.Frame(notebook, padding=8)
         notebook.add(kaiguan_tab, text="开关")
         self._build_kaiguan_tab(kaiguan_tab)
 
-        # Tab 6: 性能
+        # Tab 7: 性能
         perf_tab = ttk.Frame(notebook, padding=8)
         notebook.add(perf_tab, text="性能")
         self._build_perf_tab(perf_tab)
 
-        # Tab 7: 样式设置
+        # Tab 8: 样式设置
         style_tab = ttk.Frame(notebook, padding=8)
         notebook.add(style_tab, text="样式设置")
         self._build_style_tab(style_tab)
 
-        # Tab 8: 关于
+        # Tab 9: 关于
         about_tab = ttk.Frame(notebook, padding=8)
         notebook.add(about_tab, text="关于")
         self._build_about_tab(about_tab)
@@ -599,6 +659,156 @@ class ControlPanelApp:
             except (TypeError, ValueError, tk.TclError):
                 slot = 1
         return self._set_queue_slot_selection(slot)
+
+    @staticmethod
+    def _platform_label_to_value(label: Any) -> str:
+        return PLATFORM_LABEL_TO_VALUE.get(str(label or "").strip(), "bilibili")
+
+    @staticmethod
+    def _platform_value_to_label(value: Any) -> str:
+        return PLATFORM_VALUE_TO_LABEL.get(str(value or "").strip().lower(), PLATFORM_VALUE_TO_LABEL["bilibili"])
+
+    def _set_platform_slot_selection(self, slot: int) -> int:
+        slot = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(slot)))
+        self.platform_config_slot_choice_var.set(slot)
+        self.platform_config_slot_var.set(str(slot))
+        return slot
+
+    def _get_selected_platform_slot(self) -> int:
+        try:
+            slot = int(str(self.platform_config_slot_var.get()).strip() or self.platform_config_slot_choice_var.get())
+        except (TypeError, ValueError, tk.TclError):
+            try:
+                slot = int(self.platform_config_slot_choice_var.get())
+            except (TypeError, ValueError, tk.TclError):
+                slot = 1
+        return self._set_platform_slot_selection(slot)
+
+    def _set_platform_config_payload(self, payload: dict[str, Any] | None) -> None:
+        raw = payload if isinstance(payload, dict) else {}
+        bilibili_cfg = raw.get("bilibili", {})
+        douyin_cfg = raw.get("douyin", {})
+        douyin_bootstrap_cfg = douyin_cfg.get("bootstrap", {}) if isinstance(douyin_cfg, dict) else {}
+        douyin_ws_cfg = douyin_cfg.get("ws", {}) if isinstance(douyin_cfg, dict) else {}
+        douyin_live_info_cfg = douyin_cfg.get("live_info", {}) if isinstance(douyin_cfg, dict) else {}
+        douyin_extra_query_cfg = douyin_cfg.get("extra_query", {}) if isinstance(douyin_cfg, dict) else {}
+
+        self.platform_var.set(self._platform_value_to_label(raw.get("platform", "bilibili")))
+        self.roomid_var.set(str(bilibili_cfg.get("roomid", 0) if isinstance(bilibili_cfg, dict) else 0))
+        self.uid_var.set(str(bilibili_cfg.get("uid", 0) if isinstance(bilibili_cfg, dict) else 0))
+        self.cookie_var.set(str(bilibili_cfg.get("cookie", "") if isinstance(bilibili_cfg, dict) else ""))
+
+        self.douyin_enabled_var.set(bool(douyin_cfg.get("enabled", False)) if isinstance(douyin_cfg, dict) else False)
+        self.douyin_live_id_var.set(str(douyin_cfg.get("live_id", "") if isinstance(douyin_cfg, dict) else ""))
+        self.douyin_cookie_var.set(str(douyin_cfg.get("cookie", "") if isinstance(douyin_cfg, dict) else ""))
+        self.douyin_signature_var.set(str(douyin_cfg.get("signature", "") if isinstance(douyin_cfg, dict) else ""))
+        self.douyin_cursor_var.set(str(douyin_bootstrap_cfg.get("cursor", "") if isinstance(douyin_bootstrap_cfg, dict) else ""))
+        self.douyin_internal_ext_var.set(str(douyin_bootstrap_cfg.get("internal_ext", "") if isinstance(douyin_bootstrap_cfg, dict) else ""))
+        self.douyin_ws_auto_reconnect_var.set(bool(douyin_ws_cfg.get("auto_reconnect", True)) if isinstance(douyin_ws_cfg, dict) else True)
+        self.douyin_ws_heartbeat_var.set(str(douyin_ws_cfg.get("heartbeat_interval_seconds", 5.0) if isinstance(douyin_ws_cfg, dict) else 5.0))
+        self.douyin_ws_reconnect_delay_var.set(str(douyin_ws_cfg.get("reconnect_delay_seconds", 2.0) if isinstance(douyin_ws_cfg, dict) else 2.0))
+        self.douyin_room_id_var.set(str(douyin_live_info_cfg.get("room_id", "") if isinstance(douyin_live_info_cfg, dict) else ""))
+        self.douyin_user_id_var.set(str(douyin_live_info_cfg.get("user_id", "") if isinstance(douyin_live_info_cfg, dict) else ""))
+        self.douyin_user_unique_id_var.set(str(douyin_live_info_cfg.get("user_unique_id", "") if isinstance(douyin_live_info_cfg, dict) else ""))
+        self.douyin_anchor_id_var.set(str(douyin_live_info_cfg.get("anchor_id", "") if isinstance(douyin_live_info_cfg, dict) else ""))
+        self.douyin_sec_uid_var.set(str(douyin_live_info_cfg.get("sec_uid", "") if isinstance(douyin_live_info_cfg, dict) else ""))
+        self.douyin_ttwid_var.set(str(douyin_live_info_cfg.get("ttwid", "") if isinstance(douyin_live_info_cfg, dict) else ""))
+        self.douyin_extra_query_var.set(
+            json.dumps(douyin_extra_query_cfg, ensure_ascii=False)
+            if isinstance(douyin_extra_query_cfg, dict) and douyin_extra_query_cfg
+            else "{}"
+        )
+        self._refresh_platform_settings_visibility()
+
+    def _gather_platform_config_payload(self) -> dict[str, Any]:
+        extra_query_text = self.douyin_extra_query_var.get().strip()
+        extra_query: dict[str, Any]
+        if not extra_query_text:
+            extra_query = {}
+        else:
+            parsed_extra_query = json.loads(extra_query_text)
+            if not isinstance(parsed_extra_query, dict):
+                raise ValueError("抖音额外查询参数必须是 JSON 对象")
+            extra_query = parsed_extra_query
+
+        platform_value = self._platform_label_to_value(self.platform_var.get())
+        return {
+            "platform": platform_value,
+            "bilibili": {
+                "roomid": int(self.roomid_var.get().strip() or 0),
+                "uid": int(self.uid_var.get().strip() or 0),
+                "cookie": self.cookie_var.get().strip(),
+            },
+            "douyin": {
+                "enabled": bool(self.douyin_enabled_var.get()),
+                "live_id": self.douyin_live_id_var.get().strip(),
+                "cookie": self.douyin_cookie_var.get().strip(),
+                "signature": self.douyin_signature_var.get().strip(),
+                "bootstrap": {
+                    "cursor": self.douyin_cursor_var.get().strip(),
+                    "internal_ext": self.douyin_internal_ext_var.get().strip(),
+                },
+                "ws": {
+                    "auto_reconnect": bool(self.douyin_ws_auto_reconnect_var.get()),
+                    "heartbeat_interval_seconds": float(self.douyin_ws_heartbeat_var.get().strip() or 5.0),
+                    "reconnect_delay_seconds": float(self.douyin_ws_reconnect_delay_var.get().strip() or 2.0),
+                },
+                "live_info": {
+                    "room_id": self.douyin_room_id_var.get().strip(),
+                    "user_id": self.douyin_user_id_var.get().strip(),
+                    "user_unique_id": self.douyin_user_unique_id_var.get().strip(),
+                    "anchor_id": self.douyin_anchor_id_var.get().strip(),
+                    "sec_uid": self.douyin_sec_uid_var.get().strip(),
+                    "ttwid": self.douyin_ttwid_var.get().strip(),
+                },
+                "extra_query": extra_query,
+            },
+        }
+
+    def _refresh_platform_settings_visibility(self, _event=None) -> None:
+        platform_value = self._platform_label_to_value(self.platform_var.get())
+        self.platform_var.set(self._platform_value_to_label(platform_value))
+        if not hasattr(self, "_platform_frame_map"):
+            return
+        for key, frame in self._platform_frame_map.items():
+            if key == platform_value:
+                frame.grid()
+            else:
+                frame.grid_remove()
+
+    def _apply_platform_config_slot_selection(self, slot: int) -> None:
+        slot = self._set_platform_slot_selection(slot)
+        try:
+            backend_server = load_backend_server_module()
+            payload = backend_server.load_platform_config_slot(slot)
+            updated = backend_server._merge_config(  # type: ignore[attr-defined]
+                backend_server.load_config(),
+                {
+                    "platform": payload.get("platform", "bilibili"),
+                    "bilibili": payload.get("bilibili", {}),
+                    "douyin": payload.get("douyin", {}),
+                    "platform_config_archive": {
+                        "slots": MAX_QUEUE_ARCHIVE_SLOTS,
+                        "active_slot": slot,
+                    },
+                },
+            )
+            backend_server.save_config(updated)
+        except Exception as exc:  # noqa: BLE001
+            self._append_log(f"[GUI] 读取平台配置槽位失败: {exc}")
+            return
+        self._set_platform_config_payload(payload)
+        self._prev_platform_config_slot = slot
+        self._append_log(
+            f"[GUI] 已切换平台配置槽位 {slot}（{self._platform_value_to_label(payload.get('platform', 'bilibili'))}）"
+        )
+
+    def _on_platform_config_slot_selected(self, _event=None) -> None:
+        slot = self._get_selected_platform_slot()
+        if slot == self._prev_platform_config_slot:
+            self._refresh_platform_settings_visibility()
+            return
+        self._apply_platform_config_slot_selection(slot)
 
     def _persist_active_slot_to_config(self, slot: int) -> bool:
         try:
@@ -1785,11 +1995,57 @@ class ControlPanelApp:
     _DEFAULT_STYLE = {
         "bg1": "#0e2036", "bg2": "#060b14", "bg3": "#020409",
         "text_color": "#eaf6ff", "queue_font_size": "50",
+        "queue_font_weight": "700", "queue_font_style": "italic",
         "text_grad_start": "#f7f7f7", "text_grad_end": "rgba(255,255,255,0.6)",
         "text_stroke_color": "#000000",
+        "text_stroke_enabled": True,
     }
 
-    def _build_style_tab(self, frame: ttk.Frame) -> None:
+    _STYLE_FONT_STYLE_LABEL_TO_VALUE = {
+        "正常": "normal",
+        "斜体": "italic",
+        "倾斜": "oblique",
+    }
+    _STYLE_FONT_STYLE_VALUE_TO_LABEL = {
+        "normal": "正常",
+        "italic": "斜体",
+        "oblique": "倾斜",
+    }
+    _STYLE_FONT_WEIGHT_OPTIONS = (
+        "100 极细",
+        "200 特细",
+        "300 偏细",
+        "400 常规",
+        "500 中等",
+        "600 半粗",
+        "700 粗体",
+        "800 特粗",
+        "900 极粗",
+    )
+    _STYLE_FONT_WEIGHT_LABEL_TO_VALUE = {
+        "100 极细": "100",
+        "200 特细": "200",
+        "300 偏细": "300",
+        "400 常规": "400",
+        "500 中等": "500",
+        "600 半粗": "600",
+        "700 粗体": "700",
+        "800 特粗": "800",
+        "900 极粗": "900",
+    }
+    _STYLE_FONT_WEIGHT_VALUE_TO_LABEL = {
+        "100": "100 极细",
+        "200": "200 特细",
+        "300": "300 偏细",
+        "400": "400 常规",
+        "500": "500 中等",
+        "600": "600 半粗",
+        "700": "700 粗体",
+        "800": "800 特粗",
+        "900": "900 极粗",
+    }
+
+    def _build_style_tab_legacy(self, frame: ttk.Frame) -> None:
         from tkinter import colorchooser
         frame.columnconfigure(0, weight=0)
         frame.columnconfigure(1, weight=1)
@@ -1802,6 +2058,12 @@ class ControlPanelApp:
         right.grid(row=0, column=1, sticky="nsew")
         right.columnconfigure(0, weight=1)
         right.rowconfigure(0, weight=1)
+
+        ttk.Label(
+            left,
+            text="网页背景固定透明，透明窗口与网页共用以下字体样式。",
+            foreground="#666666",
+        ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 10))
 
         fields = [
             ("bg1",              "背景渐变色 1",   True),
@@ -1843,7 +2105,7 @@ class ControlPanelApp:
 
         self._load_style_into_ui()
 
-    def _redraw_style_preview(self) -> None:
+    def _redraw_style_preview_legacy(self) -> None:
         cv = self._style_preview_canvas
         w = cv.winfo_width()
         h = cv.winfo_height()
@@ -1883,7 +2145,7 @@ class ControlPanelApp:
             if y > h - fsize:
                 break
 
-    def _load_style_into_ui(self) -> None:
+    def _load_style_into_ui_legacy2(self) -> None:
         try:
             backend_server = load_backend_server_module()
             data = backend_server.load_style()
@@ -1894,7 +2156,14 @@ class ControlPanelApp:
             if val is not None:
                 var.set(str(val))
 
-    def _save_style(self) -> None:
+    def _refresh_style_state_legacy2(self) -> None:
+        self._load_style_into_ui()
+        self._redraw_style_preview()
+        if self._overlay_window_alive():
+            self._overlay_style = dict(self._load_style_data())
+            self._redraw_overlay()
+
+    def _save_style_legacy2(self) -> None:
         data: dict = {}
         for key, var in self._style_vars.items():
             v = var.get().strip()
@@ -1930,9 +2199,480 @@ class ControlPanelApp:
             self._overlay_style = dict(self._load_style_data())
             self._redraw_overlay()
 
-    def _reset_style(self) -> None:
+    def _reset_style_legacy2(self) -> None:
         for key, var in self._style_vars.items():
             var.set(self._DEFAULT_STYLE.get(key, ""))
+
+    def _build_style_tab_legacy2(self, frame: ttk.Frame) -> None:
+        from tkinter import colorchooser
+
+        frame.columnconfigure(0, weight=0)
+        frame.columnconfigure(1, weight=1)
+        frame.rowconfigure(0, weight=1)
+
+        left = ttk.Frame(frame)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 16))
+
+        right = ttk.LabelFrame(frame, text="样式预览")
+        right.grid(row=0, column=1, sticky="nsew")
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(0, weight=1)
+
+        ttk.Label(
+            left,
+            text="网页背景固定透明，透明窗口与网页共用以下字体样式。",
+            foreground="#666666",
+        ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 10))
+
+        fields = [
+            ("text_color", "文字颜色", "color"),
+            ("text_stroke_color", "文字描边颜色", "color"),
+            ("queue_font_size", "队列字体大小(px)", "entry"),
+            ("queue_font_weight", "字体粗细", "combo"),
+            ("queue_font_style", "字体样式", "combo"),
+        ]
+        self._style_vars: dict[str, tk.StringVar] = {}
+        for row_idx, (key, label, field_type) in enumerate(fields, start=1):
+            ttk.Label(left, text=label, anchor="e", width=14).grid(
+                row=row_idx,
+                column=0,
+                sticky="e",
+                padx=(0, 6),
+                pady=3,
+            )
+            var = tk.StringVar(value=self._DEFAULT_STYLE.get(key, ""))
+            self._style_vars[key] = var
+            if field_type == "combo":
+                values = (
+                    ("400", "500", "600", "700", "800", "900")
+                    if key == "queue_font_weight"
+                    else ("normal", "italic", "oblique")
+                )
+                widget = ttk.Combobox(
+                    left,
+                    textvariable=var,
+                    values=values,
+                    width=17,
+                    state="readonly",
+                )
+            else:
+                widget = ttk.Entry(left, textvariable=var, width=20)
+            widget.grid(row=row_idx, column=1, sticky="w")
+
+            if field_type == "color":
+                def _pick(v=var):
+                    color = colorchooser.askcolor(
+                        color=v.get() if v.get().startswith("#") else "#ffffff",
+                        parent=frame,
+                    )
+                    if color and color[1]:
+                        v.set(color[1])
+
+                ttk.Button(left, text="取色", command=_pick, width=4).grid(
+                    row=row_idx,
+                    column=2,
+                    padx=(4, 0),
+                )
+
+        btn_bar = ttk.Frame(left)
+        btn_bar.grid(row=len(fields) + 1, column=0, columnspan=3, sticky="w", pady=(12, 0))
+        ttk.Button(btn_bar, text="保存样式", command=self._save_style).grid(row=0, column=0, padx=(0, 8))
+        ttk.Button(btn_bar, text="恢复默认", command=self._reset_style).grid(row=0, column=1)
+        self._style_save_status_var = tk.StringVar(value="")
+        ttk.Label(btn_bar, textvariable=self._style_save_status_var, foreground="#0a0").grid(row=0, column=2, padx=(12, 0))
+
+        self._style_preview_canvas = tk.Canvas(right, highlightthickness=0)
+        self._style_preview_canvas.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+        for var in self._style_vars.values():
+            var.trace_add("write", lambda *_: self.root.after(0, self._redraw_style_preview))
+        self._style_preview_canvas.bind("<Configure>", lambda *_: self._redraw_style_preview())
+
+        self._load_style_into_ui()
+
+    def _redraw_style_preview_legacy2(self) -> None:
+        cv = self._style_preview_canvas
+        w = cv.winfo_width()
+        h = cv.winfo_height()
+        if w <= 1 or h <= 1:
+            return
+
+        def _safe_color(key: str, fallback: str) -> str:
+            value = self._style_vars.get(key, tk.StringVar()).get().strip()
+            return value if value.startswith("#") else fallback
+
+        def _font_tuple(size: int) -> tuple[str, int, str]:
+            try:
+                weight_value = int(str(self._style_vars["queue_font_weight"].get()).strip() or 700)
+            except (ValueError, KeyError):
+                weight_value = 700
+            style_value = str(
+                self._style_vars.get("queue_font_style", tk.StringVar(value="italic")).get()
+            ).strip().lower()
+            options: list[str] = []
+            if weight_value >= 600:
+                options.append("bold")
+            if style_value in {"italic", "oblique"}:
+                options.append("italic")
+            return (
+                "Microsoft YaHei UI" if sys.platform == "win32" else "",
+                size,
+                " ".join(options) if options else "normal",
+            )
+
+        text_color = _safe_color("text_color", "#eaf6ff")
+        stroke_color = _safe_color("text_stroke_color", "#000000")
+        try:
+            font_size_raw = int(self._style_vars["queue_font_size"].get().strip() or 50)
+        except (ValueError, KeyError):
+            font_size_raw = 50
+        font_size = max(8, int(font_size_raw * w / 1920 * 2.5))
+
+        cv.configure(bg="#d8d8d8")
+        cv.delete("all")
+
+        tile = 18
+        for top in range(0, h, tile):
+            for left in range(0, w, tile):
+                fill = "#f4f4f4" if ((left // tile) + (top // tile)) % 2 == 0 else "#e8e8e8"
+                cv.create_rectangle(left, top, left + tile, top + tile, fill=fill, outline="")
+        cv.create_rectangle(0, 0, w - 1, h - 1, outline="#98a7b3", width=1)
+        cv.create_text(
+            12,
+            10,
+            text="透明背景预览",
+            fill="#5a6772",
+            anchor="nw",
+            font=("Microsoft YaHei UI" if sys.platform == "win32" else "", 10),
+        )
+
+        font_main = _font_tuple(font_size)
+        sample = ["1001 主播点歌", "1002 舰长优先", "1003 房管处理"]
+        y = 34
+        for item in sample:
+            for dx, dy in ((-2, 0), (2, 0), (0, -2), (0, 2), (-1, -1), (1, -1), (-1, 1), (1, 1)):
+                cv.create_text(16 + dx, y + dy, text=item, fill=stroke_color, font=font_main, anchor="nw")
+            cv.create_text(16, y, text=item, fill=text_color, font=font_main, anchor="nw")
+            y += font_size + 6
+            if y > h - font_size:
+                break
+
+    @staticmethod
+    def _style_as_bool(value: Any, default: bool = True) -> bool:
+        if isinstance(value, bool):
+            return value
+        text = str(value or "").strip().lower()
+        if text in {"1", "true", "yes", "on"}:
+            return True
+        if text in {"0", "false", "no", "off"}:
+            return False
+        return default
+
+    def _style_font_style_to_css(self, value: Any) -> str:
+        text = str(value or "").strip()
+        if text in self._STYLE_FONT_STYLE_LABEL_TO_VALUE:
+            return self._STYLE_FONT_STYLE_LABEL_TO_VALUE[text]
+        lowered = text.lower()
+        if lowered in self._STYLE_FONT_STYLE_VALUE_TO_LABEL:
+            return lowered
+        return str(self._DEFAULT_STYLE.get("queue_font_style", "italic"))
+
+    def _style_font_style_to_label(self, value: Any) -> str:
+        css_value = self._style_font_style_to_css(value)
+        return self._STYLE_FONT_STYLE_VALUE_TO_LABEL.get(css_value, "斜体")
+
+    def _style_font_weight_to_css(self, value: Any) -> str:
+        text = str(value or "").strip()
+        if text in self._STYLE_FONT_WEIGHT_LABEL_TO_VALUE:
+            return self._STYLE_FONT_WEIGHT_LABEL_TO_VALUE[text]
+        matched = re.search(r"([1-9]00)", text)
+        if matched:
+            return matched.group(1)
+        return str(self._DEFAULT_STYLE.get("queue_font_weight", "700"))
+
+    def _style_font_weight_to_label(self, value: Any) -> str:
+        css_value = self._style_font_weight_to_css(value)
+        return self._STYLE_FONT_WEIGHT_VALUE_TO_LABEL.get(css_value, f"{css_value} 常规")
+
+    def _load_style_into_ui(self) -> None:
+        try:
+            backend_server = load_backend_server_module()
+            data = backend_server.load_style()
+        except Exception:
+            data = {}
+        for key, var in self._style_vars.items():
+            val = data.get(key, self._DEFAULT_STYLE.get(key, ""))
+            if key == "queue_font_style":
+                var.set(self._style_font_style_to_label(val))
+            elif key == "queue_font_weight":
+                var.set(self._style_font_weight_to_label(val))
+            else:
+                var.set(str(val))
+        for key, var in getattr(self, "_style_bool_vars", {}).items():
+            val = data.get(key, self._DEFAULT_STYLE.get(key, True))
+            var.set(self._style_as_bool(val, bool(self._DEFAULT_STYLE.get(key, True))))
+        if hasattr(self, "_style_archive_slot_var"):
+            self._style_archive_slot_var.set(str(self._get_selected_slot()))
+
+    def _refresh_style_state(self) -> None:
+        self._load_style_into_ui()
+        self._redraw_style_preview()
+        if self._overlay_window_alive():
+            self._overlay_style = dict(self._load_style_data())
+            self._redraw_overlay()
+
+    def _save_style(self) -> None:
+        data: dict[str, Any] = {}
+        for key, var in self._style_vars.items():
+            value = var.get().strip()
+            if key == "queue_font_size":
+                try:
+                    data[key] = int(value)
+                except ValueError:
+                    data[key] = 50
+            elif key == "queue_font_style":
+                data[key] = self._style_font_style_to_css(value)
+            elif key == "queue_font_weight":
+                data[key] = self._style_font_weight_to_css(value)
+            else:
+                data[key] = value
+        for key, var in getattr(self, "_style_bool_vars", {}).items():
+            data[key] = bool(var.get())
+        try:
+            backend_server = load_backend_server_module()
+            backend_server.save_style(data)
+        except Exception as exc:
+            self._append_log(f"[GUI] 样式写入文件失败: {exc}")
+            self._style_save_status_var.set("保存失败")
+            return
+        port = self.port_var.get().strip() or "9816"
+        url = f"http://127.0.0.1:{port}/api/style"
+        body = json.dumps(data).encode("utf-8")
+        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=2):
+                pass
+        except (urllib.error.URLError, TimeoutError):
+            pass
+        import time as _t
+        self._style_save_status_var.set(f"保存成功 {_t.strftime('%H:%M:%S')}")
+        self._append_log("[GUI] 样式已保存，刷新排队展示页即可生效")
+        if self._overlay_window_alive():
+            self._overlay_style = dict(self._load_style_data())
+            self._redraw_overlay()
+
+    def _reset_style(self) -> None:
+        for key, var in self._style_vars.items():
+            default_value = self._DEFAULT_STYLE.get(key, "")
+            if key == "queue_font_style":
+                var.set(self._style_font_style_to_label(default_value))
+            elif key == "queue_font_weight":
+                var.set(self._style_font_weight_to_label(default_value))
+            else:
+                var.set(str(default_value))
+        for key, var in getattr(self, "_style_bool_vars", {}).items():
+            var.set(self._style_as_bool(self._DEFAULT_STYLE.get(key, True), True))
+        if hasattr(self, "_style_archive_slot_var"):
+            self._style_archive_slot_var.set(str(self._get_selected_slot()))
+
+    def _switch_style_archive_from_ui(self) -> None:
+        try:
+            slot = int(str(self._style_archive_slot_var.get()).strip() or self._get_selected_slot())
+        except (TypeError, ValueError, tk.TclError):
+            slot = self._get_selected_slot()
+        slot = max(1, min(MAX_QUEUE_ARCHIVE_SLOTS, slot))
+        self._style_archive_slot_var.set(str(slot))
+        if slot == self._prev_slot:
+            self._refresh_style_state()
+            self._append_log(f"[GUI] CSS 样式存档当前已是槽位 {slot}")
+            return
+        threading.Thread(target=self._apply_queue_slot_selection, args=(slot,), daemon=True).start()
+
+    def _build_style_tab(self, frame: ttk.Frame) -> None:
+        from tkinter import colorchooser
+
+        frame.columnconfigure(0, weight=0)
+        frame.columnconfigure(1, weight=1)
+        frame.rowconfigure(0, weight=1)
+
+        left = ttk.Frame(frame)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 16))
+
+        right = ttk.LabelFrame(frame, text="样式预览")
+        right.grid(row=0, column=1, sticky="nsew")
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(0, weight=1)
+
+        ttk.Label(
+            left,
+            text="网页背景固定透明；CSS 样式存档与当前排队存档槽位联动。",
+            foreground="#666666",
+        ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 10))
+
+        fields = [
+            ("text_color", "文字颜色", "color"),
+            ("text_stroke_color", "描边颜色", "color"),
+            ("queue_font_size", "队列字体大小(px)", "entry"),
+            ("queue_font_weight", "字体粗细(100-900)", "combo"),
+            ("queue_font_style", "字体样式", "combo"),
+        ]
+        self._style_vars: dict[str, tk.StringVar] = {}
+        self._style_bool_vars: dict[str, tk.BooleanVar] = {
+            "text_stroke_enabled": tk.BooleanVar(
+                value=self._style_as_bool(self._DEFAULT_STYLE.get("text_stroke_enabled", True), True)
+            )
+        }
+        self._style_archive_slot_var = tk.StringVar(value=str(self._get_selected_slot()))
+        for row_idx, (key, label, field_type) in enumerate(fields, start=1):
+            ttk.Label(left, text=label, anchor="e", width=16).grid(
+                row=row_idx,
+                column=0,
+                sticky="e",
+                padx=(0, 6),
+                pady=3,
+            )
+            default_value = self._DEFAULT_STYLE.get(key, "")
+            if key == "queue_font_style":
+                initial_value = self._style_font_style_to_label(default_value)
+            elif key == "queue_font_weight":
+                initial_value = self._style_font_weight_to_label(default_value)
+            else:
+                initial_value = str(default_value)
+            var = tk.StringVar(value=initial_value)
+            self._style_vars[key] = var
+            if field_type == "combo":
+                values = self._STYLE_FONT_WEIGHT_OPTIONS if key == "queue_font_weight" else tuple(self._STYLE_FONT_STYLE_LABEL_TO_VALUE.keys())
+                widget = ttk.Combobox(
+                    left,
+                    textvariable=var,
+                    values=values,
+                    width=17,
+                    state="normal" if key == "queue_font_weight" else "readonly",
+                )
+            else:
+                widget = ttk.Entry(left, textvariable=var, width=20)
+            widget.grid(row=row_idx, column=1, sticky="w")
+
+            if field_type == "color":
+                def _pick(v=var):
+                    color = colorchooser.askcolor(
+                        color=v.get() if v.get().startswith("#") else "#ffffff",
+                        parent=frame,
+                    )
+                    if color and color[1]:
+                        v.set(color[1])
+
+                ttk.Button(left, text="取色", command=_pick, width=4).grid(
+                    row=row_idx,
+                    column=2,
+                    padx=(4, 0),
+                )
+
+        ttk.Checkbutton(
+            left,
+            text="启用文字描边",
+            variable=self._style_bool_vars["text_stroke_enabled"],
+        ).grid(row=len(fields) + 1, column=1, sticky="w", pady=(2, 6))
+
+        ttk.Label(left, text="CSS样式存档槽位", anchor="e", width=16).grid(
+            row=len(fields) + 2,
+            column=0,
+            sticky="e",
+            padx=(0, 6),
+            pady=3,
+        )
+        ttk.Combobox(
+            left,
+            textvariable=self._style_archive_slot_var,
+            values=[str(i) for i in range(1, MAX_QUEUE_ARCHIVE_SLOTS + 1)],
+            width=17,
+            state="readonly",
+        ).grid(row=len(fields) + 2, column=1, sticky="w")
+        ttk.Button(left, text="切换存档", command=self._switch_style_archive_from_ui, width=8).grid(
+            row=len(fields) + 2,
+            column=2,
+            padx=(4, 0),
+        )
+
+        btn_bar = ttk.Frame(left)
+        btn_bar.grid(row=len(fields) + 3, column=0, columnspan=3, sticky="w", pady=(12, 0))
+        ttk.Button(btn_bar, text="保存样式", command=self._save_style).grid(row=0, column=0, padx=(0, 8))
+        ttk.Button(btn_bar, text="恢复默认", command=self._reset_style).grid(row=0, column=1)
+        self._style_save_status_var = tk.StringVar(value="")
+        ttk.Label(btn_bar, textvariable=self._style_save_status_var, foreground="#0a0").grid(row=0, column=2, padx=(12, 0))
+
+        self._style_preview_canvas = tk.Canvas(right, highlightthickness=0)
+        self._style_preview_canvas.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+        for var in self._style_vars.values():
+            var.trace_add("write", lambda *_: self.root.after(0, self._redraw_style_preview))
+        for var in self._style_bool_vars.values():
+            var.trace_add("write", lambda *_: self.root.after(0, self._redraw_style_preview))
+        self._style_preview_canvas.bind("<Configure>", lambda *_: self._redraw_style_preview())
+
+        self._load_style_into_ui()
+
+    def _redraw_style_preview(self) -> None:
+        cv = self._style_preview_canvas
+        w = cv.winfo_width()
+        h = cv.winfo_height()
+        if w <= 1 or h <= 1:
+            return
+
+        def _safe_color(key: str, fallback: str) -> str:
+            value = self._style_vars.get(key, tk.StringVar()).get().strip()
+            return value if value.startswith("#") else fallback
+
+        def _font_tuple(size: int) -> tuple[str, int, str]:
+            weight_value = int(self._style_font_weight_to_css(self._style_vars["queue_font_weight"].get()) or 700)
+            style_value = self._style_font_style_to_css(self._style_vars["queue_font_style"].get())
+            options: list[str] = []
+            if weight_value >= 600:
+                options.append("bold")
+            if style_value in {"italic", "oblique"}:
+                options.append("italic")
+            return (
+                "Microsoft YaHei UI" if sys.platform == "win32" else "",
+                size,
+                " ".join(options) if options else "normal",
+            )
+
+        text_color = _safe_color("text_color", "#eaf6ff")
+        stroke_color = _safe_color("text_stroke_color", "#000000")
+        stroke_enabled = self._style_as_bool(self._style_bool_vars["text_stroke_enabled"].get(), True)
+        try:
+            font_size_raw = int(self._style_vars["queue_font_size"].get().strip() or 50)
+        except (ValueError, KeyError):
+            font_size_raw = 50
+        font_size = max(8, int(font_size_raw * w / 1920 * 2.5))
+
+        cv.configure(bg="#d8d8d8")
+        cv.delete("all")
+
+        tile = 18
+        for top in range(0, h, tile):
+            for left in range(0, w, tile):
+                fill = "#f4f4f4" if ((left // tile) + (top // tile)) % 2 == 0 else "#e8e8e8"
+                cv.create_rectangle(left, top, left + tile, top + tile, fill=fill, outline="")
+        cv.create_rectangle(0, 0, w - 1, h - 1, outline="#98a7b3", width=1)
+        cv.create_text(
+            12,
+            10,
+            text="透明背景预览",
+            fill="#5a6772",
+            anchor="nw",
+            font=("Microsoft YaHei UI" if sys.platform == "win32" else "", 10),
+        )
+
+        font_main = _font_tuple(font_size)
+        sample = ["1001 主播点歌", "1002 舰长优先", "1003 房管处理"]
+        y = 34
+        for item in sample:
+            if stroke_enabled:
+                for dx, dy in ((-2, 0), (2, 0), (0, -2), (0, 2), (-1, -1), (1, -1), (-1, 1), (1, 1)):
+                    cv.create_text(16 + dx, y + dy, text=item, fill=stroke_color, font=font_main, anchor="nw")
+            cv.create_text(16, y, text=item, fill=text_color, font=font_main, anchor="nw")
+            y += font_size + 6
+            if y > h - font_size:
+                break
 
     def _apply_overlay_settings_from_ui(self) -> None:
         settings = self._set_overlay_settings(self._get_overlay_settings())
@@ -1985,73 +2725,171 @@ class ControlPanelApp:
         self.log_text.configure(yscrollcommand=log_scroll.set)
 
     def _build_settings_tab(self, frame: ttk.Frame) -> None:
-        frame.columnconfigure(1, weight=1)
-        frame.columnconfigure(2, weight=1)
+        frame.columnconfigure(0, weight=1)
 
-        row = 0
-        for label, var in [
+        basic_frame = ttk.LabelFrame(frame, text="基础设置", padding=10)
+        basic_frame.grid(row=0, column=0, sticky="ew")
+        basic_frame.columnconfigure(1, weight=1)
+        basic_frame.columnconfigure(3, weight=1)
+
+        fields = [
             ("监听地址", self.host_var),
             ("监听端口", self.port_var),
-            ("直播间号", self.roomid_var),
-            ("UID", self.uid_var),
             ("日志保留天数", self.retention_days_var),
-        ]:
-            ttk.Label(frame, text=label).grid(row=row, column=0, sticky="w", pady=4)
-            ttk.Entry(frame, textvariable=var, width=30).grid(
-                row=row, column=1, sticky="ew", pady=4
-            )
-            row += 1
+        ]
+        for row_idx, (label, var) in enumerate(fields):
+            ttk.Label(basic_frame, text=label).grid(row=row_idx, column=0, sticky="w", pady=4)
+            ttk.Entry(basic_frame, textvariable=var, width=26).grid(row=row_idx, column=1, sticky="ew", pady=4)
 
-        # Cookie 行单独处理，右侧加"获取"按钮
-        ttk.Label(frame, text="Cookie").grid(row=row, column=0, sticky="w", pady=4)
-        ttk.Entry(frame, textvariable=self.cookie_var, width=60).grid(
-            row=row, column=1, sticky="ew", pady=4
-        )
-        ttk.Button(frame, text="获取", command=self.open_config, width=6).grid(
-            row=row, column=2, padx=(4, 0), pady=4, sticky="w"
-        )
-        row += 1
-
-        ttk.Label(frame, text="日志等级").grid(row=row, column=0, sticky="w", pady=4)
+        ttk.Label(basic_frame, text="日志等级").grid(row=0, column=2, sticky="w", padx=(16, 0), pady=4)
         self.log_level_combo = ttk.Combobox(
-            frame,
+            basic_frame,
             textvariable=self.log_level_var,
             values=LOG_LEVEL_OPTIONS,
-            width=27,
+            width=18,
             state="readonly",
         )
-        self.log_level_combo.grid(row=row, column=1, sticky="w", pady=4)
-        row += 1
+        self.log_level_combo.grid(row=0, column=3, sticky="w", pady=4)
 
-        ttk.Label(frame, text="当前存档槽位").grid(row=row, column=0, sticky="w", pady=4)
+        ttk.Label(basic_frame, text="当前排队存档").grid(row=1, column=2, sticky="w", padx=(16, 0), pady=4)
         self.queue_slot_combo_settings = ttk.Combobox(
-            frame,
+            basic_frame,
             textvariable=self.queue_slot_var,
             values=[str(slot) for slot in range(1, MAX_QUEUE_ARCHIVE_SLOTS + 1)],
-            width=8,
+            width=10,
             state="readonly",
         )
-        self.queue_slot_combo_settings.grid(row=row, column=1, sticky="w", pady=4)
+        self.queue_slot_combo_settings.grid(row=1, column=3, sticky="w", pady=4)
         self.queue_slot_combo_settings.bind("<<ComboboxSelected>>", self._on_queue_slot_selected)
-        row += 1
 
-        ttk.Checkbutton(frame, text="启用排队存档", variable=self.queue_enabled_var).grid(
-            row=row, column=1, sticky="w", pady=4
+        ttk.Label(basic_frame, text="平台配置槽位").grid(row=2, column=2, sticky="w", padx=(16, 0), pady=4)
+        self.platform_slot_combo_settings = ttk.Combobox(
+            basic_frame,
+            textvariable=self.platform_config_slot_var,
+            values=[str(slot) for slot in range(1, MAX_QUEUE_ARCHIVE_SLOTS + 1)],
+            width=10,
+            state="readonly",
         )
-        row += 1
+        self.platform_slot_combo_settings.grid(row=2, column=3, sticky="w", pady=4)
+        self.platform_slot_combo_settings.bind("<<ComboboxSelected>>", self._on_platform_config_slot_selected)
 
-        ttk.Checkbutton(frame, text="启动时自动运行后端", variable=self.auto_start_var).grid(
-            row=row, column=1, sticky="w", pady=4
+        ttk.Checkbutton(basic_frame, text="启用排队存档", variable=self.queue_enabled_var).grid(
+            row=3, column=1, sticky="w", pady=4
         )
-        row += 1
+        ttk.Checkbutton(basic_frame, text="启动时自动运行后端", variable=self.auto_start_var).grid(
+            row=3, column=3, sticky="w", pady=4
+        )
 
-        ttk.Label(frame, text="语言").grid(row=row, column=0, sticky="w", pady=4)
-        lang_cb = ttk.Combobox(frame, textvariable=self.language_var, values=["中文"], state="readonly", width=10)
-        lang_cb.grid(row=row, column=1, sticky="w", pady=4)
-        row += 1
+        ttk.Label(basic_frame, text="语言").grid(row=4, column=0, sticky="w", pady=4)
+        ttk.Combobox(
+            basic_frame,
+            textvariable=self.language_var,
+            values=["中文"],
+            state="readonly",
+            width=12,
+        ).grid(row=4, column=1, sticky="w", pady=4)
 
-        overlay_frame = ttk.LabelFrame(frame, text="透明窗口设置", padding=8)
-        overlay_frame.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(10, 6))
+        ttk.Label(
+            basic_frame,
+            text="切换平台配置槽位后，会立即载入该槽位保存的平台和参数。",
+            foreground="#666666",
+        ).grid(row=5, column=0, columnspan=4, sticky="w", pady=(6, 0))
+
+        platform_frame = ttk.LabelFrame(frame, text="平台参数", padding=10)
+        platform_frame.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        platform_frame.columnconfigure(1, weight=1)
+
+        ttk.Label(platform_frame, text="当前平台").grid(row=0, column=0, sticky="w", pady=4)
+        platform_combo = ttk.Combobox(
+            platform_frame,
+            textvariable=self.platform_var,
+            values=PLATFORM_LABELS,
+            state="readonly",
+            width=16,
+        )
+        platform_combo.grid(row=0, column=1, sticky="w", pady=4)
+        platform_combo.bind("<<ComboboxSelected>>", self._refresh_platform_settings_visibility)
+
+        ttk.Label(
+            platform_frame,
+            text="只显示当前平台需要填写的参数；隐藏平台的内容会原样保留在该槽位里。",
+            foreground="#666666",
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 8))
+
+        platform_forms = ttk.Frame(platform_frame)
+        platform_forms.grid(row=2, column=0, columnspan=2, sticky="ew")
+        platform_forms.columnconfigure(0, weight=1)
+
+        bilibili_frame = ttk.LabelFrame(platform_forms, text="B站参数", padding=8)
+        bilibili_frame.grid(row=0, column=0, sticky="ew")
+        bilibili_frame.columnconfigure(1, weight=1)
+        bilibili_frame.columnconfigure(3, weight=1)
+        ttk.Label(bilibili_frame, text="直播间号").grid(row=0, column=0, sticky="w", pady=4)
+        ttk.Entry(bilibili_frame, textvariable=self.roomid_var, width=24).grid(row=0, column=1, sticky="ew", pady=4)
+        ttk.Label(bilibili_frame, text="UID").grid(row=0, column=2, sticky="w", padx=(16, 0), pady=4)
+        ttk.Entry(bilibili_frame, textvariable=self.uid_var, width=24).grid(row=0, column=3, sticky="ew", pady=4)
+        ttk.Label(bilibili_frame, text="Cookie").grid(row=1, column=0, sticky="w", pady=4)
+        ttk.Entry(bilibili_frame, textvariable=self.cookie_var, width=48).grid(row=1, column=1, columnspan=2, sticky="ew", pady=4)
+        ttk.Button(bilibili_frame, text="获取", command=self.open_config, width=6).grid(
+            row=1, column=3, padx=(6, 0), sticky="w", pady=4
+        )
+
+        douyin_frame = ttk.LabelFrame(platform_forms, text="抖音参数", padding=8)
+        douyin_frame.grid(row=0, column=0, sticky="ew")
+        douyin_frame.columnconfigure(1, weight=1)
+        douyin_frame.columnconfigure(3, weight=1)
+        douyin_fields = [
+            ("直播标识 live_id", self.douyin_live_id_var),
+            ("Cookie", self.douyin_cookie_var),
+            ("签名 signature", self.douyin_signature_var),
+            ("bootstrap.cursor", self.douyin_cursor_var),
+            ("bootstrap.internal_ext", self.douyin_internal_ext_var),
+            ("room_id", self.douyin_room_id_var),
+            ("user_id", self.douyin_user_id_var),
+            ("user_unique_id", self.douyin_user_unique_id_var),
+            ("anchor_id", self.douyin_anchor_id_var),
+            ("sec_uid", self.douyin_sec_uid_var),
+            ("ttwid", self.douyin_ttwid_var),
+            ("extra_query(JSON)", self.douyin_extra_query_var),
+        ]
+        ttk.Checkbutton(douyin_frame, text="启用抖音配置", variable=self.douyin_enabled_var).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 6)
+        )
+        ttk.Checkbutton(douyin_frame, text="自动重连", variable=self.douyin_ws_auto_reconnect_var).grid(
+            row=0, column=2, columnspan=2, sticky="w", pady=(0, 6)
+        )
+        ttk.Label(douyin_frame, text="心跳间隔(秒)").grid(row=1, column=0, sticky="w", pady=4)
+        ttk.Entry(douyin_frame, textvariable=self.douyin_ws_heartbeat_var, width=18).grid(row=1, column=1, sticky="w", pady=4)
+        ttk.Label(douyin_frame, text="重连延迟(秒)").grid(row=1, column=2, sticky="w", padx=(16, 0), pady=4)
+        ttk.Entry(douyin_frame, textvariable=self.douyin_ws_reconnect_delay_var, width=18).grid(row=1, column=3, sticky="w", pady=4)
+        for idx, (label, var) in enumerate(douyin_fields, start=2):
+            ttk.Label(douyin_frame, text=label).grid(row=idx, column=0, sticky="w", pady=4)
+            span = 3 if label == "extra_query(JSON)" else 1
+            width = 64 if label == "extra_query(JSON)" else 48
+            ttk.Entry(douyin_frame, textvariable=var, width=width).grid(
+                row=idx,
+                column=1,
+                columnspan=span,
+                sticky="ew",
+                pady=4,
+            )
+
+        self._platform_frame_map = {
+            "bilibili": bilibili_frame,
+            "douyin": douyin_frame,
+        }
+        self._refresh_platform_settings_visibility()
+
+        btn_bar = ttk.Frame(frame)
+        btn_bar.grid(row=2, column=0, sticky="w", pady=(10, 4))
+        ttk.Button(btn_bar, text="保存配置", command=self.save_to_file).grid(row=0, column=0, padx=(0, 8))
+        ttk.Button(btn_bar, text="刷新配置", command=self.load_from_file).grid(row=0, column=1)
+
+    def _build_overlay_tab(self, frame: ttk.Frame) -> None:
+        frame.columnconfigure(0, weight=1)
+
+        overlay_frame = ttk.LabelFrame(frame, text="透明窗口设置", padding=10)
+        overlay_frame.grid(row=0, column=0, sticky="ew")
         overlay_frame.columnconfigure(1, weight=1)
         overlay_frame.columnconfigure(3, weight=1)
         ttk.Label(overlay_frame, text="宽度(px)").grid(row=0, column=0, sticky="w", pady=4)
@@ -2062,21 +2900,27 @@ class ControlPanelApp:
         ttk.Entry(overlay_frame, textvariable=self.overlay_scale_var, width=12).grid(row=1, column=1, sticky="w", pady=4)
         ttk.Label(
             overlay_frame,
-            text='在 OBS 中使用「窗口捕获」，按标题”排队透明弹窗”选择；拖动边框可缩放。',
+            text='在 OBS 中使用「窗口捕获」，按标题“排队透明弹窗”选择；拖动边框可缩放。',
         ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(6, 0))
-        ttk.Button(overlay_frame, text="应用到透明窗", command=self._apply_overlay_settings_from_ui).grid(row=1, column=3, sticky="e", pady=4)
+        ttk.Button(overlay_frame, text="应用到透明窗", command=self._apply_overlay_settings_from_ui).grid(
+            row=1, column=3, sticky="e", pady=4
+        )
 
         ctrl_frame = ttk.Frame(overlay_frame)
-        ctrl_frame.grid(row=3, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        ctrl_frame.grid(row=3, column=0, columnspan=4, sticky="w", pady=(8, 0))
+        ttk.Button(ctrl_frame, text="启动弹窗", command=self.open_overlay_window).pack(side="left", padx=(0, 6))
         ttk.Button(ctrl_frame, text="关闭弹窗", command=self._stop_overlay_process).pack(side="left", padx=(0, 6))
         ttk.Button(ctrl_frame, text="置顶", command=lambda: self._set_overlay_topmost(True)).pack(side="left", padx=(0, 6))
         ttk.Button(ctrl_frame, text="取消置顶", command=lambda: self._set_overlay_topmost(False)).pack(side="left")
-        row += 1
 
-        btn_bar = ttk.Frame(frame)
-        btn_bar.grid(row=row, column=0, columnspan=2, sticky="w", pady=(10, 4))
-        ttk.Button(btn_bar, text="保存配置", command=self.save_to_file).grid(row=0, column=0, padx=(0, 8))
-        ttk.Button(btn_bar, text="刷新配置", command=self.load_from_file).grid(row=0, column=1)
+        tip_frame = ttk.LabelFrame(frame, text="说明", padding=10)
+        tip_frame.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        ttk.Label(
+            tip_frame,
+            text="透明窗口设置会随主配置一起保存；如果透明窗已在运行，点击“应用到透明窗”会立即重载。",
+            wraplength=720,
+            justify="left",
+        ).grid(row=0, column=0, sticky="w")
 
     def _build_perf_tab(self, frame: ttk.Frame) -> None:
         frame.columnconfigure(1, weight=1)
@@ -2324,23 +3168,36 @@ class ControlPanelApp:
             KAIGUAN_PATH.write_text("".join(lines), encoding="utf-8")
 
     def load_from_file(self) -> None:
-        config = load_simple_yaml(CONFIG_PATH)
+        try:
+            backend_server = load_backend_server_module()
+            config = backend_server.load_config()
+        except Exception:
+            config = load_simple_yaml(CONFIG_PATH)
         server = config.get("server", {})
-        api = config.get("api", {})
+        bilibili = config.get("bilibili", config.get("api", {}))
+        douyin = config.get("douyin", {})
         logging_cfg = config.get("logging", {})
         queue_archive = config.get("queue_archive", {})
+        platform_archive = config.get("platform_config_archive", {})
 
         self.host_var.set(str(server.get("host", "0.0.0.0")))
         self.port_var.set(str(server.get("port", 9816)))
-        self.roomid_var.set(str(api.get("roomid", 0)))
-        self.uid_var.set(str(api.get("uid", 0)))
-        self.cookie_var.set(str(api.get("cookie", "")))
         self.log_level_var.set(str(logging_cfg.get("level", "INFO")))
         self.retention_days_var.set(str(logging_cfg.get("retention_days", 7)))
         self.queue_enabled_var.set(bool(queue_archive.get("enabled", True)))
         active_slot = int(queue_archive.get("active_slot", 1))
         active_slot = self._set_queue_slot_selection(active_slot)
         self._prev_slot = active_slot
+        active_platform_slot = int(platform_archive.get("active_slot", 1))
+        active_platform_slot = self._set_platform_slot_selection(active_platform_slot)
+        self._prev_platform_config_slot = active_platform_slot
+        self._set_platform_config_payload(
+            {
+                "platform": config.get("platform", "bilibili"),
+                "bilibili": bilibili if isinstance(bilibili, dict) else {},
+                "douyin": douyin if isinstance(douyin, dict) else {},
+            }
+        )
         ui_cfg = config.get("ui", {})
         self._set_overlay_settings(ui_cfg.get("overlay_window", DEFAULT_OVERLAY_SETTINGS))
         self.auto_start_var.set(bool(ui_cfg.get("auto_start_backend", False)))
@@ -2380,15 +3237,18 @@ class ControlPanelApp:
         threading.Thread(target=_fetch, daemon=True).start()
 
     def gather_config(self) -> dict:
+        platform_payload = self._gather_platform_config_payload()
         return {
             "server": {
                 "host": self.host_var.get().strip() or "0.0.0.0",
                 "port": int(self.port_var.get().strip() or 9816),
             },
-            "api": {
-                "roomid": int(self.roomid_var.get().strip() or 0),
-                "uid": int(self.uid_var.get().strip() or 0),
-                "cookie": self.cookie_var.get().strip(),
+            "platform": platform_payload["platform"],
+            "bilibili": platform_payload["bilibili"],
+            "douyin": platform_payload["douyin"],
+            "platform_config_archive": {
+                "slots": MAX_QUEUE_ARCHIVE_SLOTS,
+                "active_slot": self._get_selected_platform_slot(),
             },
             "myjs": {},
             "logging": {
@@ -2506,16 +3366,23 @@ class ControlPanelApp:
     def save_to_file(self) -> None:
         try:
             backend_server = load_backend_server_module()
+            platform_slot = self._get_selected_platform_slot()
+            platform_payload = self._gather_platform_config_payload()
+            backend_server.save_platform_config_slot(platform_slot, platform_payload)
             config = backend_server._merge_config(  # type: ignore[attr-defined]
                 backend_server.load_config(),
                 self.gather_config(),
             )
             backend_server.save_config(config)
+            self._prev_platform_config_slot = platform_slot
             self.status_var.set("配置保存成功")
             self._append_log("[GUI] 配置保存成功")
         except ValueError:
-            messagebox.showerror("输入错误", "请检查数字字段（端口/直播间号/UID/保留天数/槽位）")
+            messagebox.showerror("输入错误", "请检查数字字段和抖音 JSON 参数（端口、房间号、UID、心跳、槽位等）")
         except OSError as exc:
+            messagebox.showerror("保存失败", str(exc))
+            return
+        except Exception as exc:  # noqa: BLE001
             messagebox.showerror("保存失败", str(exc))
             return
         if self._overlay_window_alive():
@@ -2567,10 +3434,18 @@ class ControlPanelApp:
             new_count = result.get("size", new_count_csv)
             self._append_log(f"[GUI] 切换到存档槽位 {new_slot}，旧存档 {old_count} 人，新存档 {new_count} 人")
             self._prev_slot = new_slot
+            self.root.after(0, self._refresh_style_state)
             self.root.after(300, lambda: threading.Thread(target=self._refresh_queue_list, daemon=True).start())
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+            try:
+                backend_server = load_backend_server_module()
+                backend_server.reconcile_live_css_with_archive(old_slot)
+                backend_server.apply_css_archive_to_live(new_slot, force=True)
+            except Exception as exc:
+                self._append_log(f"[GUI] 切换 CSS 样式存档失败: {exc}")
             self._append_log(f"[GUI] 存档槽位已选择 {new_slot}，旧存档 {old_count} 人，新存档 {new_count_csv} 人（下次启动生效）")
             self._prev_slot = new_slot
+            self.root.after(0, self._refresh_style_state)
 
     def start_server(self) -> None:
         if self.server_proc and self.server_proc.poll() is None:
