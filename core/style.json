@@ -5,8 +5,9 @@
   "text_color": "#eaf6ff",
   "queue_font_size": 50,
   "queue_font_weight": "700",
-  "queue_font_style": "italic",
+  "queue_font_style": "normal",
   "text_grad_start": "#f7f7f7",
   "text_grad_end": "rgba(255,255,255,0.6)",
-  "text_stroke_color": "#000000"
+  "text_stroke_color": "#000000",
+  "text_stroke_enabled": true
 }

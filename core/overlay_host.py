@@ -22,6 +22,7 @@ OVERLAY_MIN_HEIGHT = 180
 DEFAULT_STYLE = {
     "text_color": "#eaf6ff",
     "text_stroke_color": "#000000",
+    "text_stroke_enabled": True,
     "queue_font_size": 50,
     "queue_font_weight": "700",
     "queue_font_style": "italic",
@@ -56,6 +57,17 @@ def _font_style_spec(weight_value: Any, style_value: Any) -> str:
     if normalized_style in {"italic", "oblique"}:
         parts.append("italic")
     return " ".join(parts) if parts else "normal"
+
+
+def _style_bool(value: Any, default: bool = True) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
 
 
 class OverlayHostApp:
@@ -340,7 +352,7 @@ class OverlayHostApp:
 
         next_style = dict(self.style)
         if isinstance(style_payload, dict):
-            for key in ("text_color", "text_stroke_color", "queue_font_size", "queue_font_weight", "queue_font_style"):
+            for key in ("text_color", "text_stroke_color", "text_stroke_enabled", "queue_font_size", "queue_font_weight", "queue_font_style"):
                 if key in style_payload:
                     next_style[key] = style_payload.get(key)
 
@@ -369,6 +381,7 @@ class OverlayHostApp:
         queue_font_size = max(12, int(queue_font_size * self.scale / 100))
         queue_text_color = _safe_color(self.style.get("text_color", "#eaf6ff"), "#eaf6ff")
         queue_stroke_color = _safe_color(self.style.get("text_stroke_color", "#000000"), "#000000")
+        stroke_enabled = _style_bool(self.style.get("text_stroke_enabled", True), True)
         text_font = (
             "Microsoft YaHei UI",
             queue_font_size,
@@ -389,17 +402,18 @@ class OverlayHostApp:
         max_text_width = max(80, width - 28)
         line_gap = max(2, int(queue_font_size * 0.16))
         for text in self.items:
-            for dx, dy in stroke_offsets:
-                canvas.create_text(
-                    14 + dx,
-                    y + dy,
-                    anchor="nw",
-                    text=text,
-                    fill=queue_stroke_color,
-                    font=text_font,
-                    width=max_text_width,
-                    justify="left",
-                )
+            if stroke_enabled:
+                for dx, dy in stroke_offsets:
+                    canvas.create_text(
+                        14 + dx,
+                        y + dy,
+                        anchor="nw",
+                        text=text,
+                        fill=queue_stroke_color,
+                        font=text_font,
+                        width=max_text_width,
+                        justify="left",
+                    )
             draw_id = canvas.create_text(
                 14,
                 y,

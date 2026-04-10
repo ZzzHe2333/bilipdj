@@ -81,6 +81,7 @@ STYLE_CSS_VAR_MAP: dict[str, str] = {
     "text_grad_start": "--text-grad-start",
     "text_grad_end": "--text-grad-end",
     "text_stroke_color": "--text-stroke",
+    "text_stroke_enabled": "--text-stroke-enabled",
 }
 
 
@@ -1907,6 +1908,7 @@ DEFAULT_STYLE: dict[str, Any] = {
     "text_grad_start": "#f7f7f7",
     "text_grad_end": "rgba(255,255,255,0.6)",
     "text_stroke_color": "#000000",
+    "text_stroke_enabled": True,
 }
 
 DEFAULT_CONFIG["quanxian"] = {key: list(values) for key, values in DEFAULT_QUANXIAN.items()}
@@ -1923,12 +1925,14 @@ def build_index_css(style: dict[str, Any] | None = None) -> str:
     merged = dict(DEFAULT_STYLE)
     if isinstance(style, dict):
         merged.update(style)
+    stroke_enabled = str(merged.get("text_stroke_enabled", True)).strip().lower() not in {"0", "false", "no", "off"}
     try:
         queue_font_size = max(8, int(merged.get("queue_font_size", 50)))
     except (TypeError, ValueError):
         queue_font_size = 50
     queue_font_weight = str(merged.get("queue_font_weight", DEFAULT_STYLE["queue_font_weight"]) or DEFAULT_STYLE["queue_font_weight"]).strip()
     queue_font_style = str(merged.get("queue_font_style", DEFAULT_STYLE["queue_font_style"]) or DEFAULT_STYLE["queue_font_style"]).strip()
+    text_stroke = merged.get("text_stroke_color", DEFAULT_STYLE["text_stroke_color"]) if stroke_enabled else "transparent"
     return (
         ":root {\n"
         f"    --bg1: {merged.get('bg1', DEFAULT_STYLE['bg1'])};\n"
@@ -1940,7 +1944,8 @@ def build_index_css(style: dict[str, Any] | None = None) -> str:
         f"    --queue-font-style: {queue_font_style};\n"
         f"    --text-grad-start: {merged.get('text_grad_start', DEFAULT_STYLE['text_grad_start'])};\n"
         f"    --text-grad-end: {merged.get('text_grad_end', DEFAULT_STYLE['text_grad_end'])};\n"
-        f"    --text-stroke: {merged.get('text_stroke_color', DEFAULT_STYLE['text_stroke_color'])};\n"
+        f"    --text-stroke: {text_stroke};\n"
+        f"    --text-stroke-enabled: {1 if stroke_enabled else 0};\n"
         "}\n"
         "html, body { margin: 0; background: transparent !important; color: var(--text-color); }\n"
         ".wk { width: 100%; height: 80%; text-overflow: ellipsis; white-space: nowrap; }\n"
@@ -1971,6 +1976,8 @@ def parse_style_from_css_text(css_text: str) -> dict[str, Any]:
                 result[key] = max(8, int(float(value)))
             except ValueError:
                 continue
+        elif key == "text_stroke_enabled":
+            result[key] = str(value).strip() not in {"0", "false", "False", "no", "off"}
         else:
             result[key] = value
     return result
