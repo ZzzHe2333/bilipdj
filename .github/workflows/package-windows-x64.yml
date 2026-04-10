@@ -75,6 +75,9 @@ jobs:
         run: |
           pyinstaller --noconfirm --clean bilipdj_onedir.spec
           pyinstaller --noconfirm --clean paiduijitm.spec
+          if (Test-Path "dist\bilipdj\core\cd") {
+            Remove-Item -LiteralPath "dist\bilipdj\core\cd" -Recurse -Force
+          }
           Copy-Item "dist\paiduijitm.exe" "dist\bilipdj\paiduijitm.exe"
           Rename-Item "dist\bilipdj\bilipdj.exe" "${{ steps.resolve_tag.outputs.exe_name }}.exe"
 

@@ -43,7 +43,7 @@ function PDJ_RenderQueue(queue) {
 
 async function PDJ_LoadConfig() {
     try {
-        var res = await fetch("/api/config");
+        var res = await fetch("/api/config/basic", { cache: "no-store" });
         if (!res.ok) return;
         var cfg = await res.json();
         zroomid = Number(cfg.roomid || 0);

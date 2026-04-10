@@ -704,6 +704,15 @@ def ensure_runtime_layout() -> None:
     if not KAIGUAN_PATH.exists():
         save_kaiguan(DEFAULT_KAIGUAN)
 
+    raw_config = _merge_config(DEFAULT_CONFIG, _read_raw_config())
+    queue_archive_cfg = raw_config.get("queue_archive", {})
+    active_slot = max(1, min(MAX_QUEUE_ARCHIVE_SLOTS, int(queue_archive_cfg.get("active_slot", 1) or 1)))
+    if not QUEUE_STATE_PATH.exists():
+        QUEUE_STATE_PATH.write_text(
+            json.dumps({"next_slot": 1, "active_slot": active_slot}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
     for slot in range(1, MAX_QUEUE_ARCHIVE_SLOTS + 1):
         slot_file = PD_DIR / f"queue_archive_slot_{slot}.csv"
         if not slot_file.exists():
@@ -3134,6 +3143,69 @@ class ApiHandler(BaseHTTPRequestHandler):
     def _ws_send_json(self, conn: socket.socket, payload: dict[str, Any]) -> None:
         self._ws_send_text(conn, json.dumps(payload, ensure_ascii=False))
 
+    def _build_basic_config_payload(self) -> dict[str, Any]:
+        cfg = self.server.runtime_config
+        api_cfg = cfg.get("api", {})
+        return {
+            "roomid": int(api_cfg.get("roomid", 0)),
+            "uid": int(api_cfg.get("uid", 0)),
+        }
+
+    def _build_login_config_payload(self) -> dict[str, Any]:
+        payload = self._build_basic_config_payload()
+        payload["cookie"] = str(self.server.runtime_config.get("api", {}).get("cookie", ""))
+        payload["qr_login"] = self.server.runtime_config.get("qr_login", {})
+        return payload
+
+    def _save_login_config(self, *, uid: int, cookie: str) -> dict[str, Any]:
+        login_state = _resolve_bilibili_login(
+            cookie,
+            fallback_uid=uid,
+            logger=self.server.logger if cookie else None,
+        )
+        resolved_uid = _to_int(login_state.get("uid", 0))
+        if cookie and resolved_uid > 0 and resolved_uid != uid:
+            self.server.logger.info(
+                "Auto-correcting Bilibili login UID during login save: %s -> %s (source=%s)",
+                uid,
+                resolved_uid,
+                login_state.get("uid_source", "unknown"),
+            )
+            uid = resolved_uid
+
+        updated = _merge_config(
+            self.server.runtime_config,
+            {
+                "api": {
+                    "uid": uid,
+                    "cookie": cookie,
+                }
+            },
+        )
+        save_config(updated)
+        updated = load_config()
+        self.server.runtime_config = updated
+
+        if hasattr(self.server, "danmu_relay"):
+            self.server.danmu_relay.request_reconnect()
+        if hasattr(self.server, "queue_manager"):
+            self.server.queue_manager.load_config(
+                updated.get("myjs", {}),
+                anchor_uid=_to_int(updated.get("api", {}).get("uid", 0)),
+            )
+            self.server.queue_manager.load_quanxian(updated.get("quanxian", {}))
+
+        self.server.logger.info("登录配置已更新，触发弹幕重连 uid=%s", uid)
+        return {
+            "status": "ok",
+            "roomid": int(updated.get("api", {}).get("roomid", 0)),
+            "uid": uid,
+            "cookie": cookie,
+            "uname": str(login_state.get("uname", "") or ""),
+            "uid_source": str(login_state.get("uid_source", "") or ""),
+            "is_login": bool(login_state.get("is_login", False)),
+        }
+
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         if parsed.path in {"/ws", "/danmu/sub"}:
@@ -3183,6 +3255,12 @@ class ApiHandler(BaseHTTPRequestHandler):
             self._serve_static_file(static_path)
             return
 
+        if parsed.path == "/api/config/basic":
+            self._write_json(self._build_basic_config_payload())
+            return
+        if parsed.path == "/api/config/login":
+            self._write_json(self._build_login_config_payload())
+            return
         if parsed.path == "/api/config":
             cfg = self.server.runtime_config
             self._write_json(
@@ -3323,6 +3401,30 @@ class ApiHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path == "/api/config/login":
+            length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0:
+                self._write_json(
+                    {"status": "error", "message": "Empty request body"},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+
+            raw = self.rfile.read(length).decode("utf-8", errors="replace")
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                self._write_json(
+                    {"status": "error", "message": "Body must be valid JSON"},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+
+            uid = int(payload.get("uid", 0))
+            cookie = str(payload.get("cookie", "")).strip()
+            self._write_json(self._save_login_config(uid=uid, cookie=cookie))
+            return
+
         if parsed.path == "/api/config":
             length = int(self.headers.get("Content-Length", "0"))
             if length <= 0:

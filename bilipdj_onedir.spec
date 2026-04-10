@@ -4,16 +4,9 @@ from pathlib import Path
 project_root = Path(SPECPATH).resolve()
 
 datas = [
-    # 前端 UI 页面
     (str(project_root / "core" / "ui"), "core/ui"),
-    # 初始模型数据（JSON）
     (str(project_root / "core" / "danmuji_initial_model.json"), "core"),
 ]
-
-# 排队存档目录（存档初始内容）
-cd_dir = project_root / "core" / "cd"
-if cd_dir.exists():
-    datas.append((str(cd_dir), "core/cd"))
 
 hiddenimports = [
     "core.server",
