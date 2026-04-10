@@ -23,6 +23,12 @@ function PDJ_EmitStatus(status, detail) {
     }));
 }
 
+function PDJ_ReloadStylesheet() {
+    var link = document.getElementById("pdj-style-link");
+    if (!link) return;
+    link.href = "moren.css?v=" + Date.now();
+}
+
 // ---------- 队列渲染 ----------
 
 function PDJ_RenderQueue(queue) {
@@ -37,7 +43,7 @@ function PDJ_RenderQueue(queue) {
 
 async function PDJ_LoadConfig() {
     try {
-        var res = await fetch("/api/config");
+        var res = await fetch("/api/config/basic", { cache: "no-store" });
         if (!res.ok) return;
         var cfg = await res.json();
         zroomid = Number(cfg.roomid || 0);
@@ -104,6 +110,11 @@ async function PDJ_Connect() {
             return;
         }
 
+        if (data.type === "STYLE_UPDATE") {
+            PDJ_ReloadStylesheet();
+            return;
+        }
+
         // 后端状态消息
         if (data.type === "PDJ_STATUS") {
             PDJ_EmitStatus(data.status || "server", data);
@@ -117,4 +128,5 @@ async function PDJ_Connect() {
     };
 }
 
+PDJ_ReloadStylesheet();
 PDJ_Connect();

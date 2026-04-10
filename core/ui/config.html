@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>弹幕排队姬 - 登录</title>
+    <title>弹幕排队姬 - 登录配置</title>
     <style>
         body {
             margin: 0;
@@ -14,17 +14,17 @@
 
         .panel {
             margin: 12px;
-            padding: 12px;
+            padding: 14px;
             border: 1px solid #3a5872;
             border-radius: 8px;
             max-width: 980px;
-            background: rgba(14, 32, 54, 0.78);
+            background: rgba(14, 32, 54, 0.82);
         }
 
         .row {
             display: flex;
             align-items: center;
-            margin: 8px 0;
+            margin: 10px 0;
             gap: 8px;
         }
 
@@ -42,11 +42,12 @@
             border: 1px solid #5c7f9a;
             background: #0b1829;
             color: #eaf6ff;
+            box-sizing: border-box;
         }
 
         textarea {
             resize: vertical;
-            min-height: 90px;
+            min-height: 110px;
         }
 
         .actions {
@@ -54,7 +55,7 @@
             align-items: center;
             gap: 8px;
             flex-wrap: wrap;
-            margin-top: 12px;
+            margin-top: 14px;
         }
 
         button {
@@ -66,134 +67,172 @@
             cursor: pointer;
         }
 
+        button:disabled {
+            cursor: wait;
+            opacity: 0.7;
+        }
+
         .hint {
             color: #c8d6e4;
             font-size: 14px;
         }
+
+        .tip {
+            margin-top: 8px;
+            color: #9ec7e6;
+            font-size: 13px;
+        }
     </style>
 </head>
 <body>
-    <div id="app" class="panel">
-        <h3>弹幕排队姬 - 登录</h3>
+    <div class="panel">
+        <h3>弹幕排队姬 - 登录配置</h3>
 
         <div class="row">
-            <label>UID</label>
-            <input v-model.trim="form.uid" type="number" placeholder="扫码登录后可自动识别">
+            <label for="uid">UID</label>
+            <input id="uid" type="number" inputmode="numeric" placeholder="扫码登录后可自动识别">
         </div>
 
         <div class="row">
-            <label>Cookie</label>
-            <textarea v-model.trim="form.cookie" rows="3" placeholder="粘贴 Bilibili Cookie，至少包含 SESSDATA"></textarea>
+            <label for="cookie">Cookie</label>
+            <textarea id="cookie" rows="4" placeholder="粘贴 Bilibili Cookie，至少包含 SESSDATA"></textarea>
         </div>
 
         <div class="actions">
-            <button @click="saveConfig">保存配置</button>
-            <button @click="openCookieLogin">扫码自动获取 Cookie</button>
-            <span class="hint">{{ statusText }}</span>
+            <button id="save-btn" type="button">保存登录</button>
+            <button id="qr-btn" type="button">扫码自动获取 Cookie</button>
+            <span id="status-text" class="hint">正在初始化页面...</span>
         </div>
+
+        <div class="tip">扫码按钮可立即打开，不需要等待配置读取完成。</div>
     </div>
 
-    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
     <script>
-        const { createApp } = Vue;
+        (function () {
+            const uidInput = document.getElementById("uid");
+            const cookieInput = document.getElementById("cookie");
+            const saveButton = document.getElementById("save-btn");
+            const qrButton = document.getElementById("qr-btn");
+            const statusText = document.getElementById("status-text");
 
-        createApp({
-            data() {
-                return {
-                    form: {
-                        roomid: "",
-                        uid: "",
-                        cookie: "",
-                        callback: { enabled: false, url: "", auth_token: "", timeout_seconds: 5 }
-                    },
-                    statusText: "等待初始化..."
-                };
-            },
-            async mounted() {
-                await this.loadConfig();
-            },
-            methods: {
-                async loadConfig() {
-                    try {
-                        const res = await fetch("/api/config");
-                        const cfg = await res.json();
-                        this.form.roomid = cfg.roomid || "";
-                        this.form.uid = cfg.uid || "";
-                        this.form.cookie = cfg.cookie || "";
-                        this.form.callback = Object.assign(
-                            { enabled: false, url: "", auth_token: "", timeout_seconds: 5 },
-                            cfg.callback || {}
-                        );
-                        this.statusText = "配置已加载";
-                    } catch (e) {
-                        this.statusText = "加载失败: " + e;
+            let configLoaded = false;
+            let busy = false;
+
+            function setStatus(text) {
+                statusText.textContent = text;
+            }
+
+            function setBusy(nextBusy) {
+                busy = !!nextBusy;
+                saveButton.disabled = busy;
+            }
+
+            async function loadLoginConfig() {
+                setStatus("正在读取登录配置...");
+                try {
+                    const res = await fetch("/api/config/login", { cache: "no-store" });
+                    if (!res.ok) {
+                        throw new Error("HTTP " + res.status);
                     }
-                },
-                async saveConfig(options = {}) {
-                    const { silent = false } = options;
-                    try {
-                        const body = {
-                            roomid: Number(this.form.roomid || 0),
-                            uid: Number(this.form.uid || 0),
-                            cookie: this.form.cookie || "",
-                            callback: this.form.callback
-                        };
-                        const res = await fetch("/api/config", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify(body)
-                        });
-                        if (!res.ok) {
-                            throw new Error("HTTP " + res.status);
-                        }
-
-                        const result = await res.json();
-                        const resolvedUid = Number(result?.uid || 0);
-                        if (Number.isFinite(resolvedUid) && resolvedUid > 0) {
-                            this.form.uid = String(resolvedUid);
-                        }
-
-                        const resolvedName = typeof result?.uname === "string" ? result.uname.trim() : "";
-                        this.statusText = silent ? "登录态已写入配置" : "保存成功，弹幕连接会自动重连";
-                        if (resolvedName && resolvedUid > 0) {
-                            this.statusText += ` (${resolvedName}/${resolvedUid})`;
-                        }
-                        return true;
-                    } catch (e) {
-                        this.statusText = "保存失败: " + e;
-                        return false;
-                    }
-                },
-                openCookieLogin() {
-                    const popup = window.open("/cookie-login", "pdj-cookie-login", "width=560,height=760");
-                    if (!popup) {
-                        this.statusText = "弹窗被浏览器拦截，请允许弹窗后重试";
-                        return;
-                    }
-
-                    this.statusText = "已打开扫码页面，请完成扫码后自动回填登录态";
-                    const onMessage = (event) => {
-                        if (!event || !event.data || event.data.type !== "pdj-cookie-ready") {
-                            return;
-                        }
-                        if (typeof event.data.cookie === "string" && event.data.cookie.trim()) {
-                            this.form.cookie = event.data.cookie.trim();
-                            const loginUid = Number(event.data.uid || 0);
-                            if (Number.isFinite(loginUid) && loginUid > 0) {
-                                this.form.uid = String(loginUid);
-                            }
-                            const loginName = typeof event.data.uname === "string" ? event.data.uname.trim() : "";
-                            this.statusText = loginName && loginUid > 0
-                                ? `扫码成功，已识别账号 ${loginName}(${loginUid})，正在写入配置...`
-                                : "扫码成功，Cookie 已自动回填，正在写入配置...";
-                            this.saveConfig({ silent: true });
-                        }
-                        window.removeEventListener("message", onMessage);
-                    };
-                    window.addEventListener("message", onMessage);
+                    const cfg = await res.json();
+                    uidInput.value = cfg.uid ? String(cfg.uid) : "";
+                    cookieInput.value = cfg.cookie || "";
+                    configLoaded = true;
+                    setStatus("登录配置已加载，可直接扫码或手动保存。");
+                } catch (error) {
+                    setStatus("读取登录配置失败：" + error);
                 }
             }
-        }).mount("#app");
+
+            async function saveLoginConfig(options) {
+                const opts = options || {};
+                const silent = !!opts.silent;
+                if (busy) {
+                    return false;
+                }
+
+                setBusy(true);
+                try {
+                    const body = {
+                        uid: Number(uidInput.value || 0),
+                        cookie: (cookieInput.value || "").trim()
+                    };
+                    const res = await fetch("/api/config/login", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(body)
+                    });
+                    if (!res.ok) {
+                        throw new Error("HTTP " + res.status);
+                    }
+
+                    const result = await res.json();
+                    const resolvedUid = Number(result && result.uid || 0);
+                    if (Number.isFinite(resolvedUid) && resolvedUid > 0) {
+                        uidInput.value = String(resolvedUid);
+                    }
+
+                    const resolvedName = typeof (result && result.uname) === "string"
+                        ? result.uname.trim()
+                        : "";
+                    if (silent) {
+                        setStatus("登录态已写入配置。");
+                    } else {
+                        setStatus("保存成功，弹幕连接会自动重连。");
+                    }
+                    if (resolvedName && resolvedUid > 0) {
+                        setStatus(statusText.textContent + " (" + resolvedName + "/" + resolvedUid + ")");
+                    }
+                    configLoaded = true;
+                    return true;
+                } catch (error) {
+                    setStatus("保存失败：" + error);
+                    return false;
+                } finally {
+                    setBusy(false);
+                }
+            }
+
+            function openCookieLogin() {
+                const popup = window.open("/cookie-login", "pdj-cookie-login", "width=560,height=760");
+                if (!popup) {
+                    setStatus("弹窗被浏览器拦截，请允许弹窗后重试。");
+                    return;
+                }
+                setStatus(
+                    configLoaded
+                        ? "已打开扫码页面，请完成扫码后自动回填登录态。"
+                        : "已打开扫码页面，后台仍在读取配置，不影响扫码。"
+                );
+            }
+
+            window.addEventListener("message", function (event) {
+                if (!event || !event.data || event.data.type !== "pdj-cookie-ready") {
+                    return;
+                }
+                if (typeof event.data.cookie === "string" && event.data.cookie.trim()) {
+                    cookieInput.value = event.data.cookie.trim();
+                    const loginUid = Number(event.data.uid || 0);
+                    if (Number.isFinite(loginUid) && loginUid > 0) {
+                        uidInput.value = String(loginUid);
+                    }
+                    const loginName = typeof event.data.uname === "string" ? event.data.uname.trim() : "";
+                    setStatus(
+                        loginName && loginUid > 0
+                            ? "扫码成功，已识别账号 " + loginName + "(" + loginUid + ")，正在写入配置..."
+                            : "扫码成功，正在写入登录配置..."
+                    );
+                    void saveLoginConfig({ silent: true });
+                }
+            });
+
+            saveButton.addEventListener("click", function () {
+                void saveLoginConfig();
+            });
+            qrButton.addEventListener("click", openCookieLogin);
+
+            void loadLoginConfig();
+        })();
     </script>
 </body>
 </html>

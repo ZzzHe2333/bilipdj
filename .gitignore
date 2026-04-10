@@ -2,6 +2,8 @@
 config.yaml
 kaiguan.yaml
 quanxian.yaml
+core/cd/
+tmp*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -38,6 +40,7 @@ MANIFEST
 *.spec
 !bilipdj_onedir.spec
 !paiduijitm.spec
+core/ui/cdang_*.css
 
 # Installer logs
 pip-log.txt
