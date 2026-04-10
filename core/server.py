@@ -42,9 +42,11 @@ CORE_DIR = Path(__file__).resolve().parent  # bilipdj/core/
 BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", REPO_DIR))
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else REPO_DIR
 _YAML_DIR = APP_DIR if getattr(sys, "frozen", False) else CORE_DIR
-
-MODEL_JSON_PATH = BUNDLE_DIR / "core" / "danmuji_initial_model.json"
-UI_DIR = BUNDLE_DIR / "core" / "ui"
+BUNDLE_CORE_DIR = BUNDLE_DIR / "core"
+RUNTIME_CORE_DIR = APP_DIR / "core" if getattr(sys, "frozen", False) else CORE_DIR
+BUNDLE_UI_DIR = BUNDLE_CORE_DIR / "ui"
+UI_DIR = RUNTIME_CORE_DIR / "ui"
+MODEL_JSON_PATH = BUNDLE_CORE_DIR / "danmuji_initial_model.json"
 CONFIG_PATH = _YAML_DIR / "config.yaml"
 LOG_DIR = APP_DIR / "log"
 PD_DIR = APP_DIR / "core" / "cd"
@@ -562,17 +564,8 @@ def read_queue_archive_entries(path: Path) -> list[dict[str, str]]:
 
 def write_queue_archive_entries(path: Path, entries: list[dict[str, Any]], meta: dict[str, Any] | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    merged_meta = {"actor": "", "message": ""}
-    if isinstance(meta, dict):
-        merged_meta["actor"] = str(meta.get("actor", "") or "").strip()
-        merged_meta["message"] = str(meta.get("message", "") or "").strip()
-
     with path.open("w", encoding="utf-8-sig", newline="") as f:
         writer = csv.writer(f)
-        if merged_meta["actor"]:
-            writer.writerow([ARCHIVE_META_ACTOR, merged_meta["actor"]])
-        if merged_meta["message"]:
-            writer.writerow([ARCHIVE_META_MESSAGE, merged_meta["message"]])
         writer.writerow([ARCHIVE_HEADER_SEQ, ARCHIVE_HEADER_ID, ARCHIVE_HEADER_CONTENT, ARCHIVE_HEADER_LAST_OPERATION_AT])
         for idx, entry in enumerate(entries, start=1):
             normalized = queue_item_to_entry(entry)
@@ -695,6 +688,49 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
+_ARCHIVE_SEED_NAMES = (
+    "小艾",
+    "阿星",
+    "北海",
+    "夜雨",
+    "清风",
+    "团子",
+    "阿九",
+    "若白",
+    "南栀",
+    "流云",
+    "初夏",
+    "长安",
+)
+
+_ARCHIVE_SEED_TASKS = (
+    "修城墙",
+    "清理仓库",
+    "搬运补给",
+    "巡逻东门",
+    "整理账本",
+    "训练新兵",
+    "制作药剂",
+    "检查农田",
+    "准备晚饭",
+    "修理马车",
+    "统计材料",
+    "加固护栏",
+)
+
+
+def _build_seed_archive_entries(slot: int) -> list[dict[str, str]]:
+    rng = random.SystemRandom()
+    names = list(rng.sample(_ARCHIVE_SEED_NAMES, 3))
+    tasks = list(rng.sample(_ARCHIVE_SEED_TASKS, 3))
+    base_time = dt.datetime.now().replace(microsecond=0) - dt.timedelta(minutes=max(0, slot - 1) * 7)
+    entries: list[dict[str, str]] = []
+    for idx, (name, task) in enumerate(zip(names, tasks, strict=False)):
+        timestamp = _format_archive_timestamp(base_time - dt.timedelta(minutes=idx))
+        entries.append(build_queue_entry(name, task, timestamp))
+    return entries
+
+
 def ensure_runtime_layout() -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     PD_DIR.mkdir(parents=True, exist_ok=True)
@@ -714,12 +750,17 @@ def ensure_runtime_layout() -> None:
             encoding="utf-8",
         )
 
-    for slot in range(1, MAX_QUEUE_ARCHIVE_SLOTS + 1):
-        slot_file = PD_DIR / f"queue_archive_slot_{slot}.csv"
-        if not slot_file.exists():
-            write_queue_archive_entries(slot_file, [])
-        else:
-            ensure_queue_archive_row_timestamps(slot_file)
+    archive_paths = [PD_DIR / f"queue_archive_slot_{slot}.csv" for slot in range(1, MAX_QUEUE_ARCHIVE_SLOTS + 1)]
+    has_any_archive = any(path.exists() for path in archive_paths)
+    if not has_any_archive:
+        for slot, slot_file in enumerate(archive_paths, start=1):
+            write_queue_archive_entries(slot_file, _build_seed_archive_entries(slot))
+    else:
+        for slot_file in archive_paths:
+            if not slot_file.exists():
+                write_queue_archive_entries(slot_file, [])
+            else:
+                ensure_queue_archive_row_timestamps(slot_file)
     if not BLACKLIST_PATH.exists():
         write_blacklist_entries(BLACKLIST_PATH, blacklist_names_to_entries(load_quanxian().get("blacklist", [])))
     ensure_style_css_archives()
@@ -1918,7 +1959,59 @@ DEFAULT_CONFIG["style"] = dict(DEFAULT_STYLE)
 
 def css_archive_path(slot: int) -> Path:
     normalized = max(1, min(MAX_QUEUE_ARCHIVE_SLOTS, int(slot)))
-    return UI_DIR / f"cdang_{normalized}.css"
+    return PD_DIR / f"cdang_{normalized}.css"
+
+
+def _unique_paths(*paths: Path) -> list[Path]:
+    result: list[Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        key = os.path.normcase(str(path))
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(path)
+    return result
+
+
+def _legacy_css_archive_paths(slot: int) -> list[Path]:
+    normalized = max(1, min(MAX_QUEUE_ARCHIVE_SLOTS, int(slot)))
+    name = f"cdang_{normalized}.css"
+    return _unique_paths(
+        UI_DIR / name,
+        BUNDLE_UI_DIR / name,
+        CORE_DIR / "ui" / name,
+    )
+
+
+def _load_text_from_candidates(paths: list[Path]) -> str:
+    for path in paths:
+        try:
+            if path.exists():
+                return path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+    return ""
+
+
+def _resolve_existing_path(*paths: Path) -> Path | None:
+    for path in _unique_paths(*paths):
+        if path.is_file():
+            return path
+    return None
+
+
+def _resolve_static_file(relative_path: str) -> Path | None:
+    relative = Path(relative_path)
+    for base_dir in _unique_paths(UI_DIR, BUNDLE_UI_DIR):
+        target = (base_dir / relative).resolve()
+        try:
+            target.relative_to(base_dir.resolve())
+        except ValueError:
+            continue
+        if target.is_file():
+            return target
+    return None
 
 
 def build_index_css(style: dict[str, Any] | None = None) -> str:
@@ -1985,6 +2078,7 @@ def parse_style_from_css_text(css_text: str) -> dict[str, Any]:
 
 def ensure_style_css_archives() -> None:
     UI_DIR.mkdir(parents=True, exist_ok=True)
+    PD_DIR.mkdir(parents=True, exist_ok=True)
     seed_style = dict(DEFAULT_STYLE)
     raw_config = _read_raw_config()
     config_style = raw_config.get("style", {})
@@ -1998,13 +2092,29 @@ def ensure_style_css_archives() -> None:
         if isinstance(style_json, dict):
             seed_style.update(style_json)
 
-    default_css = build_index_css(seed_style)
+    active_slot = _current_style_slot(raw_config)
+    active_archive_path = css_archive_path(active_slot)
+    default_css = (
+        _load_text_from_candidates([active_archive_path, *_legacy_css_archive_paths(active_slot)])
+        or _load_text_from_candidates([BUNDLE_UI_DIR / LIVE_STYLE_CSS_PATH.name, CORE_DIR / "ui" / LIVE_STYLE_CSS_PATH.name])
+        or build_index_css(seed_style)
+    )
     if not LIVE_STYLE_CSS_PATH.exists():
         LIVE_STYLE_CSS_PATH.write_text(default_css, encoding="utf-8")
     live_css = LIVE_STYLE_CSS_PATH.read_text(encoding="utf-8")
 
     for slot in range(1, MAX_QUEUE_ARCHIVE_SLOTS + 1):
         archive_path = css_archive_path(slot)
+        if not archive_path.exists():
+            for legacy_path in _legacy_css_archive_paths(slot):
+                if not legacy_path.exists():
+                    continue
+                archive_path.write_text(legacy_path.read_text(encoding="utf-8"), encoding="utf-8")
+                try:
+                    legacy_path.unlink()
+                except OSError:
+                    pass
+                break
         if not archive_path.exists():
             archive_path.write_text(live_css, encoding="utf-8")
 
@@ -2095,7 +2205,15 @@ def save_style(data: dict[str, Any]) -> None:
 
 
 def load_model() -> dict[str, Any]:
-    with MODEL_JSON_PATH.open("r", encoding="utf-8") as f:
+    model_path = _resolve_existing_path(
+        MODEL_JSON_PATH,
+        RUNTIME_CORE_DIR / "danmuji_initial_model.json",
+        CORE_DIR / "danmuji_initial_model.json",
+    )
+    if model_path is None:
+        model_candidates = ", ".join(str(path) for path in _unique_paths(MODEL_JSON_PATH, RUNTIME_CORE_DIR / "danmuji_initial_model.json", CORE_DIR / "danmuji_initial_model.json"))
+        raise FileNotFoundError(f"Model file not found in: {model_candidates}")
+    with model_path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -3001,16 +3119,11 @@ def _safe_static_path(request_path: str) -> Path | None:
         path = "/index.html"
     if path == "/cookie-login":
         path = "/cookie_login.html"
+    if path == f"/{LIVE_STYLE_CSS_PATH.name}":
+        ensure_style_css_archives()
+        return LIVE_STYLE_CSS_PATH
 
-    target = (UI_DIR / path.lstrip("/")).resolve()
-    try:
-        target.relative_to(UI_DIR.resolve())
-    except ValueError:
-        return None
-
-    if target.is_file():
-        return target
-    return None
+    return _resolve_static_file(path.lstrip("/"))
 
 
 def _guess_content_type(path: Path) -> str:
@@ -3044,6 +3157,8 @@ class ApiHandler(BaseHTTPRequestHandler):
     def _serve_static_file(self, file_path: Path) -> None:
         if file_path.name in {"index.html", LIVE_STYLE_CSS_PATH.name}:
             reconcile_live_css_with_archive(_current_style_slot())
+            if file_path.name == LIVE_STYLE_CSS_PATH.name:
+                file_path = LIVE_STYLE_CSS_PATH
         body = file_path.read_bytes()
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", _guess_content_type(file_path))
@@ -3233,11 +3348,11 @@ class ApiHandler(BaseHTTPRequestHandler):
             try:
                 model = load_model()
                 self._write_json({"status": "ok", "model": model})
-            except FileNotFoundError:
+            except FileNotFoundError as exc:
                 self._write_json(
                     {
                         "status": "error",
-                        "message": f"Model file not found: {MODEL_JSON_PATH}",
+                        "message": str(exc),
                     },
                     status=HTTPStatus.INTERNAL_SERVER_ERROR,
                 )

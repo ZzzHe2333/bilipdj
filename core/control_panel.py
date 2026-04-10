@@ -41,11 +41,40 @@ import core.server as _backend_server_hint  # noqa: F401
 BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", REPO_DIR))
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else REPO_DIR
 _YAML_DIR = APP_DIR if getattr(sys, "frozen", False) else CORE_DIR
+BUNDLE_CORE_DIR = BUNDLE_DIR / "core"
+RUNTIME_CORE_DIR = APP_DIR / "core" if getattr(sys, "frozen", False) else CORE_DIR
+
+
+def _prefer_existing_path(*paths: Path) -> Path:
+    fallback: Path | None = None
+    seen: set[str] = set()
+    for path in paths:
+        if fallback is None:
+            fallback = path
+        key = os.path.normcase(str(path))
+        if key in seen:
+            continue
+        seen.add(key)
+        if path.exists():
+            return path
+    if fallback is None:
+        raise FileNotFoundError("No candidate paths were provided")
+    return fallback
+
+
 CONFIG_PATH = _YAML_DIR / "config.yaml"
 QUANXIAN_PATH = _YAML_DIR / "quanxian.yaml"
 KAIGUAN_PATH = _YAML_DIR / "kaiguan.yaml"
-SERVER_PATH = BUNDLE_DIR / "core" / "server.py"
-OVERLAY_HOST_SCRIPT = BUNDLE_DIR / "core" / "overlay_host.py"
+SERVER_PATH = _prefer_existing_path(
+    RUNTIME_CORE_DIR / "server.py",
+    BUNDLE_CORE_DIR / "server.py",
+    CORE_DIR / "server.py",
+)
+OVERLAY_HOST_SCRIPT = _prefer_existing_path(
+    RUNTIME_CORE_DIR / "overlay_host.py",
+    BUNDLE_CORE_DIR / "overlay_host.py",
+    CORE_DIR / "overlay_host.py",
+)
 OVERLAY_HOST_EXE_NAME = "paiduijitm.exe"
 APP_NAME = "弹幕排队姬"
 APP_VERSION = "0.4.0"
