@@ -24,9 +24,10 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 
 if __package__:
-    from . import bilibili_protocol
+    from . import bilibili_protocol, douyin_protocol
 else:
     import bilibili_protocol
+    import douyin_protocol
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 9816
@@ -77,7 +78,7 @@ class BackendServer(ThreadingHTTPServer):
     queue_archive: "QueueArchiveManager"
     queue_manager: "QueueManager"
     ws_hub: "WebSocketHub"
-    danmu_relay: "BilibiliDanmuRelay"
+    danmu_relay: Any
 
 
 class WebSocketHub:
@@ -789,6 +790,71 @@ def _normalize_runtime_platform_config(config: dict[str, Any]) -> dict[str, Any]
     normalized["douyin"] = _get_douyin_config(normalized)
     normalized["platform_config_archive"] = _get_platform_config_archive(normalized)
     return normalized
+
+
+def _get_anchor_uid_for_platform(config: dict[str, Any] | None) -> int:
+    if not isinstance(config, dict):
+        return 0
+    platform = _normalize_platform_name(config.get("platform", DEFAULT_PLATFORM))
+    if platform == "douyin":
+        douyin_cfg = _get_douyin_config(config)
+        live_info = douyin_cfg.get("live_info", {})
+        if isinstance(live_info, dict):
+            for key in ("user_id", "user_unique_id", "anchor_id"):
+                value = _to_int(live_info.get(key, 0), 0)
+                if value > 0:
+                    return value
+        return 0
+    return _to_int(_get_bilibili_config(config).get("uid", 0), 0)
+
+
+def _get_runtime_platform(config: dict[str, Any] | None) -> str:
+    if not isinstance(config, dict):
+        return DEFAULT_PLATFORM
+    return _normalize_platform_name(config.get("platform", DEFAULT_PLATFORM))
+
+
+def _current_relay_platform(relay: Any) -> str:
+    if relay is None:
+        return ""
+    platform = str(getattr(relay, "platform", "") or "").strip().lower()
+    if platform in {"bilibili", "douyin"}:
+        return platform
+    if isinstance(relay, bilibili_protocol.BilibiliDanmuRelay):
+        return "bilibili"
+    if isinstance(relay, douyin_protocol.DouyinDanmuRelay):
+        return "douyin"
+    return ""
+
+
+def _create_danmu_relay(server: BackendServer) -> Any:
+    platform = _get_runtime_platform(getattr(server, "runtime_config", {}))
+    if platform == "douyin":
+        return douyin_protocol.DouyinDanmuRelay(server)
+    return bilibili_protocol.BilibiliDanmuRelay(server)
+
+
+def _ensure_danmu_relay(server: BackendServer, *, reconnect: bool = False) -> None:
+    desired_platform = _get_runtime_platform(getattr(server, "runtime_config", {}))
+    current = getattr(server, "danmu_relay", None)
+    current_platform = _current_relay_platform(current)
+    if current is None or current_platform != desired_platform:
+        if current is not None:
+            try:
+                current.stop()
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                current.join(timeout=1.5)
+            except Exception:  # noqa: BLE001
+                pass
+        relay = _create_danmu_relay(server)
+        server.danmu_relay = relay
+        relay.start()
+        server.logger.info("Danmu relay started platform=%s", desired_platform)
+        return
+    if reconnect and hasattr(current, "request_reconnect"):
+        current.request_reconnect()
 
 
 def _needs_bilibili_config_migration(raw_config: dict[str, Any] | None) -> bool:
@@ -2742,10 +2808,18 @@ class ApiHandler(BaseHTTPRequestHandler):
     def _build_basic_config_payload(self) -> dict[str, Any]:
         cfg = self.server.runtime_config
         bilibili_cfg = _get_bilibili_config(cfg)
+        douyin_cfg = _get_douyin_config(cfg)
+        platform_archive = _get_platform_config_archive(cfg)
         return {
             "roomid": int(bilibili_cfg.get("roomid", 0)),
             "uid": int(bilibili_cfg.get("uid", 0)),
             "bilibili": bilibili_cfg,
+            "platform": _get_runtime_platform(cfg),
+            "douyin": douyin_cfg,
+            "platform_config_archive": {
+                "slots": MAX_QUEUE_ARCHIVE_SLOTS,
+                "active_slot": int(platform_archive.get("active_slot", 1)),
+            },
         }
 
     def _build_login_config_payload(self) -> dict[str, Any]:
@@ -2779,16 +2853,32 @@ class ApiHandler(BaseHTTPRequestHandler):
                 }
             },
         )
+        active_platform_slot = _to_int(
+            updated.get("platform_config_archive", {}).get("active_slot", 1),
+            1,
+        )
+        active_platform_slot = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, active_platform_slot))
+        slot_payload = load_platform_config_slot(active_platform_slot)
+        slot_bilibili = dict(slot_payload.get("bilibili", {}))
+        slot_bilibili["uid"] = uid
+        slot_bilibili["cookie"] = cookie
+        save_platform_config_slot(
+            active_platform_slot,
+            {
+                "platform": slot_payload.get("platform", _get_runtime_platform(updated)),
+                "bilibili": slot_bilibili,
+                "douyin": slot_payload.get("douyin", _get_douyin_config(updated)),
+            },
+        )
         save_config(updated)
         updated = load_config()
         self.server.runtime_config = updated
 
-        if hasattr(self.server, "danmu_relay"):
-            self.server.danmu_relay.request_reconnect()
+        _ensure_danmu_relay(self.server, reconnect=True)
         if hasattr(self.server, "queue_manager"):
             self.server.queue_manager.load_config(
                 updated.get("myjs", {}),
-                anchor_uid=_to_int(_get_bilibili_config(updated).get("uid", 0)),
+                anchor_uid=_get_anchor_uid_for_platform(updated),
             )
             self.server.queue_manager.load_quanxian(updated.get("quanxian", {}))
 
@@ -2861,12 +2951,21 @@ class ApiHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/config":
             cfg = self.server.runtime_config
             bilibili_cfg = _get_bilibili_config(cfg)
+            douyin_cfg = _get_douyin_config(cfg)
             self._write_json(
                 {
                     "roomid": int(bilibili_cfg.get("roomid", 0)),
                     "uid": int(bilibili_cfg.get("uid", 0)),
                     "cookie": str(bilibili_cfg.get("cookie", "")),
+                    "platform": _get_runtime_platform(cfg),
                     "bilibili": bilibili_cfg,
+                    "douyin": douyin_cfg,
+                    "platform_config_archive": {
+                        "slots": MAX_QUEUE_ARCHIVE_SLOTS,
+                        "active_slot": int(
+                            _get_platform_config_archive(cfg).get("active_slot", 1)
+                        ),
+                    },
                     "qr_login": cfg.get("qr_login", {}),
                     "callback": cfg.get("callback", {}),
                     "myjs": cfg.get("myjs", {}),
@@ -2883,11 +2982,14 @@ class ApiHandler(BaseHTTPRequestHandler):
                 if hasattr(self.server, "danmu_relay")
                 else {}
             )
+            runtime_platform = _get_runtime_platform(self.server.runtime_config)
+            relay_platform = str(relay_status.get("platform", runtime_platform) or runtime_platform)
             self._write_json(
                 {
                     "status": "ok",
                     "ws_clients": self.server.ws_hub.client_count,
                     "danmu_stream_active": bool(relay_status.get("connected", False)),
+                    "danmu_platform": relay_platform,
                     "last_message_at": self.server.ws_hub.last_message_at,
                     "danmu_connected": bool(relay_status.get("connected", False)),
                     "danmu_last_packet_at": str(relay_status.get("last_packet_at", "") or ""),
@@ -2900,6 +3002,10 @@ class ApiHandler(BaseHTTPRequestHandler):
                     "danmu_port": int(relay_status.get("port", 0) or 0),
                     "danmu_transport": str(relay_status.get("transport", "") or ""),
                     "danmu_auth_uid": int(relay_status.get("auth_uid", 0) or 0),
+                    "danmu_live_status": str(relay_status.get("live_status", "") or ""),
+                    "danmu_live_id": str(relay_status.get("live_id", "") or ""),
+                    "danmu_anchor_nickname": str(relay_status.get("anchor_nickname", "") or ""),
+                    "danmu_last_chat_seen_at": str(relay_status.get("last_chat_seen_at", "") or ""),
                 }
             )
             return
@@ -3043,9 +3149,34 @@ class ApiHandler(BaseHTTPRequestHandler):
                 )
                 return
 
-            roomid = int(payload.get("roomid", 0))
-            uid = int(payload.get("uid", 0))
-            cookie = str(payload.get("cookie", "")).strip()
+            current_cfg = self.server.runtime_config if isinstance(self.server.runtime_config, dict) else {}
+            incoming_platform = _normalize_platform_name(
+                payload.get("platform", current_cfg.get("platform", DEFAULT_PLATFORM))
+            )
+            incoming_bilibili = payload.get("bilibili", {})
+            if not isinstance(incoming_bilibili, dict):
+                incoming_bilibili = {}
+            roomid = int(incoming_bilibili.get("roomid", payload.get("roomid", 0)))
+            uid = int(incoming_bilibili.get("uid", payload.get("uid", 0)))
+            cookie = str(incoming_bilibili.get("cookie", payload.get("cookie", ""))).strip()
+            incoming_douyin = payload.get("douyin", {})
+            if not isinstance(incoming_douyin, dict):
+                incoming_douyin = {}
+            if "douyin" in payload:
+                douyin_payload = _get_douyin_config({"douyin": incoming_douyin})
+            else:
+                douyin_payload = _get_douyin_config(current_cfg)
+            platform_archive_payload = payload.get("platform_config_archive", {})
+            if not isinstance(platform_archive_payload, dict):
+                platform_archive_payload = {}
+            active_platform_slot = _to_int(
+                platform_archive_payload.get(
+                    "active_slot",
+                    current_cfg.get("platform_config_archive", {}).get("active_slot", 1),
+                ),
+                1,
+            )
+            active_platform_slot = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, active_platform_slot))
             callback_payload = payload.get("callback", {})
             callback_enabled = bool(callback_payload.get("enabled", False)) if isinstance(callback_payload, dict) else False
             callback_url = str(callback_payload.get("url", "")).strip() if isinstance(callback_payload, dict) else ""
@@ -3087,10 +3218,25 @@ class ApiHandler(BaseHTTPRequestHandler):
                 )
                 uid = resolved_uid
 
+            save_platform_config_slot(
+                active_platform_slot,
+                {
+                    "platform": incoming_platform,
+                    "bilibili": {"roomid": roomid, "uid": uid, "cookie": cookie},
+                    "douyin": douyin_payload,
+                },
+            )
+
             updated = _merge_config(
                 self.server.runtime_config,
                 {
+                    "platform": incoming_platform,
                     "bilibili": {"roomid": roomid, "uid": uid, "cookie": cookie},
+                    "douyin": douyin_payload,
+                    "platform_config_archive": {
+                        "slots": MAX_QUEUE_ARCHIVE_SLOTS,
+                        "active_slot": active_platform_slot,
+                    },
                     "callback": {
                         "enabled": callback_enabled,
                         "url": callback_url,
@@ -3106,23 +3252,31 @@ class ApiHandler(BaseHTTPRequestHandler):
                 save_quanxian(quanxian_payload)
             updated = load_config()
             self.server.runtime_config = updated
-            if hasattr(self.server, "danmu_relay"):
-                self.server.danmu_relay.request_reconnect()
+            _ensure_danmu_relay(self.server, reconnect=True)
             if hasattr(self.server, "queue_manager"):
                 self.server.queue_manager.load_config(
                     updated.get("myjs", {}),
-                    anchor_uid=_to_int(_get_bilibili_config(updated).get("uid", 0)),
+                    anchor_uid=_get_anchor_uid_for_platform(updated),
                 )
                 self.server.queue_manager.load_quanxian(updated.get("quanxian", {}))
-            self.server.logger.info("配置已更新，触发直播间弹幕重连 roomid=%s uid=%s", roomid, uid)
+            self.server.logger.info(
+                "配置已更新，触发直播弹幕重连 platform=%s roomid=%s uid=%s",
+                incoming_platform,
+                roomid,
+                uid,
+            )
             self._write_json(
                 {
                     "status": "ok",
+                    "platform": incoming_platform,
                     "roomid": roomid,
                     "uid": uid,
                     "uname": str(login_state.get("uname", "") or ""),
                     "uid_source": str(login_state.get("uid_source", "") or ""),
                     "is_login": bool(login_state.get("is_login", False)),
+                    "bilibili": updated.get("bilibili", {}),
+                    "douyin": updated.get("douyin", {}),
+                    "platform_config_archive": updated.get("platform_config_archive", {}),
                     "myjs": updated.get("myjs", {}),
                     "quanxian": updated.get("quanxian", {}),
                 }
@@ -3378,10 +3532,33 @@ class ApiHandler(BaseHTTPRequestHandler):
                             },
                         },
                     )
+                    active_platform_slot = _to_int(
+                        updated.get("platform_config_archive", {}).get("active_slot", 1),
+                        1,
+                    )
+                    active_platform_slot = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, active_platform_slot))
+                    slot_payload = load_platform_config_slot(active_platform_slot)
+                    slot_bilibili = dict(slot_payload.get("bilibili", {}))
+                    slot_bilibili.update(bilibili_update)
+                    save_platform_config_slot(
+                        active_platform_slot,
+                        {
+                            "platform": slot_payload.get("platform", _get_runtime_platform(updated)),
+                            "bilibili": slot_bilibili,
+                            "douyin": slot_payload.get("douyin", _get_douyin_config(updated)),
+                        },
+                    )
                     save_config(updated)
                     self.server.runtime_config = load_config()
-                    if hasattr(self.server, "danmu_relay"):
-                        self.server.danmu_relay.request_reconnect()
+                    _ensure_danmu_relay(self.server, reconnect=True)
+                    if hasattr(self.server, "queue_manager"):
+                        self.server.queue_manager.load_config(
+                            self.server.runtime_config.get("myjs", {}),
+                            anchor_uid=_get_anchor_uid_for_platform(self.server.runtime_config),
+                        )
+                        self.server.queue_manager.load_quanxian(
+                            self.server.runtime_config.get("quanxian", {})
+                        )
                     callback_ok, callback_message = _dispatch_login_callback(
                         self.server.runtime_config.get("callback", {}),
                         cookie=cookie_text,
@@ -3476,16 +3653,17 @@ def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
     )
     httpd.queue_manager.load_config(
         runtime_config.get("myjs", {}),
-        anchor_uid=_to_int(_get_bilibili_config(runtime_config).get("uid", 0)),
+        anchor_uid=_get_anchor_uid_for_platform(runtime_config),
     )
     httpd.queue_manager.load_quanxian(load_quanxian())
     httpd.queue_manager.load_kaiguan(load_kaiguan())
     httpd.queue_manager.restore_from_archive()
-    httpd.danmu_relay = bilibili_protocol.BilibiliDanmuRelay(httpd)
-    httpd.danmu_relay.start()
+    httpd.danmu_relay = None
+    _ensure_danmu_relay(httpd, reconnect=False)
     if _migrate_legacy_bilibili_config_if_needed(runtime_config, logger=logger):
         runtime_config = load_config()
         httpd.runtime_config = runtime_config
+        _ensure_danmu_relay(httpd, reconnect=True)
 
     logger.info("后端已启动，地址：http://%s:%s", host, port)
     logger.info("配置页：http://127.0.0.1:%s/config", port)
@@ -3494,15 +3672,19 @@ def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
 
     # 打印非敏感配置
     srv_cfg = runtime_config.get("server", {})
+    platform_name = _get_runtime_platform(runtime_config)
     bilibili_cfg = _get_bilibili_config(runtime_config)
+    douyin_cfg = _get_douyin_config(runtime_config)
     log_cfg = runtime_config.get("logging", {})
     qa_cfg = runtime_config.get("queue_archive", {})
     logger.info(
-        "[config] server=%s:%s  roomid=%s  uid=%s  log_level=%s  retention=%sd  "
-        "archive_enabled=%s  active_slot=%s",
+        "[config] server=%s:%s  platform=%s  roomid=%s  uid=%s  douyin_live_id=%s  "
+        "log_level=%s  retention=%sd  archive_enabled=%s  active_slot=%s",
         srv_cfg.get("host", host), srv_cfg.get("port", port),
+        platform_name,
         bilibili_cfg.get("roomid", 0),
         bilibili_cfg.get("uid", 0),
+        douyin_cfg.get("live_id", ""),
         log_cfg.get("level", "INFO"),
         log_cfg.get("retention_days", 7),
         qa_cfg.get("enabled", True),
@@ -3511,7 +3693,12 @@ def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
     try:
         httpd.serve_forever()
     finally:
-        httpd.danmu_relay.stop()
+        relay = getattr(httpd, "danmu_relay", None)
+        if relay is not None:
+            try:
+                relay.stop()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 def _warn_use_gui_startup() -> None:

@@ -4,6 +4,7 @@ kaiguan.yaml
 quanxian.yaml
 core/cd/
 tmp*
+log/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
