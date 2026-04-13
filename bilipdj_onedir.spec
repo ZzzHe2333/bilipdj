@@ -43,7 +43,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="bilipdj",
+    name="main",
     icon=str(project_root / "core" / "256x.ico"),
     debug=False,
     bootloader_ignore_signals=False,

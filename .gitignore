@@ -5,6 +5,7 @@ quanxian.yaml
 core/cd/
 tmp*
 log/
+node_modules/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

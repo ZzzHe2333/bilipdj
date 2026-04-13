@@ -439,9 +439,9 @@ class OverlayHostApp:
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="弹幕排队姬透明窗口宿主")
     parser.add_argument("--port", type=int, default=9816)
-    parser.add_argument("--width", type=int, default=860)
-    parser.add_argument("--height", type=int, default=420)
-    parser.add_argument("--scale", type=int, default=100)
+    parser.add_argument("--width", type=int, default=400)
+    parser.add_argument("--height", type=int, default=400)
+    parser.add_argument("--scale", type=int, default=50)
     parser.add_argument("--no-topmost", action="store_true", default=False,
                         help="启动时不置顶（可从主控制台切换）")
     return parser

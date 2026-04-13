@@ -2,6 +2,48 @@
 
 ---
 
+## 2026-04-11（二次修订）UTC+08:00
+
+### UI 科技感重设计（直角控件 + 霓虹主题）
+
+**core/ui/moren.css**
+- 队列文字颜色改为青色霓虹 `#00e5ff`，使用 `text-shadow` 替代仅有的 webkit-text-stroke 实现发光效果
+- `.pdj-confirm-pending` 动画由简单透明度脉冲改为青/白霓虹色切换闪烁
+- `.vText span` 同步应用霓虹发光
+
+**core/ui/config.html**
+- `body` 背景：深黑 `#07101e` + `repeating-linear-gradient` 扫描线纹理 + 径向渐变
+- `.panel`：移除 `border-radius`，改为左侧 3px 青色实线边框、顶角/底角 CSS `::before/::after` L 形装饰、`box-shadow` 顶部发光
+- `h3` 标题：等宽字体、大写、青色霓虹 `text-shadow`、`[ ]` 前后装饰符
+- `input` / `textarea`：直角（`border-radius: 0`）、暗色底、底边高亮；focus 时全框发光
+- `button`：直角、深背景 + 青色边框 + 大写字母 + 字间距；hover 时 `box-shadow` 扩散发光；disabled 时降低不透明度
+- `label`：小写转大写、青灰色、等宽字体
+- `.tip`：添加 `//` 代码注释风前缀
+
+**core/ui/cookie_login.html**
+- 与 config.html 同步科技感处理
+- `.card`：直角、左侧 3px 青色实线、L 形角装饰、顶部发光
+- `#qrcode`：保持白色背景（供手机扫码），外框改为青色发光直角边框
+- `.status`：等宽字体、青色霓虹色、`>` 命令行风格前缀
+- `.hint`：`//` 注释风前缀
+- `button`：与 config.html 一致的直角霓虹按钮风格
+
+**ai.md / README.md / UPDATE.md**
+- 根据当前代码架构完整重写，补充抖音平台、10 槽存档、全部 API 端点、UI 样式说明等
+
+---
+
+## 2026-04-11 UTC+08:00
+
+**bilipdj_onedir.spec**
+- 主面板打包产物名调整为 `main.exe`，输出路径变更为 `dist\bilipdj\main.exe`
+
+**package-windows-local.ps1**
+- 新增本地 Windows 打包脚本，统一处理依赖安装、PyInstaller 构建、透明窗口程序集成与 `core/cd` 清理
+
+**.github/workflows/package-windows-x64.yml**
+- GitHub Action 改为直接调用本地打包脚本，发布 zip 内主程序保留为 `main.exe`，不再额外重命名
+
 ## 2026-04-09 UTC+08:00
 
 ### 透明弹窗 OBS 兼容 + GUI 操控 + 打包修复 + 配置页简化

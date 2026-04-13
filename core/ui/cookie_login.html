@@ -7,60 +7,104 @@
     <style>
         body {
             margin: 0;
-            font-family: "Microsoft YaHei", sans-serif;
-            background: #0c1629;
-            color: #eaf6ff;
+            font-family: "Microsoft YaHei", "Consolas", monospace;
+            background: #07101e;
+            background-image:
+                repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,229,255,0.025) 3px, rgba(0,229,255,0.025) 4px),
+                radial-gradient(ellipse at 50% 10%, #0d1e36 0%, #060c18 60%, #030608 100%);
+            color: #cce8ff;
         }
 
         .wrap {
             max-width: 520px;
             margin: 0 auto;
-            padding: 18px;
+            padding: 20px;
         }
 
         .card {
-            border: 1px solid #2e597f;
-            border-radius: 12px;
-            background: #10213c;
-            padding: 16px;
+            position: relative;
+            border: 1px solid rgba(0,229,255,0.35);
+            border-left: 3px solid #00e5ff;
+            border-radius: 0;
+            background: rgba(7, 18, 36, 0.95);
+            padding: 20px;
+            box-shadow: 0 0 20px rgba(0,229,255,0.1), inset 0 0 30px rgba(0,229,255,0.03);
         }
 
-        .title {
-            font-size: 20px;
-            margin: 0 0 12px;
+        .card::before,
+        .card::after {
+            content: '';
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            border-color: #00e5ff;
+            border-style: solid;
         }
+        .card::before { top: -1px; right: -1px; border-width: 2px 2px 0 0; }
+        .card::after  { bottom: -1px; right: -1px; border-width: 0 2px 2px 0; }
+
+        .title {
+            font-family: "Consolas", monospace;
+            font-size: 14px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: #00e5ff;
+            text-shadow: 0 0 8px rgba(0,229,255,0.55);
+            margin: 0 0 16px;
+        }
+        .title::before { content: '[ '; opacity: 0.6; }
+        .title::after  { content: ' ]'; opacity: 0.6; }
 
         #qrcode {
             display: flex;
             justify-content: center;
+            align-items: center;
             background: #fff;
-            border-radius: 8px;
-            padding: 10px;
+            border-radius: 0;
+            padding: 12px;
             min-height: 280px;
+            border: 1px solid rgba(0,229,255,0.4);
+            box-shadow: 0 0 14px rgba(0,229,255,0.2);
         }
 
         .status {
-            margin-top: 12px;
-            font-size: 14px;
-            color: #9fd7ff;
+            margin-top: 14px;
+            font-size: 13px;
+            font-family: "Consolas", monospace;
+            color: #00e5ff;
+            text-shadow: 0 0 6px rgba(0,229,255,0.4);
             white-space: pre-wrap;
         }
+        .status::before { content: '> '; opacity: 0.55; }
 
         .hint {
-            margin-top: 10px;
-            font-size: 13px;
-            color: #b8d8ee;
-            line-height: 1.5;
+            margin-top: 12px;
+            font-size: 12px;
+            color: rgba(126,200,227,0.7);
+            line-height: 1.6;
+            letter-spacing: 0.3px;
         }
+        .hint::before { content: '// '; opacity: 0.5; }
 
         button {
             margin-top: 14px;
-            background: #33a3ff;
-            border: 0;
-            color: #fff;
-            border-radius: 8px;
-            padding: 8px 14px;
+            background: rgba(0,40,60,0.9);
+            border: 1px solid #00b8d9;
+            border-radius: 0;
+            color: #00e5ff;
+            padding: 8px 16px;
             cursor: pointer;
+            font-family: "Consolas", monospace;
+            font-size: 13px;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            transition: background 0.2s, box-shadow 0.2s, color 0.2s;
+        }
+
+        button:hover {
+            background: rgba(0,229,255,0.12);
+            box-shadow: 0 0 10px rgba(0,229,255,0.4), inset 0 0 6px rgba(0,229,255,0.1);
+            color: #fff;
         }
     </style>
 </head>

@@ -38,7 +38,6 @@ jobs:
           fi
 
           echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
-          echo "exe_name=bilibili-danmuji-$TAG_NAME" >> "$GITHUB_OUTPUT"
           echo "zip_name=bilibili-danmuji-windows-x64-$TAG_NAME.zip" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
@@ -54,36 +53,17 @@ jobs:
           $httpPkg = pip list | Select-String -Pattern "^http\s" -CaseSensitive:$false
           if ($httpPkg) { Write-Host "WARNING: http package installed: $httpPkg" } else { Write-Host "http package not installed (OK)" }
 
-      - name: Check stdlib shadowing
-        shell: pwsh
-        run: |
-          if (Test-Path http.py) { throw "Found shadowing file: http.py" }
-          if (Test-Path http/__init__.py) { throw "Found shadowing file: http/__init__.py" }
-
-      - name: Install build dependencies
-        shell: pwsh
-        run: |
-          python -m pip install --upgrade pip
-          if (Test-Path requirements.txt) {
-            pip install -r requirements.txt
-          }
-          pip uninstall -y http 2>$null; Write-Host "http uninstall done (or not installed)"
-          pip install pyinstaller qrcode[pil] brotli psutil
-
       - name: Build Windows executable (x64)
         shell: pwsh
         run: |
-          pyinstaller --noconfirm --clean bilipdj_onedir.spec
-          pyinstaller --noconfirm --clean paiduijitm.spec
-          if (Test-Path "dist\bilipdj\core\cd") {
-            Remove-Item -LiteralPath "dist\bilipdj\core\cd" -Recurse -Force
-          }
-          Copy-Item "dist\paiduijitm.exe" "dist\bilipdj\paiduijitm.exe"
-          Rename-Item "dist\bilipdj\bilipdj.exe" "${{ steps.resolve_tag.outputs.exe_name }}.exe"
+          .\package-windows-local.ps1 -InstallDependencies
 
       - name: Create release zip
         shell: pwsh
         run: |
+          if (Test-Path package) {
+            Remove-Item -LiteralPath package -Recurse -Force
+          }
           New-Item -ItemType Directory -Path package -Force | Out-Null
           Copy-Item -Recurse "dist\bilipdj\*" package\
           if (Test-Path README.md)           { Copy-Item README.md           package\ }
