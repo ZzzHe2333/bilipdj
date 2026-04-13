@@ -78,6 +78,15 @@ def _to_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _to_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+
+
 def _safe_unescape(value: str) -> str:
     text = html.unescape(str(value or ""))
     try:
@@ -216,6 +225,15 @@ def parse_douyin_live_info_html(html_text: str, live_id: str) -> DouyinLiveInfo:
             r'\\"roomInfo\\":\{\\"room\\":\{\\"id_str\\":\\"[^"]+\\",\\"status\\":(?P<value>\d+),',
             r'"roomInfo"\s*:\s*\{"room"\s*:\s*\{"id_str"\s*:\s*"[^"]+",\s*"status"\s*:\s*(?P<value>\d+),',
             r'"room_status"\s*:\s*"?(?P<value>\d+)"?',
+            # 宽松匹配：roomInfo 下 room 对象里的 status 字段（不要求 id_str 紧邻）
+            r'\\"roomInfo\\":\{[^}]{0,200}\\"status\\":(?P<value>\d+)[,}]',
+            r'"roomInfo"\s*:\s*\{[^}]{0,200}"status"\s*:\s*(?P<value>\d+)[,}]',
+            # room 对象直接包含 status（各种嵌套写法）
+            r'\\"room\\":\{[^}]{0,400}\\"status\\":(?P<value>\d+)[,}]',
+            r'"room"\s*:\s*\{[^}]{0,400}"status"\s*:\s*(?P<value>\d+)[,}]',
+            # liveStatus / live_status 兜底
+            r'"liveStatus"\s*:\s*"?(?P<value>\d+)"?',
+            r'"live_status"\s*:\s*"?(?P<value>\d+)"?',
         ],
     )
     room_title = _search_patterns(
@@ -533,6 +551,9 @@ class DouyinDanmuRelay(threading.Thread):
         extra_query = douyin_cfg.get("extra_query", {})
         if not isinstance(extra_query, dict):
             extra_query = {}
+        live_info_cfg = douyin_cfg.get("live_info", {})
+        if not isinstance(live_info_cfg, dict):
+            live_info_cfg = {}
         return {
             "platform": str(runtime.get("platform", "bilibili") or "").strip().lower(),
             "enabled": bool(douyin_cfg.get("enabled", False)),
@@ -541,8 +562,15 @@ class DouyinDanmuRelay(threading.Thread):
             "cursor": str(bootstrap_cfg.get("cursor", "") or ""),
             "internal_ext": str(bootstrap_cfg.get("internal_ext", "") or ""),
             "auto_reconnect": bool(ws_cfg.get("auto_reconnect", True)),
-            "reconnect_delay_seconds": max(0.5, float(ws_cfg.get("reconnect_delay_seconds", 2.0) or 2.0)),
+            "reconnect_delay_seconds": max(0.5, _to_float(ws_cfg.get("reconnect_delay_seconds", 2.0), 2.0)),
             "extra_query": dict(extra_query),
+            # 预置 live_info 字段（由"获取参数"或手动填写写入 config）
+            "preset_room_id": str(live_info_cfg.get("room_id", "") or "").strip(),
+            "preset_user_id": str(live_info_cfg.get("user_id", "") or "").strip(),
+            "preset_user_unique_id": str(live_info_cfg.get("user_unique_id", "") or "").strip(),
+            "preset_anchor_id": str(live_info_cfg.get("anchor_id", "") or "").strip(),
+            "preset_sec_uid": str(live_info_cfg.get("sec_uid", "") or "").strip(),
+            "preset_ttwid": str(live_info_cfg.get("ttwid", "") or "").strip(),
         }
 
     def _sync_runtime_live_info(self, info: DouyinLiveInfo) -> None:
@@ -616,6 +644,19 @@ class DouyinDanmuRelay(threading.Thread):
             return
 
         info = fetch_douyin_live_info(cfg["live_id"], cookie=cfg["cookie"])
+        # 预置字段：config 里由"获取参数"或手动填写写入的值优先级高于 HTML 解析结果
+        if cfg["preset_room_id"] and not info.room_id:
+            info.room_id = cfg["preset_room_id"]
+        if cfg["preset_user_unique_id"] and not info.user_unique_id:
+            info.user_unique_id = cfg["preset_user_unique_id"]
+        if cfg["preset_user_id"] and not info.user_id:
+            info.user_id = cfg["preset_user_id"]
+        if cfg["preset_anchor_id"] and not info.anchor_id:
+            info.anchor_id = cfg["preset_anchor_id"]
+        if cfg["preset_sec_uid"] and not info.sec_uid:
+            info.sec_uid = cfg["preset_sec_uid"]
+        if cfg["preset_ttwid"] and not info.ttwid:
+            info.ttwid = cfg["preset_ttwid"]
         self._sync_runtime_live_info(info)
         if hasattr(self.server, "queue_manager"):
             try:
@@ -631,7 +672,8 @@ class DouyinDanmuRelay(threading.Thread):
             self._current_live_id = info.live_id
             self._current_live_status = live_status
             self._current_anchor_nickname = str(info.anchor_nickname or "")
-        if live_status != "live":
+        # 仅在明确为 offline（status=4）时等待；unknown 状态仍尝试连接
+        if live_status == "offline":
             self._mark_disconnected(f"douyin live status: {live_status}")
             self._emit_status(
                 "danmu_waiting_live",
@@ -642,6 +684,11 @@ class DouyinDanmuRelay(threading.Thread):
             )
             time.sleep(cfg["reconnect_delay_seconds"])
             return
+        if live_status not in ("live", "offline"):
+            self.logger.warning(
+                "Douyin room status unknown (raw=%r); proceeding optimistically",
+                info.room_status,
+            )
 
         cursor = cfg["cursor"]
         internal_ext = cfg["internal_ext"]
@@ -714,7 +761,7 @@ class DouyinDanmuRelay(threading.Thread):
                 break
             if not cfg.get("auto_reconnect", True):
                 break
-            time.sleep(float(cfg.get("reconnect_delay_seconds", 2.0) or 2.0))
+            time.sleep(_to_float(cfg.get("reconnect_delay_seconds", 2.0), 2.0))
 
 
 __all__ = [

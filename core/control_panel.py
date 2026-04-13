@@ -85,6 +85,10 @@ _LOG_LEVEL_RE = re.compile(r"\[(DEBUG|INFO|WARNING|ERROR|CRITICAL)\]")
 _LOG_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2} (\d{2}:\d{2}:\d{2}),\d+ \[(?:DEBUG|INFO|WARNING|ERROR|CRITICAL)\] [^:]+: (.*)")
 # 匹配面板显示格式 "HH:MM:SS 内容"
 _PANEL_TS_RE = re.compile(r"^(\d{2}:\d{2}:\d{2}) (.*)", re.DOTALL)
+# 匹配日志中的 URL（用于可点击链接）
+_URL_RE = re.compile(r"https?://[^\s,，）)\]>\"']+")
+# 匹配日志行前缀括号标签 "[GUI]" "[INFO]" 等
+_BRACKET_TAG_RE = re.compile(r"^\[([A-Z_a-z0-9/\s]+)\] ?")
 MAX_QUEUE_ARCHIVE_SLOTS = 10
 OVERLAY_REFRESH_MS = 1200
 OVERLAY_TRANSPARENT_COLOR = "#010101"
@@ -92,16 +96,48 @@ OVERLAY_RESIZE_MARGIN = 8
 OVERLAY_MIN_WIDTH = 320
 OVERLAY_MIN_HEIGHT = 180
 DEFAULT_OVERLAY_SETTINGS = {
-    "width": 860,
-    "height": 420,
-    "scale": 100,
+    "width": 400,
+    "height": 400,
+    "scale": 50,
 }
+RESERVED_PLATFORM_KEYS = ("huya", "kuaishou", "douyu", "weixin_videohao")
 PLATFORM_LABEL_TO_VALUE = {
     "B站": "bilibili",
     "抖音": "douyin",
+    "虎牙(预留)": "huya",
+    "快手(预留)": "kuaishou",
+    "斗鱼(预留)": "douyu",
+    "微信视频号(预留)": "weixin_videohao",
 }
 PLATFORM_VALUE_TO_LABEL = {value: key for key, value in PLATFORM_LABEL_TO_VALUE.items()}
 PLATFORM_LABELS = tuple(PLATFORM_LABEL_TO_VALUE.keys())
+RESERVED_PLATFORM_UI_META = {
+    "huya": {
+        "title": "虎牙参数(预留)",
+        "hint": "当前仅预留配置位，保存后不会接入弹幕。",
+    },
+    "kuaishou": {
+        "title": "快手参数(预留)",
+        "hint": "可以先保存房间、Cookie 或其他参数，后续接入时直接使用。",
+    },
+    "douyu": {
+        "title": "斗鱼参数(预留)",
+        "hint": "斗鱼暂未接入，目前仅做配置占位和存档。",
+    },
+    "weixin_videohao": {
+        "title": "微信视频号参数(预留)",
+        "hint": "视频号暂未接入，可先预留房间链接、房间号和验证信息。",
+    },
+}
+RESERVED_PLATFORM_FIELD_DEFS = (
+    ("room_id", "房间号 / Live ID"),
+    ("room_url", "直播间链接"),
+    ("anchor_id", "主播 ID"),
+    ("cookie", "Cookie"),
+    ("auth_token", "Auth Token"),
+    ("notes", "备注"),
+    ("extra", "extra(JSON)"),
+)
 KAIGUAN_LABELS = [
     ("paidui",           "排队总开关"),
     ("guanfu_paidui",    "官服排队"),
@@ -176,6 +212,26 @@ def parse_scalar(value: str):
         return float(value)
     except ValueError:
         return value
+
+
+def _coerce_int_field(value: Any, default: int, field_name: str) -> int:
+    text = str(value).strip() if value is not None else ""
+    if not text:
+        return default
+    try:
+        return int(text)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} 必须是整数") from exc
+
+
+def _coerce_float_field(value: Any, default: float, field_name: str) -> float:
+    text = str(value).strip() if value is not None else ""
+    if not text:
+        return default
+    try:
+        return float(text)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} 必须是数字") from exc
 
 
 def next_meaningful_line(lines: list[str], start_index: int):
@@ -316,6 +372,30 @@ queue_archive:
 
 
 class ControlPanelApp:
+    # --- 主题配色 ---
+    _THEME_DARK: dict[str, str] = {
+        "bg": "#07101e", "bg2": "#0e1f3c", "surface": "#0a1830",
+        "accent": "#00e5ff", "accent_dim": "#00b8d9",
+        "fg": "#cce8ff", "fg2": "#7ec8e3",
+        "border": "#1a3555",
+        "btn_bg": "#091830", "btn_active": "#102848",
+        "input_bg": "#060e1c",
+        "select_bg": "#003a5a", "select_fg": "#00e5ff",
+        "status_ok": "#00cc77", "warn": "#ff5555",
+        "ts": "#00cc55", "ev": "#9ec7e6",
+    }
+    _THEME_LIGHT: dict[str, str] = {
+        "bg": "#eef3fa", "bg2": "#dde6f3", "surface": "#ffffff",
+        "accent": "#0078c8", "accent_dim": "#005fa0",
+        "fg": "#1a2a40", "fg2": "#4a6080",
+        "border": "#b0c8e0",
+        "btn_bg": "#dae6f5", "btn_active": "#b8d4f0",
+        "input_bg": "#f4f8ff",
+        "select_bg": "#0078c8", "select_fg": "#ffffff",
+        "status_ok": "#007a40", "warn": "#cc1100",
+        "ts": "#1a8a30", "ev": "#334466",
+    }
+
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title(f"{APP_NAME} 控制台 v{APP_VERSION}")
@@ -359,11 +439,38 @@ class ControlPanelApp:
         self.douyin_sec_uid_var = tk.StringVar(value="")
         self.douyin_ttwid_var = tk.StringVar(value="")
         self.douyin_extra_query_var = tk.StringVar(value="{}")
+        self.reserved_platform_vars: dict[str, dict[str, tk.Variable]] = {
+            platform_key: {
+                "enabled": tk.BooleanVar(value=False),
+                "room_id": tk.StringVar(value=""),
+                "room_url": tk.StringVar(value=""),
+                "anchor_id": tk.StringVar(value=""),
+                "cookie": tk.StringVar(value=""),
+                "auth_token": tk.StringVar(value=""),
+                "notes": tk.StringVar(value=""),
+                "extra": tk.StringVar(value="{}"),
+            }
+            for platform_key in RESERVED_PLATFORM_KEYS
+        }
         self.overlay_width_var = tk.StringVar(value=str(DEFAULT_OVERLAY_SETTINGS["width"]))
         self.overlay_height_var = tk.StringVar(value=str(DEFAULT_OVERLAY_SETTINGS["height"]))
         self.overlay_scale_var = tk.StringVar(value=str(DEFAULT_OVERLAY_SETTINGS["scale"]))
         self.ws_light_var = tk.StringVar(value="●")
         self.ws_text_var = tk.StringVar(value="直播间链接状态：未连接")
+
+        # --- 主题状态 ---
+        self._dark_mode: bool = False
+        self._all_text_widgets: list[tk.Text] = []
+        self._status_label: ttk.Label | None = None
+        self._ws_light_label: ttk.Label | None = None
+        self._theme_btn: ttk.Button | None = None
+        self._settings_hint_label: ttk.Label | None = None
+        self._settings_canvas: tk.Canvas | None = None
+        self._platform_hint_label: ttk.Label | None = None
+
+        # --- 抖音参数获取 ---
+        self.douyin_fetch_url_var = tk.StringVar(value="")
+        self._douyin_fetch_status_var = tk.StringVar(value="")
 
         self._clear_click_time: float = 0.0
         self._blacklist_clear_click_time: float = 0.0
@@ -392,6 +499,174 @@ class ControlPanelApp:
             self.root.after(200, self.start_server)
         self.root.after(1000, self.refresh_runtime_status)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    # ------------------------------------------------------------------
+    # 主题
+    # ------------------------------------------------------------------
+
+    def _apply_theme(self, dark: bool = True) -> None:
+        self._dark_mode = dark
+        t = self._THEME_DARK if dark else self._THEME_LIGHT
+
+        style = ttk.Style(self.root)
+        style.theme_use("clam")
+
+        # 基础容器
+        style.configure("TFrame", background=t["bg"])
+        style.configure("TLabelframe", background=t["bg"], bordercolor=t["border"], relief="flat")
+        style.configure("TLabelframe.Label", background=t["bg"], foreground=t["accent"])
+
+        # 标签
+        style.configure("TLabel", background=t["bg"], foreground=t["fg"])
+
+        # 按钮
+        style.configure(
+            "TButton",
+            background=t["btn_bg"], foreground=t["accent"],
+            bordercolor=t["border"], darkcolor=t["border"], lightcolor=t["border"],
+            focuscolor=t["btn_bg"], relief="flat", padding=(8, 4),
+        )
+        style.map(
+            "TButton",
+            background=[("active", t["btn_active"]), ("pressed", t["select_bg"]), ("disabled", t["bg2"])],
+            foreground=[("active", t["fg"]), ("pressed", t["select_fg"]), ("disabled", t["fg2"])],
+        )
+
+        # 输入框
+        style.configure(
+            "TEntry",
+            fieldbackground=t["input_bg"], foreground=t["fg"],
+            insertcolor=t["accent"], bordercolor=t["border"],
+            focuscolor=t["border"], selectbackground=t["select_bg"], selectforeground=t["select_fg"],
+        )
+        style.map("TEntry", bordercolor=[("focus", t["accent"])])
+
+        # 下拉框
+        style.configure(
+            "TCombobox",
+            fieldbackground=t["input_bg"], background=t["btn_bg"],
+            foreground=t["fg"], selectbackground=t["select_bg"],
+            selectforeground=t["select_fg"], bordercolor=t["border"],
+            arrowcolor=t["accent"], insertcolor=t["accent"],
+        )
+        style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", t["input_bg"])],
+            foreground=[("readonly", t["fg"])],
+            bordercolor=[("focus", t["accent"])],
+        )
+        # Combobox 展开列表（tk.Listbox 内部，不走 ttk.Style）
+        self.root.option_add("*TCombobox*Listbox.background", t["input_bg"])
+        self.root.option_add("*TCombobox*Listbox.foreground", t["fg"])
+        self.root.option_add("*TCombobox*Listbox.selectBackground", t["select_bg"])
+        self.root.option_add("*TCombobox*Listbox.selectForeground", t["select_fg"])
+
+        # 复选框 / 单选框
+        for widget_type in ("TCheckbutton", "TRadiobutton"):
+            style.configure(
+                widget_type,
+                background=t["bg"], foreground=t["fg"],
+                focuscolor=t["bg"], indicatorcolor=t["input_bg"],
+                indicatorrelief="flat",
+            )
+            style.map(
+                widget_type,
+                background=[("active", t["bg2"])],
+                indicatorcolor=[("selected", t["accent"]), ("active", t["accent_dim"])],
+            )
+
+        # Notebook 标签页
+        style.configure(
+            "TNotebook",
+            background=t["bg"], bordercolor=t["border"], tabmargins=(2, 4, 0, 0),
+        )
+        style.configure(
+            "TNotebook.Tab",
+            background=t["bg2"], foreground=t["fg2"],
+            padding=(10, 4), focuscolor=t["bg2"],
+            bordercolor=t["border"],
+        )
+        style.map(
+            "TNotebook.Tab",
+            background=[("selected", t["surface"]), ("active", t["btn_active"])],
+            foreground=[("selected", t["accent"]), ("active", t["fg"])],
+        )
+
+        # Treeview
+        style.configure(
+            "Treeview",
+            background=t["surface"], foreground=t["fg"],
+            fieldbackground=t["surface"], bordercolor=t["border"],
+            rowheight=22,
+        )
+        style.configure(
+            "Treeview.Heading",
+            background=t["bg2"], foreground=t["accent"],
+            bordercolor=t["border"], relief="flat",
+        )
+        style.map(
+            "Treeview",
+            background=[("selected", t["select_bg"])],
+            foreground=[("selected", t["select_fg"])],
+        )
+        style.map("Treeview.Heading", background=[("active", t["btn_active"])])
+
+        # 滚动条
+        style.configure(
+            "TScrollbar",
+            background=t["bg2"], troughcolor=t["bg"],
+            bordercolor=t["border"], arrowcolor=t["fg2"],
+            darkcolor=t["bg2"], lightcolor=t["bg2"],
+            relief="flat",
+        )
+        style.map("TScrollbar", background=[("active", t["accent_dim"])])
+
+        # 分隔线
+        style.configure("TSeparator", background=t["border"])
+
+        # 根窗口背景
+        self.root.configure(bg=t["bg"])
+
+        # tk.Text 控件（不走 ttk.Style，需手动设置）
+        for w in self._all_text_widgets:
+            try:
+                w.configure(
+                    background=t["surface"], foreground=t["fg"],
+                    insertbackground=t["accent"],
+                    selectbackground=t["select_bg"], selectforeground=t["select_fg"],
+                )
+            except tk.TclError:
+                pass
+
+        # 日志文字标签
+        if hasattr(self, "log_text"):
+            _mono = ("Consolas", 9) if sys.platform == "win32" else ("Menlo", 10) if sys.platform == "darwin" else ("Monospace", 10)
+            self.log_text.tag_configure("ts", foreground=t["ts"], font=_mono)
+            self.log_text.tag_configure("sep", foreground=t["border"])
+            self.log_text.tag_configure("bracket", foreground=t["accent_dim"], font=(*_mono[:1], _mono[1], "bold"))
+            self.log_text.tag_configure("ev", foreground=t["ev"])
+            self.log_text.tag_configure("warn", foreground=t["warn"])
+            self.log_text.tag_configure("link", foreground=t["accent"], underline=True)
+            self.log_text.tag_raise("link")  # link 优先级高于 ev/warn
+
+        # 硬编码颜色的标签引用
+        if self._status_label is not None:
+            self._status_label.configure(foreground=t["status_ok"])
+        if self._ws_light_label is not None:
+            self._ws_light_label.configure(foreground=t["status_ok"])
+        if self._settings_hint_label is not None:
+            self._settings_hint_label.configure(foreground=t["fg2"])
+        if self._platform_hint_label is not None:
+            self._platform_hint_label.configure(foreground=t["fg2"])
+        if self._settings_canvas is not None:
+            self._settings_canvas.configure(background=t["bg"])
+
+        # 主题切换按钮文字
+        if self._theme_btn is not None:
+            self._theme_btn.configure(text="☀ 明亮" if dark else "🌙 暗夜")
+
+    def _toggle_theme(self) -> None:
+        self._apply_theme(not self._dark_mode)
 
     def _apply_root_icon(self) -> None:
         icon_candidates = (
@@ -429,7 +704,11 @@ class ControlPanelApp:
         ttk.Button(btn_bar, text="排队展示页", command=self.open_web).grid(row=0, column=3, padx=(0, 6))
         ttk.Button(btn_bar, text="透明弹窗", command=self.open_overlay_window).grid(row=0, column=4)
 
-        ttk.Label(top, textvariable=self.status_var, foreground="#0b5").pack(side="left", padx=(16, 0))
+        self._status_label = ttk.Label(top, textvariable=self.status_var)
+        self._status_label.pack(side="left", padx=(16, 0))
+
+        self._theme_btn = ttk.Button(top, text="☀ 明亮", command=self._toggle_theme)
+        self._theme_btn.pack(side="right")
 
         # --- 标签页 ---
         notebook = ttk.Notebook(main)
@@ -484,6 +763,8 @@ class ControlPanelApp:
         about_tab = ttk.Frame(notebook, padding=8)
         notebook.add(about_tab, text="关于")
         self._build_about_tab(about_tab)
+
+        self._apply_theme(self._dark_mode)
 
     def _build_queue_tab(self, frame: ttk.Frame) -> None:
         frame.columnconfigure(0, weight=1)
@@ -718,6 +999,26 @@ class ControlPanelApp:
             if isinstance(douyin_extra_query_cfg, dict) and douyin_extra_query_cfg
             else "{}"
         )
+        for platform_key in RESERVED_PLATFORM_KEYS:
+            reserved_cfg = raw.get(platform_key, {})
+            if not isinstance(reserved_cfg, dict):
+                reserved_cfg = {}
+            var_map = self.reserved_platform_vars.get(platform_key, {})
+            bool_var = var_map.get("enabled")
+            if isinstance(bool_var, tk.BooleanVar):
+                bool_var.set(bool(reserved_cfg.get("enabled", False)))
+            for field_name in ("room_id", "room_url", "anchor_id", "cookie", "auth_token", "notes"):
+                field_var = var_map.get(field_name)
+                if isinstance(field_var, tk.StringVar):
+                    field_var.set(str(reserved_cfg.get(field_name, "") or ""))
+            extra_var = var_map.get("extra")
+            if isinstance(extra_var, tk.StringVar):
+                extra_value = reserved_cfg.get("extra", {})
+                extra_var.set(
+                    json.dumps(extra_value, ensure_ascii=False)
+                    if isinstance(extra_value, dict) and extra_value
+                    else "{}"
+                )
         self._refresh_platform_settings_visibility()
 
     def _gather_platform_config_payload(self) -> dict[str, Any]:
@@ -732,11 +1033,11 @@ class ControlPanelApp:
             extra_query = parsed_extra_query
 
         platform_value = self._platform_label_to_value(self.platform_var.get())
-        return {
+        payload = {
             "platform": platform_value,
             "bilibili": {
-                "roomid": int(self.roomid_var.get().strip() or 0),
-                "uid": int(self.uid_var.get().strip() or 0),
+                "roomid": _coerce_int_field(self.roomid_var.get(), 0, "B站直播间号"),
+                "uid": _coerce_int_field(self.uid_var.get(), 0, "B站 UID"),
                 "cookie": self.cookie_var.get().strip(),
             },
             "douyin": {
@@ -750,8 +1051,16 @@ class ControlPanelApp:
                 },
                 "ws": {
                     "auto_reconnect": bool(self.douyin_ws_auto_reconnect_var.get()),
-                    "heartbeat_interval_seconds": float(self.douyin_ws_heartbeat_var.get().strip() or 5.0),
-                    "reconnect_delay_seconds": float(self.douyin_ws_reconnect_delay_var.get().strip() or 2.0),
+                    "heartbeat_interval_seconds": _coerce_float_field(
+                        self.douyin_ws_heartbeat_var.get(),
+                        5.0,
+                        "抖音心跳间隔",
+                    ),
+                    "reconnect_delay_seconds": _coerce_float_field(
+                        self.douyin_ws_reconnect_delay_var.get(),
+                        2.0,
+                        "抖音重连延迟",
+                    ),
                 },
                 "live_info": {
                     "room_id": self.douyin_room_id_var.get().strip(),
@@ -764,6 +1073,101 @@ class ControlPanelApp:
                 "extra_query": extra_query,
             },
         }
+        for platform_key in RESERVED_PLATFORM_KEYS:
+            var_map = self.reserved_platform_vars.get(platform_key, {})
+            extra_text = str(var_map.get("extra").get()).strip() if isinstance(var_map.get("extra"), tk.StringVar) else ""
+            if not extra_text:
+                reserved_extra = {}
+            else:
+                parsed_reserved_extra = json.loads(extra_text)
+                if not isinstance(parsed_reserved_extra, dict):
+                    raise ValueError(f"{self._platform_value_to_label(platform_key)} extra 参数必须是 JSON 对象")
+                reserved_extra = parsed_reserved_extra
+            payload[platform_key] = {
+                "enabled": bool(var_map.get("enabled").get()) if isinstance(var_map.get("enabled"), tk.BooleanVar) else False,
+                "room_id": str(var_map.get("room_id").get()).strip() if isinstance(var_map.get("room_id"), tk.StringVar) else "",
+                "room_url": str(var_map.get("room_url").get()).strip() if isinstance(var_map.get("room_url"), tk.StringVar) else "",
+                "anchor_id": str(var_map.get("anchor_id").get()).strip() if isinstance(var_map.get("anchor_id"), tk.StringVar) else "",
+                "cookie": str(var_map.get("cookie").get()).strip() if isinstance(var_map.get("cookie"), tk.StringVar) else "",
+                "auth_token": str(var_map.get("auth_token").get()).strip() if isinstance(var_map.get("auth_token"), tk.StringVar) else "",
+                "notes": str(var_map.get("notes").get()).strip() if isinstance(var_map.get("notes"), tk.StringVar) else "",
+                "extra": reserved_extra,
+            }
+        return payload
+
+    @staticmethod
+    def _parse_url_query_room_id(raw: str) -> str:
+        """从 URL query string 中直接提取 room_id（如有）。"""
+        try:
+            import urllib.parse as _up
+            parsed = _up.urlparse(raw)
+            qs = _up.parse_qs(parsed.query)
+            candidates = qs.get("room_id") or qs.get("roomId") or []
+            for v in candidates:
+                if str(v).isdigit():
+                    return str(v)
+        except Exception:  # noqa: BLE001
+            pass
+        return ""
+
+    def _fetch_douyin_params(self) -> None:
+        """在后台线程中获取抖音直播间参数，成功后回填到 UI。"""
+        raw = self.douyin_fetch_url_var.get().strip()
+        if not raw:
+            self._douyin_fetch_status_var.set("请先填写直播间链接或 live_id")
+            return
+        self._douyin_fetch_status_var.set("正在获取，请稍候…")
+
+        # 从 URL query 里直取 room_id（优先级高于 HTML 解析结果）
+        url_room_id = self._parse_url_query_room_id(raw)
+
+        def _worker():
+            try:
+                from core.douyin_protocol import (
+                    DouyinLiveInfo,
+                    fetch_douyin_live_info,
+                    map_room_status,
+                    normalize_live_id,
+                )
+                live_id = normalize_live_id(raw)
+                if not live_id:
+                    self.root.after(0, lambda: self._douyin_fetch_status_var.set("无法从输入中提取 live_id"))
+                    return
+                cookie = self.douyin_cookie_var.get().strip()
+                info: DouyinLiveInfo = fetch_douyin_live_info(live_id, cookie=cookie)
+                # URL query 里的 room_id 比 HTML 解析结果更可靠，覆盖之
+                if url_room_id:
+                    info.room_id = url_room_id
+                status_str = map_room_status(info.room_status)
+                self.root.after(0, lambda: self._apply_douyin_live_info(info, status_str))
+            except Exception as exc:  # noqa: BLE001
+                msg = f"获取失败: {exc}"
+                self.root.after(0, lambda: self._douyin_fetch_status_var.set(msg))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _apply_douyin_live_info(self, info: Any, room_status: str) -> None:
+        """将抖取的直播间信息回填到设置页各输入框。"""
+        if info.live_id:
+            self.douyin_live_id_var.set(info.live_id)
+        if info.room_id:
+            self.douyin_room_id_var.set(info.room_id)
+        if info.user_id:
+            self.douyin_user_id_var.set(info.user_id)
+        if info.user_unique_id:
+            self.douyin_user_unique_id_var.set(info.user_unique_id)
+        if info.anchor_id:
+            self.douyin_anchor_id_var.set(info.anchor_id)
+        if info.sec_uid:
+            self.douyin_sec_uid_var.set(info.sec_uid)
+        if info.ttwid:
+            self.douyin_ttwid_var.set(info.ttwid)
+        nickname = str(info.anchor_nickname or "").strip()
+        status_parts = []
+        if nickname:
+            status_parts.append(f"主播: {nickname}")
+        status_parts.append(f"状态: {room_status}")
+        self._douyin_fetch_status_var.set("  ".join(status_parts) if status_parts else "获取成功")
 
     def _refresh_platform_settings_visibility(self, _event=None) -> None:
         platform_value = self._platform_label_to_value(self.platform_var.get())
@@ -776,6 +1180,39 @@ class ControlPanelApp:
             else:
                 frame.grid_remove()
 
+    def _build_reserved_platform_frame(self, parent: ttk.Frame, platform_key: str) -> ttk.LabelFrame:
+        meta = RESERVED_PLATFORM_UI_META.get(platform_key, {})
+        frame = ttk.LabelFrame(parent, text=meta.get("title", f"{platform_key}(预留)"), padding=8)
+        frame.grid(row=0, column=0, sticky="ew")
+        frame.columnconfigure(1, weight=1)
+        frame.columnconfigure(3, weight=1)
+        ttk.Label(
+            frame,
+            text=meta.get("hint", "当前仅预留配置位，暂不接入弹幕。"),
+            foreground="#666666",
+        ).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
+
+        var_map = self.reserved_platform_vars.get(platform_key, {})
+        ttk.Checkbutton(
+            frame,
+            text="启用该平台占位配置",
+            variable=var_map.get("enabled"),
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 6))
+
+        for idx, (field_name, label) in enumerate(RESERVED_PLATFORM_FIELD_DEFS, start=2):
+            ttk.Label(frame, text=label).grid(row=idx, column=0, sticky="w", pady=4)
+            field_var = var_map.get(field_name)
+            width = 64 if field_name in {"room_url", "notes", "extra"} else 48
+            span = 3 if field_name in {"room_url", "notes", "extra"} else 1
+            ttk.Entry(frame, textvariable=field_var, width=width).grid(
+                row=idx,
+                column=1,
+                columnspan=span,
+                sticky="ew",
+                pady=4,
+            )
+        return frame
+
     def _apply_platform_config_slot_selection(self, slot: int) -> None:
         slot = self._set_platform_slot_selection(slot)
         try:
@@ -784,9 +1221,15 @@ class ControlPanelApp:
             updated = backend_server._merge_config(  # type: ignore[attr-defined]
                 backend_server.load_config(),
                 {
-                    "platform": payload.get("platform", "bilibili"),
-                    "bilibili": payload.get("bilibili", {}),
-                    "douyin": payload.get("douyin", {}),
+                    **{
+                        "platform": payload.get("platform", "bilibili"),
+                        "bilibili": payload.get("bilibili", {}),
+                        "douyin": payload.get("douyin", {}),
+                    },
+                    **{
+                        platform_key: payload.get(platform_key, {})
+                        for platform_key in RESERVED_PLATFORM_KEYS
+                    },
                     "platform_config_archive": {
                         "slots": MAX_QUEUE_ARCHIVE_SLOTS,
                         "active_slot": slot,
@@ -2701,12 +3144,12 @@ class ControlPanelApp:
         # 连接状态指示
         status_bar = ttk.Frame(frame)
         status_bar.grid(row=0, column=0, sticky="ew", pady=(0, 6))
-        ttk.Label(
+        self._ws_light_label = ttk.Label(
             status_bar,
             textvariable=self.ws_light_var,
-            foreground="#0b5",
             font=("Arial", 14, "bold"),
-        ).pack(side="left")
+        )
+        self._ws_light_label.pack(side="left")
         ttk.Label(status_bar, textvariable=self.ws_text_var).pack(side="left", padx=(8, 0))
 
         # 日志文本
@@ -2716,9 +3159,7 @@ class ControlPanelApp:
         log_frame.rowconfigure(0, weight=1)
         _sys_font = ("Microsoft YaHei UI", 9) if sys.platform == "win32" else ("PingFang SC", 11) if sys.platform == "darwin" else ("Sans", 10)
         self.log_text = tk.Text(log_frame, height=18, wrap="word", state="disabled", font=_sys_font)
-        self.log_text.tag_configure("warn", foreground="#c00")
-        self.log_text.tag_configure("ts", foreground="#080")   # 时间戳：绿色
-        self.log_text.tag_configure("ev", foreground="#111")   # 事件内容：深黑
+        self._all_text_widgets.append(self.log_text)
         self.log_text.grid(row=0, column=0, sticky="nsew")
         log_scroll = ttk.Scrollbar(log_frame, orient="vertical", command=self.log_text.yview)
         log_scroll.grid(row=0, column=1, sticky="ns")
@@ -2726,8 +3167,45 @@ class ControlPanelApp:
 
     def _build_settings_tab(self, frame: ttk.Frame) -> None:
         frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=1)
 
-        basic_frame = ttk.LabelFrame(frame, text="基础设置", padding=10)
+        # 可滚动容器
+        _cv = tk.Canvas(frame, highlightthickness=0, bd=0)
+        _cv.grid(row=0, column=0, sticky="nsew")
+        _vsb = ttk.Scrollbar(frame, orient="vertical", command=_cv.yview)
+        _vsb.grid(row=0, column=1, sticky="ns")
+        _cv.configure(yscrollcommand=_vsb.set)
+        self._settings_canvas = _cv
+
+        inner = ttk.Frame(_cv)
+        inner.columnconfigure(0, weight=1)
+        _win_id = _cv.create_window((0, 0), window=inner, anchor="nw")
+
+        def _on_inner_configure(*_):
+            _cv.configure(scrollregion=_cv.bbox("all"))
+
+        def _on_canvas_configure(ev):
+            _cv.itemconfigure(_win_id, width=ev.width)
+
+        inner.bind("<Configure>", _on_inner_configure)
+        _cv.bind("<Configure>", _on_canvas_configure)
+
+        def _on_enter(_e=None):
+            _cv.bind_all("<MouseWheel>", lambda e: _cv.yview_scroll(int(-e.delta / 120), "units"))
+
+        def _on_leave(_e=None):
+            _cv.unbind_all("<MouseWheel>")
+
+        _cv.bind("<Enter>", _on_enter)
+        _cv.bind("<Leave>", _on_leave)
+
+        # 保存配置/刷新按钮放在 canvas 外（固定底部）
+        btn_bar = ttk.Frame(frame)
+        btn_bar.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 4), padx=4)
+        ttk.Button(btn_bar, text="保存配置", command=self.save_to_file).grid(row=0, column=0, padx=(0, 8))
+        ttk.Button(btn_bar, text="刷新配置", command=self.load_from_file).grid(row=0, column=1)
+
+        basic_frame = ttk.LabelFrame(inner, text="基础设置", padding=10)
         basic_frame.grid(row=0, column=0, sticky="ew")
         basic_frame.columnconfigure(1, weight=1)
         basic_frame.columnconfigure(3, weight=1)
@@ -2789,13 +3267,13 @@ class ControlPanelApp:
             width=12,
         ).grid(row=4, column=1, sticky="w", pady=4)
 
-        ttk.Label(
+        self._settings_hint_label = ttk.Label(
             basic_frame,
             text="切换平台配置槽位后，会立即载入该槽位保存的平台和参数。",
-            foreground="#666666",
-        ).grid(row=5, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        )
+        self._settings_hint_label.grid(row=5, column=0, columnspan=4, sticky="w", pady=(6, 0))
 
-        platform_frame = ttk.LabelFrame(frame, text="平台参数", padding=10)
+        platform_frame = ttk.LabelFrame(inner, text="平台参数", padding=10)
         platform_frame.grid(row=1, column=0, sticky="ew", pady=(10, 0))
         platform_frame.columnconfigure(1, weight=1)
 
@@ -2810,11 +3288,11 @@ class ControlPanelApp:
         platform_combo.grid(row=0, column=1, sticky="w", pady=4)
         platform_combo.bind("<<ComboboxSelected>>", self._refresh_platform_settings_visibility)
 
-        ttk.Label(
+        self._platform_hint_label = ttk.Label(
             platform_frame,
             text="只显示当前平台需要填写的参数；隐藏平台的内容会原样保留在该槽位里。",
-            foreground="#666666",
-        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 8))
+        )
+        self._platform_hint_label.grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 8))
 
         platform_forms = ttk.Frame(platform_frame)
         platform_forms.grid(row=2, column=0, columnspan=2, sticky="ew")
@@ -2852,17 +3330,28 @@ class ControlPanelApp:
             ("ttwid", self.douyin_ttwid_var),
             ("extra_query(JSON)", self.douyin_extra_query_var),
         ]
+        # row=0: 直播间链接一键获取
+        fetch_bar = ttk.Frame(douyin_frame)
+        fetch_bar.grid(row=0, column=0, columnspan=4, sticky="ew", pady=(0, 6))
+        fetch_bar.columnconfigure(1, weight=1)
+        ttk.Label(fetch_bar, text="直播间链接").grid(row=0, column=0, sticky="w", padx=(0, 6))
+        ttk.Entry(fetch_bar, textvariable=self.douyin_fetch_url_var, width=48).grid(row=0, column=1, sticky="ew")
+        ttk.Button(fetch_bar, text="获取参数", command=self._fetch_douyin_params).grid(row=0, column=2, padx=(6, 0))
+        ttk.Label(fetch_bar, textvariable=self._douyin_fetch_status_var).grid(row=1, column=0, columnspan=3, sticky="w", pady=(2, 0))
+
+        # row=1: 启用开关
         ttk.Checkbutton(douyin_frame, text="启用抖音配置", variable=self.douyin_enabled_var).grid(
-            row=0, column=0, columnspan=2, sticky="w", pady=(0, 6)
+            row=1, column=0, columnspan=2, sticky="w", pady=(0, 6)
         )
         ttk.Checkbutton(douyin_frame, text="自动重连", variable=self.douyin_ws_auto_reconnect_var).grid(
-            row=0, column=2, columnspan=2, sticky="w", pady=(0, 6)
+            row=1, column=2, columnspan=2, sticky="w", pady=(0, 6)
         )
-        ttk.Label(douyin_frame, text="心跳间隔(秒)").grid(row=1, column=0, sticky="w", pady=4)
-        ttk.Entry(douyin_frame, textvariable=self.douyin_ws_heartbeat_var, width=18).grid(row=1, column=1, sticky="w", pady=4)
-        ttk.Label(douyin_frame, text="重连延迟(秒)").grid(row=1, column=2, sticky="w", padx=(16, 0), pady=4)
-        ttk.Entry(douyin_frame, textvariable=self.douyin_ws_reconnect_delay_var, width=18).grid(row=1, column=3, sticky="w", pady=4)
-        for idx, (label, var) in enumerate(douyin_fields, start=2):
+        # row=2: 心跳/重连
+        ttk.Label(douyin_frame, text="心跳间隔(秒)").grid(row=2, column=0, sticky="w", pady=4)
+        ttk.Entry(douyin_frame, textvariable=self.douyin_ws_heartbeat_var, width=18).grid(row=2, column=1, sticky="w", pady=4)
+        ttk.Label(douyin_frame, text="重连延迟(秒)").grid(row=2, column=2, sticky="w", padx=(16, 0), pady=4)
+        ttk.Entry(douyin_frame, textvariable=self.douyin_ws_reconnect_delay_var, width=18).grid(row=2, column=3, sticky="w", pady=4)
+        for idx, (label, var) in enumerate(douyin_fields, start=3):
             ttk.Label(douyin_frame, text=label).grid(row=idx, column=0, sticky="w", pady=4)
             span = 3 if label == "extra_query(JSON)" else 1
             width = 64 if label == "extra_query(JSON)" else 48
@@ -2874,16 +3363,16 @@ class ControlPanelApp:
                 pady=4,
             )
 
+        reserved_frames = {
+            platform_key: self._build_reserved_platform_frame(platform_forms, platform_key)
+            for platform_key in RESERVED_PLATFORM_KEYS
+        }
         self._platform_frame_map = {
             "bilibili": bilibili_frame,
             "douyin": douyin_frame,
+            **reserved_frames,
         }
         self._refresh_platform_settings_visibility()
-
-        btn_bar = ttk.Frame(frame)
-        btn_bar.grid(row=2, column=0, sticky="w", pady=(10, 4))
-        ttk.Button(btn_bar, text="保存配置", command=self.save_to_file).grid(row=0, column=0, padx=(0, 8))
-        ttk.Button(btn_bar, text="刷新配置", command=self.load_from_file).grid(row=0, column=1)
 
     def _build_overlay_tab(self, frame: ttk.Frame) -> None:
         frame.columnconfigure(0, weight=1)
@@ -3017,6 +3506,7 @@ class ControlPanelApp:
             container.grid(row=row_idx * 2 + 1, column=0, sticky="ew", pady=(0, 2))
             container.columnconfigure(0, weight=1)
             t = tk.Text(container, height=3, wrap="word")
+            self._all_text_widgets.append(t)
             t.grid(row=0, column=0, sticky="ew")
             sb = ttk.Scrollbar(container, orient="vertical", command=t.yview)
             sb.grid(row=0, column=1, sticky="ns")
@@ -3185,10 +3675,16 @@ class ControlPanelApp:
         self.log_level_var.set(str(logging_cfg.get("level", "INFO")))
         self.retention_days_var.set(str(logging_cfg.get("retention_days", 7)))
         self.queue_enabled_var.set(bool(queue_archive.get("enabled", True)))
-        active_slot = int(queue_archive.get("active_slot", 1))
+        try:
+            active_slot = _coerce_int_field(queue_archive.get("active_slot", 1), 1, "排队存档槽位")
+        except ValueError:
+            active_slot = 1
         active_slot = self._set_queue_slot_selection(active_slot)
         self._prev_slot = active_slot
-        active_platform_slot = int(platform_archive.get("active_slot", 1))
+        try:
+            active_platform_slot = _coerce_int_field(platform_archive.get("active_slot", 1), 1, "平台配置槽位")
+        except ValueError:
+            active_platform_slot = 1
         active_platform_slot = self._set_platform_slot_selection(active_platform_slot)
         self._prev_platform_config_slot = active_platform_slot
         self._set_platform_config_payload(
@@ -3196,6 +3692,10 @@ class ControlPanelApp:
                 "platform": config.get("platform", "bilibili"),
                 "bilibili": bilibili if isinstance(bilibili, dict) else {},
                 "douyin": douyin if isinstance(douyin, dict) else {},
+                **{
+                    platform_key: config.get(platform_key, {})
+                    for platform_key in RESERVED_PLATFORM_KEYS
+                },
             }
         )
         ui_cfg = config.get("ui", {})
@@ -3225,8 +3725,12 @@ class ControlPanelApp:
                     payload = json.loads(resp.read().decode("utf-8", errors="replace"))
                 active = bool(payload.get("danmu_stream_active"))
                 ws_clients = int(payload.get("ws_clients", 0))
+                relay_platform = str(payload.get("danmu_platform", "") or "").strip().lower()
+                relay_reason = str(payload.get("danmu_last_disconnect_reason", "") or "").strip()
                 if active:
                     light, text = "🟢", f"直播间链接状态：已连接（WS 客户端 {ws_clients}）"
+                elif relay_platform in RESERVED_PLATFORM_KEYS and relay_reason:
+                    light, text = "🟡", f"直播间链接状态：{relay_reason}"
                 else:
                     light, text = "🔴", f"直播间链接状态：等待弹幕流（WS 客户端 {ws_clients}）"
             except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError):
@@ -3241,11 +3745,15 @@ class ControlPanelApp:
         return {
             "server": {
                 "host": self.host_var.get().strip() or "0.0.0.0",
-                "port": int(self.port_var.get().strip() or 9816),
+                "port": _coerce_int_field(self.port_var.get(), 9816, "监听端口"),
             },
             "platform": platform_payload["platform"],
             "bilibili": platform_payload["bilibili"],
             "douyin": platform_payload["douyin"],
+            **{
+                platform_key: platform_payload[platform_key]
+                for platform_key in RESERVED_PLATFORM_KEYS
+            },
             "platform_config_archive": {
                 "slots": MAX_QUEUE_ARCHIVE_SLOTS,
                 "active_slot": self._get_selected_platform_slot(),
@@ -3253,7 +3761,7 @@ class ControlPanelApp:
             "myjs": {},
             "logging": {
                 "level": self.log_level_var.get().strip().upper() or "INFO",
-                "retention_days": int(self.retention_days_var.get().strip() or 7),
+                "retention_days": _coerce_int_field(self.retention_days_var.get(), 7, "日志保留天数"),
             },
             "queue_archive": {
                 "enabled": bool(self.queue_enabled_var.get()),
@@ -3267,23 +3775,55 @@ class ControlPanelApp:
             },
         }
 
+    def _insert_with_links(self, text: str, base_tag: str) -> None:
+        """将 text 插入日志，URL 部分自动加 link 标签并绑定点击事件。"""
+        last = 0
+        for m in _URL_RE.finditer(text):
+            if m.start() > last:
+                self.log_text.insert("end", text[last:m.start()], base_tag)
+            url = m.group(0)
+            # 用 mark 记录插入起点
+            self.log_text.mark_set("_url_s", "end")
+            self.log_text.mark_gravity("_url_s", "left")
+            self.log_text.insert("end", url, (base_tag, "link"))
+            start_idx = self.log_text.index("_url_s")
+            end_idx = self.log_text.index("end")
+            self.log_text.mark_unset("_url_s")
+            # 每段 URL 绑独立 tag，携带闭包 URL
+            tag_name = f"_lnk_{start_idx.replace('.', '_')}"
+            self.log_text.tag_add(tag_name, start_idx, end_idx)
+            self.log_text.tag_bind(tag_name, "<Button-1>", lambda e, u=url: webbrowser.open(u))
+            self.log_text.tag_bind(tag_name, "<Enter>", lambda e: self.log_text.configure(cursor="hand2"))
+            self.log_text.tag_bind(tag_name, "<Leave>", lambda e: self.log_text.configure(cursor=""))
+            last = m.end()
+        if last < len(text):
+            self.log_text.insert("end", text[last:], base_tag)
+
     def _append_log(self, message: str, warn: bool = False) -> None:
         import time as _t
         self.log_text.configure(state="normal")
-        # 若消息尚无时间戳前缀，补一个
+        # 补时间戳前缀
         if not _PANEL_TS_RE.match(message):
             message = f"{_t.strftime('%H:%M:%S')} {message}"
         m = _PANEL_TS_RE.match(message)
-        if m and not warn:
-            ts_part = m.group(1)
-            ev_part = m.group(2)
-            self.log_text.insert("end", ts_part, "ts")
-            self.log_text.insert("end", f" {ev_part}\n", "ev")
+        ts_part = m.group(1) if m else _t.strftime('%H:%M:%S')
+        ev_part = (m.group(2) if m else message).rstrip()
+
+        self.log_text.insert("end", ts_part, "ts")
+        self.log_text.insert("end", " │ ", "sep")
+
+        # 检测括号前缀 [TAG] 并单独着色
+        bm = _BRACKET_TAG_RE.match(ev_part)
+        if bm and not warn:
+            bracket_text = ev_part[:bm.end()]
+            rest = ev_part[bm.end():]
+            self.log_text.insert("end", bracket_text, "bracket")
+            self._insert_with_links(rest + "\n", "ev")
+        elif warn:
+            self._insert_with_links(ev_part + "\n", "warn")
         else:
-            start = self.log_text.index("end-1c")
-            self.log_text.insert("end", f"{message}\n")
-            if warn:
-                self.log_text.tag_add("warn", start, self.log_text.index("end-1c"))
+            self._insert_with_links(ev_part + "\n", "ev")
+
         self.log_text.see("end")
         self.log_text.configure(state="disabled")
 
@@ -3377,8 +3917,8 @@ class ControlPanelApp:
             self._prev_platform_config_slot = platform_slot
             self.status_var.set("配置保存成功")
             self._append_log("[GUI] 配置保存成功")
-        except ValueError:
-            messagebox.showerror("输入错误", "请检查数字字段和抖音 JSON 参数（端口、房间号、UID、心跳、槽位等）")
+        except ValueError as exc:
+            messagebox.showerror("输入错误", str(exc))
         except OSError as exc:
             messagebox.showerror("保存失败", str(exc))
             return

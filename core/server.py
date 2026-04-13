@@ -33,6 +33,27 @@ DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 9816
 MAX_QUEUE_ARCHIVE_SLOTS = 10
 DEFAULT_PLATFORM = "bilibili"
+SUPPORTED_RUNTIME_PLATFORMS = (DEFAULT_PLATFORM, "douyin")
+RESERVED_RUNTIME_PLATFORMS = ("huya", "kuaishou", "douyu", "weixin_videohao")
+ALL_RUNTIME_PLATFORMS = SUPPORTED_RUNTIME_PLATFORMS + RESERVED_RUNTIME_PLATFORMS
+PLATFORM_DISPLAY_NAMES = {
+    "bilibili": "Bilibili",
+    "douyin": "Douyin",
+    "huya": "Huya",
+    "kuaishou": "Kuaishou",
+    "douyu": "Douyu",
+    "weixin_videohao": "WeChat Channels",
+}
+RESERVED_PLATFORM_SECTION_DEFAULT = {
+    "enabled": False,
+    "room_id": "",
+    "room_url": "",
+    "anchor_id": "",
+    "cookie": "",
+    "auth_token": "",
+    "notes": "",
+    "extra": {},
+}
 
 REPO_DIR = Path(__file__).resolve().parents[1]
 CORE_DIR = Path(__file__).resolve().parent  # bilipdj/core/
@@ -654,6 +675,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         },
         "extra_query": {},
     },
+    "huya": copy.deepcopy(RESERVED_PLATFORM_SECTION_DEFAULT),
+    "kuaishou": copy.deepcopy(RESERVED_PLATFORM_SECTION_DEFAULT),
+    "douyu": copy.deepcopy(RESERVED_PLATFORM_SECTION_DEFAULT),
+    "weixin_videohao": copy.deepcopy(RESERVED_PLATFORM_SECTION_DEFAULT),
     "qr_login": {
         "last_success_at": "",
         "qrcode_key": "",
@@ -725,7 +750,7 @@ def _normalize_bilibili_config(config: dict[str, Any]) -> dict[str, Any]:
 
 def _normalize_platform_name(value: Any) -> str:
     platform = str(value or DEFAULT_PLATFORM).strip().lower()
-    if platform not in {"bilibili", "douyin"}:
+    if platform not in ALL_RUNTIME_PLATFORMS:
         return DEFAULT_PLATFORM
     return platform
 
@@ -755,8 +780,14 @@ def _get_douyin_config(config: dict[str, Any] | None) -> dict[str, Any]:
     }
     merged["ws"] = {
         "auto_reconnect": bool(ws_cfg.get("auto_reconnect", defaults["ws"].get("auto_reconnect", True))),
-        "heartbeat_interval_seconds": float(ws_cfg.get("heartbeat_interval_seconds", defaults["ws"].get("heartbeat_interval_seconds", 5.0)) or 5.0),
-        "reconnect_delay_seconds": float(ws_cfg.get("reconnect_delay_seconds", defaults["ws"].get("reconnect_delay_seconds", 2.0)) or 2.0),
+        "heartbeat_interval_seconds": _to_float(
+            ws_cfg.get("heartbeat_interval_seconds", defaults["ws"].get("heartbeat_interval_seconds", 5.0)),
+            defaults["ws"].get("heartbeat_interval_seconds", 5.0),
+        ),
+        "reconnect_delay_seconds": _to_float(
+            ws_cfg.get("reconnect_delay_seconds", defaults["ws"].get("reconnect_delay_seconds", 2.0)),
+            defaults["ws"].get("reconnect_delay_seconds", 2.0),
+        ),
     }
     merged["live_info"] = {
         "room_id": str(live_info_cfg.get("room_id", defaults["live_info"].get("room_id", "")) or ""),
@@ -768,6 +799,30 @@ def _get_douyin_config(config: dict[str, Any] | None) -> dict[str, Any]:
     }
     merged["extra_query"] = dict(extra_query_cfg) if isinstance(extra_query_cfg, dict) else {}
     return merged
+
+
+def _get_reserved_platform_config(platform_key: str, config: dict[str, Any] | None) -> dict[str, Any]:
+    defaults = copy.deepcopy(RESERVED_PLATFORM_SECTION_DEFAULT)
+    if platform_key not in RESERVED_RUNTIME_PLATFORMS:
+        return defaults
+    if not isinstance(config, dict):
+        return defaults
+
+    raw = config.get(platform_key, {})
+    if not isinstance(raw, dict):
+        raw = {}
+    merged = _merge_config(defaults, raw)
+    extra_cfg = merged.get("extra", {})
+    return {
+        "enabled": bool(merged.get("enabled", defaults["enabled"])),
+        "room_id": str(merged.get("room_id", defaults["room_id"]) or ""),
+        "room_url": str(merged.get("room_url", defaults["room_url"]) or ""),
+        "anchor_id": str(merged.get("anchor_id", defaults["anchor_id"]) or ""),
+        "cookie": str(merged.get("cookie", defaults["cookie"]) or ""),
+        "auth_token": str(merged.get("auth_token", defaults["auth_token"]) or ""),
+        "notes": str(merged.get("notes", defaults["notes"]) or ""),
+        "extra": dict(extra_cfg) if isinstance(extra_cfg, dict) else {},
+    }
 
 
 def _get_platform_config_archive(config: dict[str, Any] | None) -> dict[str, int]:
@@ -788,8 +843,22 @@ def _normalize_runtime_platform_config(config: dict[str, Any]) -> dict[str, Any]
     normalized = _normalize_bilibili_config(config)
     normalized["platform"] = _normalize_platform_name(normalized.get("platform", DEFAULT_PLATFORM))
     normalized["douyin"] = _get_douyin_config(normalized)
+    for platform_key in RESERVED_RUNTIME_PLATFORMS:
+        normalized[platform_key] = _get_reserved_platform_config(platform_key, normalized)
     normalized["platform_config_archive"] = _get_platform_config_archive(normalized)
     return normalized
+
+
+def _build_platform_config_payload(config: dict[str, Any] | None) -> dict[str, Any]:
+    normalized = _normalize_runtime_platform_config(config if isinstance(config, dict) else {})
+    payload = {
+        "platform": normalized["platform"],
+        "bilibili": dict(normalized["bilibili"]),
+        "douyin": copy.deepcopy(normalized["douyin"]),
+    }
+    for platform_key in RESERVED_RUNTIME_PLATFORMS:
+        payload[platform_key] = copy.deepcopy(normalized.get(platform_key, RESERVED_PLATFORM_SECTION_DEFAULT))
+    return payload
 
 
 def _get_anchor_uid_for_platform(config: dict[str, Any] | None) -> int:
@@ -805,6 +874,9 @@ def _get_anchor_uid_for_platform(config: dict[str, Any] | None) -> int:
                 if value > 0:
                     return value
         return 0
+    if platform in RESERVED_RUNTIME_PLATFORMS:
+        reserved_cfg = _get_reserved_platform_config(platform, config)
+        return _to_int(reserved_cfg.get("anchor_id", 0), 0)
     return _to_int(_get_bilibili_config(config).get("uid", 0), 0)
 
 
@@ -814,11 +886,94 @@ def _get_runtime_platform(config: dict[str, Any] | None) -> str:
     return _normalize_platform_name(config.get("platform", DEFAULT_PLATFORM))
 
 
+class ReservedPlatformRelay(threading.Thread):
+    def __init__(self, server: BackendServer, platform: str) -> None:
+        super().__init__(name=f"{platform}-danmu-relay", daemon=True)
+        self.server = server
+        self.platform = platform
+        self.logger = server.logger
+        self._stop_event = threading.Event()
+        self._reconnect_event = threading.Event()
+        self._status_lock = threading.Lock()
+        self._last_disconnect_at = ""
+        self._last_disconnect_reason = ""
+        self._last_status_signature: tuple[str, str] | None = None
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        self._reconnect_event.set()
+
+    def request_reconnect(self) -> None:
+        self._reconnect_event.set()
+
+    def _emit_status(self, status: str, *, message: str) -> None:
+        signature = (status, message)
+        if signature == self._last_status_signature:
+            return
+        self._last_status_signature = signature
+        self.server.ws_hub.broadcast_json(
+            None,
+            {
+                "type": "PDJ_STATUS",
+                "status": status,
+                "platform": self.platform,
+                "message": message,
+                "reserved": True,
+            },
+        )
+
+    def _mark_disconnected(self, reason: str) -> None:
+        with self._status_lock:
+            self._last_disconnect_at = dt.datetime.now(dt.timezone.utc).isoformat()
+            self._last_disconnect_reason = reason
+
+    def get_runtime_status(self) -> dict[str, Any]:
+        with self._status_lock:
+            last_disconnect_at = self._last_disconnect_at
+            last_disconnect_reason = self._last_disconnect_reason
+        return {
+            "platform": self.platform,
+            "connected": False,
+            "last_packet_at": "",
+            "last_connect_at": "",
+            "last_disconnect_at": last_disconnect_at,
+            "last_disconnect_reason": last_disconnect_reason,
+            "idle_seconds": None,
+            "roomid": 0,
+            "host": "",
+            "port": 0,
+            "transport": "",
+            "auth_uid": 0,
+        }
+
+    def run(self) -> None:
+        display_name = PLATFORM_DISPLAY_NAMES.get(self.platform, self.platform)
+        while not self._stop_event.is_set():
+            active_platform = _get_runtime_platform(getattr(self.server, "runtime_config", {}))
+            if active_platform != self.platform:
+                self._emit_status(
+                    "danmu_waiting_platform",
+                    message=f"platform is not {self.platform}",
+                )
+                self._reconnect_event.wait(1.0)
+                self._reconnect_event.clear()
+                continue
+
+            reason = f"{display_name} relay is reserved but not implemented yet"
+            self._mark_disconnected(reason)
+            should_log = self._last_status_signature != ("danmu_platform_reserved", reason)
+            self._emit_status("danmu_platform_reserved", message=reason)
+            if should_log:
+                self.logger.warning(reason)
+            self._reconnect_event.wait(3.0)
+            self._reconnect_event.clear()
+
+
 def _current_relay_platform(relay: Any) -> str:
     if relay is None:
         return ""
     platform = str(getattr(relay, "platform", "") or "").strip().lower()
-    if platform in {"bilibili", "douyin"}:
+    if platform in ALL_RUNTIME_PLATFORMS:
         return platform
     if isinstance(relay, bilibili_protocol.BilibiliDanmuRelay):
         return "bilibili"
@@ -831,6 +986,8 @@ def _create_danmu_relay(server: BackendServer) -> Any:
     platform = _get_runtime_platform(getattr(server, "runtime_config", {}))
     if platform == "douyin":
         return douyin_protocol.DouyinDanmuRelay(server)
+    if platform in RESERVED_RUNTIME_PLATFORMS:
+        return ReservedPlatformRelay(server, platform)
     return bilibili_protocol.BilibiliDanmuRelay(server)
 
 
@@ -939,25 +1096,49 @@ def platform_config_path(slot: int) -> Path:
     return PD_DIR / f"pingtai_config_{normalized}.yaml"
 
 
+def _render_reserved_platform_yaml_block(platform_key: str, payload: dict[str, Any]) -> str:
+    extra_cfg = payload.get("extra", {}) if isinstance(payload, dict) else {}
+    extra_lines: list[str] = []
+    if isinstance(extra_cfg, dict):
+        for key, value in extra_cfg.items():
+            if not isinstance(key, str):
+                continue
+            if isinstance(value, bool):
+                rendered = "true" if value else "false"
+            elif isinstance(value, (int, float)):
+                rendered = str(value)
+            elif value is None:
+                rendered = "null"
+            else:
+                rendered = _yaml_quote_string(value)
+            extra_lines.append(f"    {key}: {rendered}")
+    extra_block = "\n".join(extra_lines)
+    return f"""{platform_key}:
+  enabled: {'true' if bool(payload.get('enabled', False)) else 'false'}
+  room_id: {_yaml_quote_string(payload.get('room_id', ''))}
+  room_url: {_yaml_quote_string(payload.get('room_url', ''))}
+  anchor_id: {_yaml_quote_string(payload.get('anchor_id', ''))}
+  cookie: {_yaml_quote_string(payload.get('cookie', ''))}
+  auth_token: {_yaml_quote_string(payload.get('auth_token', ''))}
+  notes: {_yaml_quote_string(payload.get('notes', ''))}
+  extra:
+{extra_block if extra_block else '    # reserved for future platform-specific fields'}"""
+
+
 def _default_platform_slot_payload(seed: dict[str, Any] | None = None) -> dict[str, Any]:
-    base = {
-        "platform": DEFAULT_PLATFORM,
-        "bilibili": copy.deepcopy(DEFAULT_CONFIG.get("bilibili", {})),
-        "douyin": copy.deepcopy(DEFAULT_CONFIG.get("douyin", {})),
-    }
+    base = _build_platform_config_payload(DEFAULT_CONFIG)
     merged_seed = _merge_config(base, seed) if isinstance(seed, dict) else base
-    normalized = _normalize_runtime_platform_config(merged_seed)
-    return {
-        "platform": normalized["platform"],
-        "bilibili": dict(normalized["bilibili"]),
-        "douyin": copy.deepcopy(normalized["douyin"]),
-    }
+    return _build_platform_config_payload(merged_seed)
 
 
 def _render_platform_slot_yaml(payload: dict[str, Any]) -> str:
     normalized = _default_platform_slot_payload(payload)
     bilibili_cfg = normalized.get("bilibili", {})
     douyin_cfg = normalized.get("douyin", {})
+    reserved_blocks = "\n\n".join(
+        _render_reserved_platform_yaml_block(platform_key, normalized.get(platform_key, {}))
+        for platform_key in RESERVED_RUNTIME_PLATFORMS
+    )
     douyin_bootstrap_cfg = douyin_cfg.get("bootstrap", {}) if isinstance(douyin_cfg, dict) else {}
     douyin_ws_cfg = douyin_cfg.get("ws", {}) if isinstance(douyin_cfg, dict) else {}
     douyin_live_info_cfg = douyin_cfg.get("live_info", {}) if isinstance(douyin_cfg, dict) else {}
@@ -995,8 +1176,8 @@ douyin:
     internal_ext: {_yaml_quote_string(douyin_bootstrap_cfg.get('internal_ext', ''))}
   ws:
     auto_reconnect: {'true' if bool(douyin_ws_cfg.get('auto_reconnect', True)) else 'false'}
-    heartbeat_interval_seconds: {float(douyin_ws_cfg.get('heartbeat_interval_seconds', 5.0) or 5.0)}
-    reconnect_delay_seconds: {float(douyin_ws_cfg.get('reconnect_delay_seconds', 2.0) or 2.0)}
+    heartbeat_interval_seconds: {_to_float(douyin_ws_cfg.get('heartbeat_interval_seconds', 5.0), 5.0)}
+    reconnect_delay_seconds: {_to_float(douyin_ws_cfg.get('reconnect_delay_seconds', 2.0), 2.0)}
   live_info:
     room_id: {_yaml_quote_string(douyin_live_info_cfg.get('room_id', ''))}
     user_id: {_yaml_quote_string(douyin_live_info_cfg.get('user_id', ''))}
@@ -1006,6 +1187,8 @@ douyin:
     ttwid: {_yaml_quote_string(douyin_live_info_cfg.get('ttwid', ''))}
   extra_query:
 {douyin_extra_query_block if douyin_extra_query_block else '    # optional websocket query overrides'}
+
+{reserved_blocks}
 """
 
 
@@ -1057,7 +1240,10 @@ def ensure_runtime_layout() -> None:
 
     raw_config = _merge_config(DEFAULT_CONFIG, _read_raw_config())
     queue_archive_cfg = raw_config.get("queue_archive", {})
-    active_slot = max(1, min(MAX_QUEUE_ARCHIVE_SLOTS, int(queue_archive_cfg.get("active_slot", 1) or 1)))
+    active_slot = max(
+        1,
+        min(MAX_QUEUE_ARCHIVE_SLOTS, _to_int(queue_archive_cfg.get("active_slot", 1), 1)),
+    )
     if not QUEUE_STATE_PATH.exists():
         QUEUE_STATE_PATH.write_text(
             json.dumps({"next_slot": 1, "active_slot": active_slot}, ensure_ascii=False, indent=2),
@@ -1087,10 +1273,12 @@ def load_config() -> dict[str, Any]:
     merged = _normalize_runtime_platform_config(_merge_config(DEFAULT_CONFIG, raw_config))
     platform_archive_cfg = merged.get("platform_config_archive", {})
     active_platform_slot = max(1, min(MAX_QUEUE_ARCHIVE_SLOTS, _to_int(platform_archive_cfg.get("active_slot", 1), 1)))
-    slot_payload = load_platform_config_slot(active_platform_slot)
+    slot_payload = _build_platform_config_payload(load_platform_config_slot(active_platform_slot))
     merged["platform"] = slot_payload["platform"]
     merged["bilibili"] = dict(slot_payload["bilibili"])
     merged["douyin"] = copy.deepcopy(slot_payload["douyin"])
+    for platform_key in RESERVED_RUNTIME_PLATFORMS:
+        merged[platform_key] = copy.deepcopy(slot_payload.get(platform_key, RESERVED_PLATFORM_SECTION_DEFAULT))
     merged["api"] = dict(slot_payload["bilibili"])
     merged["platform_config_archive"] = {"slots": MAX_QUEUE_ARCHIVE_SLOTS, "active_slot": active_platform_slot}
     merged["myjs"] = _normalize_myjs_config(merged.get("myjs", {}))
@@ -1105,6 +1293,10 @@ def save_config(config: dict[str, Any], *, preserve_legacy_api_schema: bool | No
     platform_name = _normalize_platform_name(config.get("platform", DEFAULT_PLATFORM))
     bilibili_cfg = config.get("bilibili", {})
     douyin_cfg = config.get("douyin", {})
+    reserved_platform_cfgs = {
+        platform_key: _get_reserved_platform_config(platform_key, config)
+        for platform_key in RESERVED_RUNTIME_PLATFORMS
+    }
     qr_login = config.get("qr_login", {})
     callback_cfg = config.get("callback", {})
     myjs_cfg = config.get("myjs", {})
@@ -1191,6 +1383,10 @@ def save_config(config: dict[str, Any], *, preserve_legacy_api_schema: bool | No
                 rendered = _yaml_quote_string(value)
             douyin_extra_query_lines.append(f"    {key}: {rendered}")
     douyin_extra_query_block = "\n".join(douyin_extra_query_lines)
+    reserved_platform_block = "\n\n".join(
+        _render_reserved_platform_yaml_block(platform_key, reserved_platform_cfgs.get(platform_key, {}))
+        for platform_key in RESERVED_RUNTIME_PLATFORMS
+    )
     douyin_live_id = _yaml_quote_string(douyin_cfg.get("live_id", "") if isinstance(douyin_cfg, dict) else "")
     douyin_cookie = _yaml_quote_string(douyin_cfg.get("cookie", "") if isinstance(douyin_cfg, dict) else "")
     douyin_signature = _yaml_quote_string(douyin_cfg.get("signature", "") if isinstance(douyin_cfg, dict) else "")
@@ -1217,13 +1413,13 @@ def save_config(config: dict[str, Any], *, preserve_legacy_api_schema: bool | No
     content = f"""# Danmuji 全局配置
 server:
   host: {server.get('host', DEFAULT_HOST)}
-  port: {int(server.get('port', DEFAULT_PORT))}
+  port: {_to_int(server.get('port', DEFAULT_PORT), DEFAULT_PORT)}
 
 platform: {platform_name}
 
 {bilibili_section_name}:
-  roomid: {int(bilibili_cfg.get('roomid', 0))}
-  uid: {int(bilibili_cfg.get('uid', 0))}
+  roomid: {_to_int(bilibili_cfg.get('roomid', 0), 0)}
+  uid: {_to_int(bilibili_cfg.get('uid', 0), 0)}
   cookie: {cookie_text}
 
 douyin:
@@ -1236,8 +1432,8 @@ douyin:
     internal_ext: {douyin_internal_ext}
   ws:
     auto_reconnect: {'true' if bool(douyin_ws_cfg.get('auto_reconnect', True)) else 'false'}
-    heartbeat_interval_seconds: {float(douyin_ws_cfg.get('heartbeat_interval_seconds', 5.0) or 5.0)}
-    reconnect_delay_seconds: {float(douyin_ws_cfg.get('reconnect_delay_seconds', 2.0) or 2.0)}
+    heartbeat_interval_seconds: {_to_float(douyin_ws_cfg.get('heartbeat_interval_seconds', 5.0), 5.0)}
+    reconnect_delay_seconds: {_to_float(douyin_ws_cfg.get('reconnect_delay_seconds', 2.0), 2.0)}
   live_info:
     room_id: {douyin_room_id}
     user_id: {douyin_user_id}
@@ -1248,11 +1444,13 @@ douyin:
   extra_query:
 {douyin_extra_query_block if douyin_extra_query_block else '    # optional websocket query overrides'}
 
+{reserved_platform_block}
+
 qr_login:
   # 最近一次扫码成功信息（由 /api/bili/qr/poll 自动写入）
   last_success_at: {qr_last_success_at}
   qrcode_key: {qr_qrcode_key}
-  poll_code: {int(qr_login.get('poll_code', -1))}
+  poll_code: {_to_int(qr_login.get('poll_code', -1), -1)}
   message: {qr_message}
   cookie: {qr_cookie}
 
@@ -1262,7 +1460,7 @@ myjs:
 
 ui:
   # 页面启动提示层展示时长（秒）
-  startup_splash_seconds: {max(0, int(ui_cfg.get('startup_splash_seconds', 5)))}
+  startup_splash_seconds: {max(0, _to_int(ui_cfg.get('startup_splash_seconds', 5), 5))}
   # GUI 启动时是否自动拉起后端
   auto_start_backend: {'true' if bool(ui_cfg.get('auto_start_backend', False)) else 'false'}
   # GUI 当前语言
@@ -1276,24 +1474,24 @@ logging:
   # 支持 DEBUG / INFO / WARNING / ERROR / CRITICAL
   level: {str(logging_cfg.get('level', 'INFO')).upper()}
   # 每次启动默认清理多少天前日志
-  retention_days: {int(logging_cfg.get('retention_days', 7))}
+  retention_days: {_to_int(logging_cfg.get('retention_days', 7), 7)}
 
 queue_archive:
   enabled: {'true' if bool(queue_archive.get('enabled', True)) else 'false'}
   # 最大存档位数（固定为 {MAX_QUEUE_ARCHIVE_SLOTS}，勿修改）
   slots: {MAX_QUEUE_ARCHIVE_SLOTS}
   # 当前活动存档槽（1~{MAX_QUEUE_ARCHIVE_SLOTS}，由 GUI 写入）
-  active_slot: {min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(queue_archive.get('active_slot', 1))))}
+  active_slot: {min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, _to_int(queue_archive.get('active_slot', 1), 1)))}
 
 platform_config_archive:
   slots: {MAX_QUEUE_ARCHIVE_SLOTS}
-  active_slot: {min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(platform_archive.get('active_slot', 1))))}
+  active_slot: {min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, _to_int(platform_archive.get('active_slot', 1), 1)))}
 
 callback:
   enabled: {'true' if bool(callback_cfg.get('enabled', False)) else 'false'}
   url: {callback_url}
   auth_token: {callback_auth_token}
-  timeout_seconds: {max(1, int(callback_cfg.get('timeout_seconds', 5)))}
+  timeout_seconds: {max(1, _to_int(callback_cfg.get('timeout_seconds', 5), 5))}
 
 quanxian:
 {quanxian_block}
@@ -1319,7 +1517,7 @@ def _cleanup_old_logs(retention_days: int) -> None:
 
 def setup_logging(config: dict[str, Any]) -> logging.Logger:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    retention_days = int(config.get("logging", {}).get("retention_days", 7))
+    retention_days = _to_int(config.get("logging", {}).get("retention_days", 7), 7)
     _cleanup_old_logs(retention_days)
 
     level_name = str(config.get("logging", {}).get("level", "INFO")).upper()
@@ -2605,6 +2803,13 @@ def _to_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _to_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 
 def _dispatch_login_callback(
     callback_cfg: dict[str, Any],
@@ -2627,7 +2832,7 @@ def _dispatch_login_callback(
         "bilibili": bilibili_data,
     }
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    timeout_seconds = max(1, int(callback_cfg.get("timeout_seconds", 5)))
+    timeout_seconds = max(1, _to_int(callback_cfg.get("timeout_seconds", 5), 5))
     headers = {
         "Content-Type": "application/json; charset=utf-8",
         "User-Agent": "DanmujiBackend/0.3",
@@ -2807,20 +3012,24 @@ class ApiHandler(BaseHTTPRequestHandler):
 
     def _build_basic_config_payload(self) -> dict[str, Any]:
         cfg = self.server.runtime_config
-        bilibili_cfg = _get_bilibili_config(cfg)
-        douyin_cfg = _get_douyin_config(cfg)
+        platform_payload = _build_platform_config_payload(cfg)
+        bilibili_cfg = platform_payload["bilibili"]
+        douyin_cfg = platform_payload["douyin"]
         platform_archive = _get_platform_config_archive(cfg)
-        return {
+        payload = {
             "roomid": int(bilibili_cfg.get("roomid", 0)),
             "uid": int(bilibili_cfg.get("uid", 0)),
             "bilibili": bilibili_cfg,
-            "platform": _get_runtime_platform(cfg),
+            "platform": platform_payload["platform"],
             "douyin": douyin_cfg,
             "platform_config_archive": {
                 "slots": MAX_QUEUE_ARCHIVE_SLOTS,
                 "active_slot": int(platform_archive.get("active_slot", 1)),
             },
         }
+        for platform_key in RESERVED_RUNTIME_PLATFORMS:
+            payload[platform_key] = copy.deepcopy(platform_payload.get(platform_key, RESERVED_PLATFORM_SECTION_DEFAULT))
+        return payload
 
     def _build_login_config_payload(self) -> dict[str, Any]:
         payload = self._build_basic_config_payload()
@@ -2865,6 +3074,7 @@ class ApiHandler(BaseHTTPRequestHandler):
         save_platform_config_slot(
             active_platform_slot,
             {
+                **_build_platform_config_payload(updated),
                 "platform": slot_payload.get("platform", _get_runtime_platform(updated)),
                 "bilibili": slot_bilibili,
                 "douyin": slot_payload.get("douyin", _get_douyin_config(updated)),
@@ -2950,22 +3160,14 @@ class ApiHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/config":
             cfg = self.server.runtime_config
-            bilibili_cfg = _get_bilibili_config(cfg)
-            douyin_cfg = _get_douyin_config(cfg)
+            platform_payload = self._build_basic_config_payload()
+            bilibili_cfg = platform_payload["bilibili"]
             self._write_json(
                 {
+                    **platform_payload,
                     "roomid": int(bilibili_cfg.get("roomid", 0)),
                     "uid": int(bilibili_cfg.get("uid", 0)),
                     "cookie": str(bilibili_cfg.get("cookie", "")),
-                    "platform": _get_runtime_platform(cfg),
-                    "bilibili": bilibili_cfg,
-                    "douyin": douyin_cfg,
-                    "platform_config_archive": {
-                        "slots": MAX_QUEUE_ARCHIVE_SLOTS,
-                        "active_slot": int(
-                            _get_platform_config_archive(cfg).get("active_slot", 1)
-                        ),
-                    },
                     "qr_login": cfg.get("qr_login", {}),
                     "callback": cfg.get("callback", {}),
                     "myjs": cfg.get("myjs", {}),
@@ -3156,8 +3358,8 @@ class ApiHandler(BaseHTTPRequestHandler):
             incoming_bilibili = payload.get("bilibili", {})
             if not isinstance(incoming_bilibili, dict):
                 incoming_bilibili = {}
-            roomid = int(incoming_bilibili.get("roomid", payload.get("roomid", 0)))
-            uid = int(incoming_bilibili.get("uid", payload.get("uid", 0)))
+            roomid = _to_int(incoming_bilibili.get("roomid", payload.get("roomid", 0)), 0)
+            uid = _to_int(incoming_bilibili.get("uid", payload.get("uid", 0)), 0)
             cookie = str(incoming_bilibili.get("cookie", payload.get("cookie", ""))).strip()
             incoming_douyin = payload.get("douyin", {})
             if not isinstance(incoming_douyin, dict):
@@ -3166,6 +3368,19 @@ class ApiHandler(BaseHTTPRequestHandler):
                 douyin_payload = _get_douyin_config({"douyin": incoming_douyin})
             else:
                 douyin_payload = _get_douyin_config(current_cfg)
+            reserved_platform_payloads: dict[str, dict[str, Any]] = {}
+            for platform_key in RESERVED_RUNTIME_PLATFORMS:
+                incoming_reserved = payload.get(platform_key, None)
+                if isinstance(incoming_reserved, dict):
+                    reserved_platform_payloads[platform_key] = _get_reserved_platform_config(
+                        platform_key,
+                        {platform_key: incoming_reserved},
+                    )
+                else:
+                    reserved_platform_payloads[platform_key] = _get_reserved_platform_config(
+                        platform_key,
+                        current_cfg,
+                    )
             platform_archive_payload = payload.get("platform_config_archive", {})
             if not isinstance(platform_archive_payload, dict):
                 platform_archive_payload = {}
@@ -3181,7 +3396,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             callback_enabled = bool(callback_payload.get("enabled", False)) if isinstance(callback_payload, dict) else False
             callback_url = str(callback_payload.get("url", "")).strip() if isinstance(callback_payload, dict) else ""
             callback_auth_token = str(callback_payload.get("auth_token", "")).strip() if isinstance(callback_payload, dict) else ""
-            callback_timeout = int(callback_payload.get("timeout_seconds", 5)) if isinstance(callback_payload, dict) else 5
+            callback_timeout = _to_int(callback_payload.get("timeout_seconds", 5), 5) if isinstance(callback_payload, dict) else 5
             incoming_myjs = payload.get("myjs", {})
             myjs_payload = _normalize_myjs_config(incoming_myjs) if isinstance(incoming_myjs, dict) else None
             incoming_quanxian = payload.get("quanxian", {})
@@ -3224,6 +3439,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                     "platform": incoming_platform,
                     "bilibili": {"roomid": roomid, "uid": uid, "cookie": cookie},
                     "douyin": douyin_payload,
+                    **reserved_platform_payloads,
                 },
             )
 
@@ -3233,6 +3449,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                     "platform": incoming_platform,
                     "bilibili": {"roomid": roomid, "uid": uid, "cookie": cookie},
                     "douyin": douyin_payload,
+                    **reserved_platform_payloads,
                     "platform_config_archive": {
                         "slots": MAX_QUEUE_ARCHIVE_SLOTS,
                         "active_slot": active_platform_slot,
@@ -3276,6 +3493,10 @@ class ApiHandler(BaseHTTPRequestHandler):
                     "is_login": bool(login_state.get("is_login", False)),
                     "bilibili": updated.get("bilibili", {}),
                     "douyin": updated.get("douyin", {}),
+                    **{
+                        platform_key: updated.get(platform_key, {})
+                        for platform_key in RESERVED_RUNTIME_PLATFORMS
+                    },
                     "platform_config_archive": updated.get("platform_config_archive", {}),
                     "myjs": updated.get("myjs", {}),
                     "quanxian": updated.get("quanxian", {}),
