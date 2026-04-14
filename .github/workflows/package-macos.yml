@@ -1,0 +1,91 @@
+name: Package macOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: '手动输入要发布的标签（示例：v1.0.0）'
+        required: true
+        type: string
+      arch:
+        description: '目标架构（arm64 = Apple Silicon / x86_64 = Intel）'
+        required: true
+        type: choice
+        options:
+          - arm64
+          - x86_64
+        default: arm64
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: ${{ inputs.arch == 'arm64' && 'macos-14' || 'macos-13' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        id: resolve_tag
+        shell: bash
+        run: |
+          TAG_NAME="${{ inputs.tag_name }}"
+
+          if [[ ! "$TAG_NAME" =~ ^v[0-9A-Za-z._-]+$ ]]; then
+            echo "标签格式不合法：$TAG_NAME（需以 v 开头，例如 v1.0.0）"
+            exit 1
+          fi
+
+          ARCH="${{ inputs.arch }}"
+          ASSET_NAME="bilibili-danmuji-macos-${ARCH}-${TAG_NAME}.tar.gz"
+
+          echo "tag_name=$TAG_NAME"     >> "$GITHUB_OUTPUT"
+          echo "arch=$ARCH"             >> "$GITHUB_OUTPUT"
+          echo "asset_name=$ASSET_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Debug Python env
+        run: |
+          python3 -V
+          python3 -c "import sys; print(sys.executable)"
+          python3 -c "import tkinter; print('tkinter OK')"
+          pip list | grep -i "^http " && echo "WARNING: http package installed" || echo "http package not installed (OK)"
+
+      - name: Build macOS executable
+        run: |
+          chmod +x package-macos-local.sh
+          ./package-macos-local.sh --install-deps
+
+      - name: Create release tarball
+        run: |
+          rm -rf _package
+          mkdir _package
+          cp -R dist/bilipdj/* _package/
+          [[ -f README.md ]]          && cp README.md          _package/
+          [[ -f core/quanxian.yaml ]] && cp core/quanxian.yaml _package/
+          [[ -f core/kaiguan.yaml  ]] && cp core/kaiguan.yaml  _package/
+          tar -czf "${{ steps.resolve_tag.outputs.asset_name }}" -C _package .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bilibili-danmuji-macos-${{ steps.resolve_tag.outputs.arch }}-${{ steps.resolve_tag.outputs.tag_name }}
+          path: ${{ steps.resolve_tag.outputs.asset_name }}
+
+      - name: Create / update GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ steps.resolve_tag.outputs.tag_name }}
+          commit: ${{ github.sha }}
+          name: ${{ steps.resolve_tag.outputs.tag_name }}
+          artifacts: ${{ steps.resolve_tag.outputs.asset_name }}
+          artifactErrorsFailBuild: true
+          allowUpdates: true
+          replacesArtifacts: true
+          generateReleaseNotes: true
