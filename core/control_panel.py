@@ -467,6 +467,7 @@ class ControlPanelApp:
         self._settings_hint_label: ttk.Label | None = None
         self._settings_canvas: tk.Canvas | None = None
         self._platform_hint_label: ttk.Label | None = None
+        self.ui_font_size_var = tk.StringVar(value="10")
 
         # --- 抖音参数获取 ---
         self.douyin_fetch_url_var = tk.StringVar(value="")
@@ -495,6 +496,7 @@ class ControlPanelApp:
         self._overlay_font_path = self._detect_overlay_font_path()
 
         self._build_ui()
+        self.ui_font_size_var.trace_add("write", lambda *_: self._apply_ui_font_size())
         self.load_from_file()
         self._append_log("[GUI] 初始化完成 — 后端尚未启动，请点击「启动后端」")
         if self.auto_start_var.get():
@@ -666,6 +668,34 @@ class ControlPanelApp:
         # 主题切换按钮文字
         if self._theme_btn is not None:
             self._theme_btn.configure(text="☀ 明亮" if dark else "🌙 暗夜")
+
+        self._apply_ui_font_size()
+
+    def _apply_ui_font_size(self) -> None:
+        try:
+            size = max(8, min(20, int(self.ui_font_size_var.get().strip() or 10)))
+        except ValueError:
+            size = 10
+        fn = "Microsoft YaHei UI" if sys.platform == "win32" else ("PingFang SC" if sys.platform == "darwin" else "Sans")
+        font = (fn, size)
+        font_bold = (fn, size, "bold")
+        style = ttk.Style(self.root)
+        style.configure("TLabel", font=font)
+        style.configure("TButton", font=font)
+        style.configure("TEntry", font=font)
+        style.configure("TCombobox", font=font)
+        style.configure("TCheckbutton", font=font)
+        style.configure("TRadiobutton", font=font)
+        style.configure("TNotebook.Tab", font=font)
+        style.configure("TLabelframe.Label", font=font_bold)
+        style.configure("Treeview", font=font, rowheight=size + 10)
+        style.configure("Treeview.Heading", font=font_bold)
+        if hasattr(self, "log_text"):
+            mono = "Consolas" if sys.platform == "win32" else ("Menlo" if sys.platform == "darwin" else "Monospace")
+            mono_font = (mono, size)
+            self.log_text.configure(font=mono_font)
+            self.log_text.tag_configure("ts", font=mono_font)
+            self.log_text.tag_configure("bracket", font=(mono, size, "bold"))
 
     def _toggle_theme(self) -> None:
         self._apply_theme(not self._dark_mode)
@@ -3347,6 +3377,15 @@ class ControlPanelApp:
             width=12,
         ).grid(row=4, column=1, sticky="w", pady=4)
 
+        ttk.Label(basic_frame, text="界面字体大小").grid(row=4, column=2, sticky="w", padx=(16, 0), pady=4)
+        ttk.Combobox(
+            basic_frame,
+            textvariable=self.ui_font_size_var,
+            values=["9", "10", "11", "12", "13", "14"],
+            state="readonly",
+            width=8,
+        ).grid(row=4, column=3, sticky="w", pady=4)
+
         self._settings_hint_label = ttk.Label(
             basic_frame,
             text="切换平台配置槽位后，会立即载入该槽位保存的平台和参数。",
@@ -3782,6 +3821,7 @@ class ControlPanelApp:
         self._set_overlay_settings(ui_cfg.get("overlay_window", DEFAULT_OVERLAY_SETTINGS))
         self.auto_start_var.set(bool(ui_cfg.get("auto_start_backend", False)))
         self.language_var.set(str(ui_cfg.get("language", "中文")))
+        self.ui_font_size_var.set(str(ui_cfg.get("ui_font_size", 10)))
         if self._overlay_window_alive():
             self._apply_overlay_settings_to_window()
             self._overlay_style = dict(self._load_style_data())
@@ -3852,6 +3892,7 @@ class ControlPanelApp:
                 "auto_start_backend": bool(self.auto_start_var.get()),
                 "language": self.language_var.get(),
                 "overlay_window": self._get_overlay_settings(),
+                "ui_font_size": max(8, min(20, int(self.ui_font_size_var.get().strip() or 10))),
             },
         }
 
