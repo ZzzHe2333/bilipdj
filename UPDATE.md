@@ -2,6 +2,27 @@
 
 ---
 
+## v0.4.1（2026-04-14）
+
+### 新功能
+- 设置页平台参数区添加可滚动 Canvas，抖音大量参数不再拥挤
+- 抖音参数支持从直播间链接一键获取（URL query 中 room_id 优先于 HTML 解析结果）
+- 新增用户教学文档 GUIDE.md（快速开始 / 界面导览 / B站/抖音接入 / 排队指令 / 常见问题）
+
+### 修复
+- **抖音弹幕"没有弹幕"根本原因修复**：
+  - `room_status` 正则增加 7 条兜底模式，覆盖不同页面结构
+  - 仅在明确 `offline`（status=4）时停止轮询，`unknown` 状态乐观继续连接
+  - `_load_runtime_cfg` 读取 `live_info` 预置字段（`room_id` / `ttwid` 等）作为 HTML 解析失败时的兜底
+  - `preset` 字段覆盖逻辑修复：`"0"` 也视为空值，不再阻止预置值生效
+- **`QueueArchiveManager` 竞态修复**：`_read_state` / `_write_state` / `get_active_slot` / `set_active_slot` 加 `threading.Lock` 保护，避免多线程并发读写状态 JSON 文件
+- **GUI 刷新线程积压修复**：队列 Tab 和黑名单 Tab 的定时刷新增加忙碌标志，避免前一次请求未完成时新线程叠加
+
+### 文档
+- `ai.md`、`README.md` 全量重写，同步当前所有功能
+
+---
+
 ## 2026-04-11（二次修订）UTC+08:00
 
 ### UI 科技感重设计（直角控件 + 霓虹主题）
