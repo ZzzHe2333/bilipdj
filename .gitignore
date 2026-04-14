@@ -42,6 +42,8 @@ MANIFEST
 *.spec
 !bilipdj_onedir.spec
 !paiduijitm.spec
+!bilipdj_onedir_mac.spec
+!paiduijitm_mac.spec
 core/ui/cdang_*.css
 
 # Installer logs
