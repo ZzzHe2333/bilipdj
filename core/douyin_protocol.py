@@ -97,14 +97,16 @@ def _safe_unescape(value: str) -> str:
 
 def _search_patterns(text: str, patterns: list[str]) -> str:
     for pattern in patterns:
-        match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
-        if not match:
-            continue
-        value = match.group("value") if "value" in match.groupdict() else match.group(1)
-        value = value.strip()
-        if "\\u" in value or '\\"' in value or "\\/" in value:
-            return _safe_unescape(value)
-        return html.unescape(value)
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE | re.DOTALL):
+            value = match.group("value") if "value" in match.groupdict() else match.group(1)
+            value = value.strip()
+            if "\\u" in value or '\\"' in value or "\\/" in value:
+                value = _safe_unescape(value)
+            else:
+                value = html.unescape(value)
+            if value in {"", "$undefined", "undefined", "null", "$null", "None"}:
+                continue
+            return value
     return ""
 
 
@@ -117,10 +119,31 @@ def normalize_live_id(raw_value: Any) -> str:
     match = re.search(r"live\.douyin\.com/(\d+)", text, flags=re.IGNORECASE)
     if match:
         return match.group(1)
+    match = re.search(r"web_rid(?:=|\\\":\\\")(?P<value>\d+)", text, flags=re.IGNORECASE)
+    if match:
+        return match.group("value")
     match = re.search(r"/(\d+)(?:\?|$)", text)
     if match:
         return match.group(1)
     return text
+
+
+def _looks_like_http_url(text: str) -> bool:
+    parsed = urllib.parse.urlparse(str(text or "").strip())
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _looks_like_douyin_short_url(text: str) -> bool:
+    parsed = urllib.parse.urlparse(str(text or "").strip())
+    host = parsed.netloc.lower()
+    return host in {"v.douyin.com", "iesdouyin.com"} or host.endswith(".v.douyin.com") or host.endswith(".iesdouyin.com")
+
+
+def _resolve_douyin_short_url(url: str, *, cookie: str = "", timeout: float = 12.0) -> str:
+    referer = "https://live.douyin.com/?from_nav=1"
+    req = urllib.request.Request(url, headers=build_douyin_live_headers(cookie, referer=referer))
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return str(resp.geturl() or "").strip()
 
 
 def extract_cookie_value(cookie_text: str, name: str) -> str:
@@ -155,9 +178,10 @@ def _extract_cookie_string(set_cookie_headers: list[str]) -> str:
 
 def map_room_status(room_status: Any) -> str:
     status = str(room_status or "").strip()
-    if status == "2":
+    lowered = status.lower()
+    if status == "2" or lowered in {"live", "normal"}:
         return "live"
-    if status == "4":
+    if status == "4" or lowered in {"offline", "ended"}:
         return "offline"
     if status:
         return f"unknown:{status}"
@@ -186,6 +210,8 @@ def parse_douyin_live_info_html(html_text: str, live_id: str) -> DouyinLiveInfo:
             r'\\"roomId\\":\\"(?P<value>\d+)\\"',
             r'"roomId"\s*:\s*"(?P<value>\d+)"',
             r'"room_id"\s*:\s*"(?P<value>\d+)"',
+            r'\\"web_rid\\":\\"(?P<value>\d+)\\"',
+            r'"web_rid"\s*:\s*"(?P<value>\d+)"',
         ],
     )
     user_unique_id = _search_patterns(
@@ -232,7 +258,11 @@ def parse_douyin_live_info_html(html_text: str, live_id: str) -> DouyinLiveInfo:
             r'\\"room\\":\{[^}]{0,400}\\"status\\":(?P<value>\d+)[,}]',
             r'"room"\s*:\s*\{[^}]{0,400}"status"\s*:\s*(?P<value>\d+)[,}]',
             # liveStatus / live_status 兜底
+            r'\\"liveStatus\\":\\"(?P<value>[^"]+)\\"',
+            r'"liveStatus"\s*:\s*"(?P<value>[^"]+)"',
             r'"liveStatus"\s*:\s*"?(?P<value>\d+)"?',
+            r'\\"live_status\\":\\"(?P<value>[^"]+)\\"',
+            r'"live_status"\s*:\s*"(?P<value>[^"]+)"',
             r'"live_status"\s*:\s*"?(?P<value>\d+)"?',
         ],
     )
@@ -262,7 +292,20 @@ def parse_douyin_live_info_html(html_text: str, live_id: str) -> DouyinLiveInfo:
 
 
 def fetch_douyin_live_info(live_id: str, *, cookie: str = "", timeout: float = 12.0) -> DouyinLiveInfo:
-    normalized_live_id = normalize_live_id(live_id)
+    raw_input = str(live_id or "").strip()
+    resolved_short_url = ""
+    resolved_sec_uid = ""
+    normalized_live_id = normalize_live_id(raw_input)
+    if _looks_like_douyin_short_url(raw_input):
+        resolved_short_url = _resolve_douyin_short_url(raw_input, cookie=cookie, timeout=timeout)
+        normalized_live_id = normalize_live_id(resolved_short_url)
+        parsed_short_url = urllib.parse.urlparse(resolved_short_url)
+        short_query = urllib.parse.parse_qs(parsed_short_url.query)
+        for key in ("sec_user_id", "sec_uid", "secuid"):
+            values = short_query.get(key) or []
+            if values and str(values[0]).strip():
+                resolved_sec_uid = str(values[0]).strip()
+                break
     if not normalized_live_id:
         raise DouyinProtocolError("Empty Douyin live_id")
     referer = "https://live.douyin.com/?from_nav=1"
@@ -273,6 +316,8 @@ def fetch_douyin_live_info(live_id: str, *, cookie: str = "", timeout: float = 1
         set_cookie_headers = resp.headers.get_all("Set-Cookie") or []
     info = parse_douyin_live_info_html(html_text, normalized_live_id)
     merged_cookie = merge_cookie_strings(cookie, _extract_cookie_string(set_cookie_headers))
+    if not info.sec_uid and resolved_sec_uid:
+        info.sec_uid = resolved_sec_uid
     if not info.ttwid:
         info.ttwid = extract_cookie_value(merged_cookie, "ttwid")
     return info
@@ -644,14 +689,18 @@ class DouyinDanmuRelay(threading.Thread):
             return
 
         info = fetch_douyin_live_info(cfg["live_id"], cookie=cfg["cookie"])
-        # 预置字段：config 里由"获取参数"或手动填写写入的值优先级高于 HTML 解析结果
-        if cfg["preset_room_id"] and not info.room_id:
+        # 预置字段：config 里由"获取参数"或手动填写写入的值作为兜底
+        # 判断 HTML 解析结果是否为空（空字符串或 "0" 均视为无效）
+        def _empty(v: str) -> bool:
+            return not v or v == "0"
+
+        if cfg["preset_room_id"] and _empty(info.room_id):
             info.room_id = cfg["preset_room_id"]
-        if cfg["preset_user_unique_id"] and not info.user_unique_id:
+        if cfg["preset_user_unique_id"] and _empty(info.user_unique_id):
             info.user_unique_id = cfg["preset_user_unique_id"]
-        if cfg["preset_user_id"] and not info.user_id:
+        if cfg["preset_user_id"] and _empty(info.user_id):
             info.user_id = cfg["preset_user_id"]
-        if cfg["preset_anchor_id"] and not info.anchor_id:
+        if cfg["preset_anchor_id"] and _empty(info.anchor_id):
             info.anchor_id = cfg["preset_anchor_id"]
         if cfg["preset_sec_uid"] and not info.sec_uid:
             info.sec_uid = cfg["preset_sec_uid"]

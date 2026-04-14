@@ -1,7 +1,7 @@
 # 弹幕排队姬（Bilipdj）
 
-弹幕排队姬是一个面向 Bilibili / 抖音直播间的弹幕排队管理工具。
-排队逻辑由 **Python 后端统一处理**，前端页面只负责展示，避免前后端重复计算导致的不一致问题。
+弹幕排队姬是一个面向 **Bilibili / 抖音**直播间的弹幕排队管理工具。
+排队逻辑由 Python 后端统一处理，前端页面只负责展示，避免前后端计算不一致。
 
 ## 核心功能
 
@@ -10,9 +10,9 @@
 - **黑名单机制**：黑名单用户无法触发任何指令，拦截行为写入日志
 - **功能开关**：总开关与分项开关（官服 / B 服 / 超级 / 米服 / 舰长插队等，共 9 项）
 - **排队存档**：10 个槽位，支持切换、恢复、清空；每条记录保留最后操作时间
-- **多平台支持**：Bilibili（WebSocket 二进制协议）、抖音（HTTPS 轮询）
-- **GUI 控制台**：10 个标签页，涵盖日志、队列、黑名单、设置、权限、开关、性能、样式等
-- **透明弹窗**：支持 OBS 窗口捕获、拖拽移动、置顶控制，由主 GUI 统一管控
+- **多平台支持**：Bilibili（WebSocket 二进制协议）、抖音（HTTPS 轮询 + Protobuf）
+- **GUI 控制台**：10 个标签页，涵盖日志、队列、黑名单、设置、权限、开关、性能、样式等；暗夜/明亮双主题
+- **透明弹窗**：支持 OBS 窗口捕获、拖拽移动、置顶控制
 
 ## 目录结构（主要）
 
@@ -32,16 +32,19 @@ bilipdj/
 │   └── cd/                     # 排队存档 CSV + 状态 JSON
 ├── bilipdj_onedir.spec         # PyInstaller 主程序配置
 ├── paiduijitm.spec             # PyInstaller 透明弹窗配置（onefile）
-└── package-windows-local.ps1   # Windows 本地打包脚本
+├── package-windows-local.ps1   # Windows 本地打包脚本
+├── README.md
+├── UPDATE.md
+└── GUIDE.md                    # 用户教学文档
 ```
 
 ## 快速启动（源码运行）
 
-1. 进入项目目录（`bilipdj/` 子目录，本 README 所在位置）。
+1. 进入 `bilipdj/` 子目录（本 README 所在位置）。
 2. 安装依赖：
 
 ```bash
-pip install Pillow qrcode brotli psutil pyyaml
+pip install Pillow qrcode brotli psutil pyyaml protobuf
 ```
 
 3. 启动 GUI：
@@ -55,7 +58,7 @@ python core/control_panel.py
 - **配置页**（扫码登录）：`http://127.0.0.1:9816/config`
 - **展示页**（队列看板）：`http://127.0.0.1:9816/index`
 
-**透明弹窗（OBS 捕获）**：在 OBS 中添加「窗口捕获」，按标题 **排队透明弹窗** 选择窗口，勾选「允许透明」即可获得透明叠加效果。
+**透明弹窗（OBS 捕获）**：在 OBS 中添加「窗口捕获」，按标题 **排队透明弹窗** 选择窗口，勾选「允许透明」即可。
 
 ## 弹幕指令
 
@@ -92,6 +95,16 @@ python core/control_panel.py
 | `拉黑 [昵称]` | 加入黑名单 |
 | `取消拉黑 [昵称]` | 移出黑名单 |
 
+## 配置说明（简要）
+
+- `core/config.yaml`：直播间信息、日志、存档槽位、UI 参数
+- `core/quanxian.yaml`：权限名单（每行一个用户名）
+- `core/kaiguan.yaml`：9 项功能开关（布尔值）
+- `core/style.json`：队列展示颜色、字体、描边等
+
+关闭 `kaiguan.paidui` 后，除管理员命令外所有排队指令不处理；
+`恢复排队功能` 弹幕或在 GUI 开关页勾选可重新开启。
+
 ## 打包说明（Windows）
 
 | spec | 说明 | 产物 |
@@ -107,15 +120,6 @@ powershell -ExecutionPolicy Bypass -File .\package-windows-local.ps1 -InstallDep
 
 脚本会构建 `dist\bilipdj\main.exe` 并自动将 `dist\paiduijitm.exe` 复制至主程序目录。
 CI（`package-windows-x64.yml`）同样调用此脚本，将 onedir 打包成 zip 发布。
-
-## 配置说明（简要）
-
-- `core/config.yaml`：直播间信息、日志、存档槽位、UI 参数
-- `core/quanxian.yaml`：权限名单（每行一个用户名）
-- `core/kaiguan.yaml`：9 项功能开关（布尔值）
-
-关闭 `kaiguan.paidui` 后，除管理员命令外所有排队指令不处理；
-`恢复排队功能` 弹幕或在 GUI 开关页勾选可重新开启。
 
 ## 运行数据与日志
 

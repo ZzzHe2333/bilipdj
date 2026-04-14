@@ -1544,6 +1544,7 @@ class QueueArchiveManager:
     def __init__(self, slots: int = 3, enabled: bool = True) -> None:
         self.slots = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(slots)))
         self.enabled = enabled
+        self._lock = threading.Lock()
         PD_DIR.mkdir(parents=True, exist_ok=True)
 
     def _read_state(self) -> dict[str, int]:
@@ -1559,6 +1560,18 @@ class QueueArchiveManager:
             json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
         )
 
+    def get_active_slot(self) -> int:
+        with self._lock:
+            state = self._read_state()
+            slot = int(state.get("active_slot", 1))
+            return max(1, min(self.slots, slot))
+
+    def set_active_slot(self, slot: int) -> None:
+        with self._lock:
+            state = self._read_state()
+            state["active_slot"] = max(1, min(self.slots, slot))
+            self._write_state(state)
+
     def _slot_file(self, slot: int) -> Path:
         return PD_DIR / f"queue_archive_slot_{slot}.csv"
 
@@ -1573,16 +1586,6 @@ class QueueArchiveManager:
             "queue": [],
             "entries": [],
         }
-
-    def get_active_slot(self) -> int:
-        state = self._read_state()
-        slot = int(state.get("active_slot", 1))
-        return max(1, min(self.slots, slot))
-
-    def set_active_slot(self, slot: int) -> None:
-        state = self._read_state()
-        state["active_slot"] = max(1, min(self.slots, slot))
-        self._write_state(state)
 
     def write_snapshot(self, actor: str, message: str, queue_items: list[Any]) -> Path | None:
         if not self.enabled:

@@ -472,6 +472,8 @@ class ControlPanelApp:
         self.douyin_fetch_url_var = tk.StringVar(value="")
         self._douyin_fetch_status_var = tk.StringVar(value="")
 
+        self._queue_refresh_busy: bool = False
+        self._blacklist_refresh_busy: bool = False
         self._clear_click_time: float = 0.0
         self._blacklist_clear_click_time: float = 0.0
         self._prev_slot: int = self.queue_slot_choice_var.get()
@@ -1033,6 +1035,19 @@ class ControlPanelApp:
             extra_query = parsed_extra_query
 
         platform_value = self._platform_label_to_value(self.platform_var.get())
+        try:
+            from core.douyin_protocol import normalize_live_id as _normalize_douyin_live_id
+        except Exception:  # noqa: BLE001
+            _normalize_douyin_live_id = lambda value: str(value or "").strip()
+        douyin_fetch_input = self.douyin_fetch_url_var.get().strip()
+        douyin_live_id = _normalize_douyin_live_id(self.douyin_live_id_var.get().strip() or douyin_fetch_input)
+        douyin_enabled = bool(self.douyin_enabled_var.get())
+        if platform_value == "douyin" and douyin_live_id:
+            douyin_enabled = True
+        if douyin_live_id and self.douyin_live_id_var.get().strip() != douyin_live_id:
+            self.douyin_live_id_var.set(douyin_live_id)
+        if bool(self.douyin_enabled_var.get()) != douyin_enabled:
+            self.douyin_enabled_var.set(douyin_enabled)
         payload = {
             "platform": platform_value,
             "bilibili": {
@@ -1041,8 +1056,8 @@ class ControlPanelApp:
                 "cookie": self.cookie_var.get().strip(),
             },
             "douyin": {
-                "enabled": bool(self.douyin_enabled_var.get()),
-                "live_id": self.douyin_live_id_var.get().strip(),
+                "enabled": douyin_enabled,
+                "live_id": douyin_live_id,
                 "cookie": self.douyin_cookie_var.get().strip(),
                 "signature": self.douyin_signature_var.get().strip(),
                 "bootstrap": {
@@ -1110,6 +1125,72 @@ class ControlPanelApp:
             pass
         return ""
 
+    def _load_douyin_live_info_from_input(self, raw: str | None = None) -> tuple[Any, str]:
+        """根据链接或 live_id 拉取抖音直播间参数并返回解析结果。"""
+        source_text = str(raw or "").strip() or self.douyin_fetch_url_var.get().strip() or self.douyin_live_id_var.get().strip()
+        if not source_text:
+            raise ValueError("请先填写直播间链接或 live_id")
+
+        from core.douyin_protocol import (
+            DouyinLiveInfo,
+            fetch_douyin_live_info,
+            map_room_status,
+            normalize_live_id,
+        )
+
+        live_id = normalize_live_id(source_text)
+        if not live_id:
+            raise ValueError("无法从输入中提取 live_id")
+
+        cookie = self.douyin_cookie_var.get().strip()
+        info: DouyinLiveInfo = fetch_douyin_live_info(live_id, cookie=cookie)
+        url_room_id = self._parse_url_query_room_id(source_text)
+        if url_room_id:
+            info.room_id = url_room_id
+        return info, map_room_status(info.room_status)
+
+    def _should_refresh_douyin_live_info_before_save(self) -> bool:
+        try:
+            from core.douyin_protocol import normalize_live_id as _normalize_douyin_live_id
+        except Exception:  # noqa: BLE001
+            _normalize_douyin_live_id = lambda value: str(value or "").strip()
+
+        source_text = self.douyin_fetch_url_var.get().strip() or self.douyin_live_id_var.get().strip()
+        if not source_text:
+            return False
+
+        expected_live_id = _normalize_douyin_live_id(source_text)
+        current_live_id = _normalize_douyin_live_id(self.douyin_live_id_var.get().strip())
+        required_fields = (
+            self.douyin_room_id_var.get().strip(),
+            self.douyin_user_id_var.get().strip(),
+            self.douyin_user_unique_id_var.get().strip(),
+            self.douyin_anchor_id_var.get().strip(),
+            self.douyin_sec_uid_var.get().strip(),
+            self.douyin_ttwid_var.get().strip(),
+        )
+        return bool(self.douyin_fetch_url_var.get().strip()) or current_live_id != expected_live_id or any(
+            not value for value in required_fields
+        )
+
+    def _ensure_douyin_live_info_before_save(self) -> None:
+        if self._platform_label_to_value(self.platform_var.get()) != "douyin":
+            return
+        if not self._should_refresh_douyin_live_info_before_save():
+            return
+
+        source_text = self.douyin_fetch_url_var.get().strip() or self.douyin_live_id_var.get().strip()
+        self.status_var.set("正在获取抖音直播间参数…")
+        self._douyin_fetch_status_var.set("保存前自动获取直播间参数…")
+        self.root.update_idletasks()
+        try:
+            info, status_str = self._load_douyin_live_info_from_input(source_text)
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"抖音直播间参数获取失败: {exc}") from exc
+
+        self._apply_douyin_live_info(info, status_str)
+        self._append_log(f"[GUI] 已根据抖音链接回填直播参数 live_id={info.live_id} room_id={info.room_id}")
+
     def _fetch_douyin_params(self) -> None:
         """在后台线程中获取抖音直播间参数，成功后回填到 UI。"""
         raw = self.douyin_fetch_url_var.get().strip()
@@ -1118,28 +1199,13 @@ class ControlPanelApp:
             return
         self._douyin_fetch_status_var.set("正在获取，请稍候…")
 
-        # 从 URL query 里直取 room_id（优先级高于 HTML 解析结果）
-        url_room_id = self._parse_url_query_room_id(raw)
-
         def _worker():
             try:
-                from core.douyin_protocol import (
-                    DouyinLiveInfo,
-                    fetch_douyin_live_info,
-                    map_room_status,
-                    normalize_live_id,
+                info, status_str = self._load_douyin_live_info_from_input(raw)
+                self.root.after(
+                    0,
+                    lambda info=info, status_str=status_str: self._apply_douyin_live_info(info, status_str),
                 )
-                live_id = normalize_live_id(raw)
-                if not live_id:
-                    self.root.after(0, lambda: self._douyin_fetch_status_var.set("无法从输入中提取 live_id"))
-                    return
-                cookie = self.douyin_cookie_var.get().strip()
-                info: DouyinLiveInfo = fetch_douyin_live_info(live_id, cookie=cookie)
-                # URL query 里的 room_id 比 HTML 解析结果更可靠，覆盖之
-                if url_room_id:
-                    info.room_id = url_room_id
-                status_str = map_room_status(info.room_status)
-                self.root.after(0, lambda: self._apply_douyin_live_info(info, status_str))
             except Exception as exc:  # noqa: BLE001
                 msg = f"获取失败: {exc}"
                 self.root.after(0, lambda: self._douyin_fetch_status_var.set(msg))
@@ -1148,6 +1214,7 @@ class ControlPanelApp:
 
     def _apply_douyin_live_info(self, info: Any, room_status: str) -> None:
         """将抖取的直播间信息回填到设置页各输入框。"""
+        self.douyin_enabled_var.set(True)
         if info.live_id:
             self.douyin_live_id_var.set(info.live_id)
         if info.room_id:
@@ -1167,6 +1234,7 @@ class ControlPanelApp:
         if nickname:
             status_parts.append(f"主播: {nickname}")
         status_parts.append(f"状态: {room_status}")
+        status_parts.append("已自动启用抖音配置")
         self._douyin_fetch_status_var.set("  ".join(status_parts) if status_parts else "获取成功")
 
     def _refresh_platform_settings_visibility(self, _event=None) -> None:
@@ -1381,10 +1449,16 @@ class ControlPanelApp:
 
     def _refresh_queue_list(self) -> None:
         """后端运行时优先读取内存队列，否则读取当前槽位 CSV。"""
-        entries = self._fetch_queue_entries_from_backend()
-        if entries is None:
-            entries = self._read_queue_entries_from_csv()
-        self.root.after(0, lambda: self._update_queue_ui(entries))
+        if self._queue_refresh_busy:
+            return
+        self._queue_refresh_busy = True
+        try:
+            entries = self._fetch_queue_entries_from_backend()
+            if entries is None:
+                entries = self._read_queue_entries_from_csv()
+            self.root.after(0, lambda: self._update_queue_ui(entries))
+        finally:
+            self._queue_refresh_busy = False
 
     def _update_queue_ui(self, entries: list[dict[str, str]]) -> None:
         # 记住当前选中序号，刷新后恢复
@@ -2090,10 +2164,16 @@ class ControlPanelApp:
             return None
 
     def _refresh_blacklist_list(self) -> None:
-        entries = self._fetch_blacklist_entries_from_backend()
-        if entries is None:
-            entries = self._read_blacklist_entries_from_csv()
-        self.root.after(0, lambda: self._update_blacklist_ui(entries))
+        if self._blacklist_refresh_busy:
+            return
+        self._blacklist_refresh_busy = True
+        try:
+            entries = self._fetch_blacklist_entries_from_backend()
+            if entries is None:
+                entries = self._read_blacklist_entries_from_csv()
+            self.root.after(0, lambda: self._update_blacklist_ui(entries))
+        finally:
+            self._blacklist_refresh_busy = False
 
     def _update_blacklist_ui(self, entries: list[dict[str, str]]) -> None:
         sel = self.blacklist_tree.selection()
@@ -3905,6 +3985,7 @@ class ControlPanelApp:
 
     def save_to_file(self) -> None:
         try:
+            self._ensure_douyin_live_info_before_save()
             backend_server = load_backend_server_module()
             platform_slot = self._get_selected_platform_slot()
             platform_payload = self._gather_platform_config_payload()
