@@ -1,6 +1,12 @@
 # 弹幕排队姬（Bilipdj）
-[更新日志](./UPDATE.md) | [Ai请看](./ai.md) | [readme](./README.md) | [教程](./GUIDE.md)
-[![更新日志](https://img.shields.io/badge/更新日志-UPDATE.md-blue)](UPDATE.md) [![使用教程](https://img.shields.io/badge/使用教程-GUIDE.md-green)](GUIDE.md) [![AI上下文](https://img.shields.io/badge/AI上下文-ai.md-purple)](ai.md)
+[更新日志](./UPDATE.md) |
+[Ai请看](./ai.md) 
+[readme](./README.md) 
+[教程](./GUIDE.md)
+
+[![更新日志](https://img.shields.io/badge/更新日志-UPDATE.md-blue)](UPDATE.md) 
+[![使用教程](https://img.shields.io/badge/使用教程-GUIDE.md-green)](GUIDE.md) 
+[![AI上下文](https://img.shields.io/badge/AI上下文-ai.md-purple)](ai.md)
 
 弹幕排队姬是一个面向 **Bilibili / 抖音**直播间的弹幕排队管理工具。
 排队逻辑由 Python 后端统一处理，前端页面只负责展示，避免前后端计算不一致。
