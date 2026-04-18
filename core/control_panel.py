@@ -90,6 +90,7 @@ _URL_RE = re.compile(r"https?://[^\s,，）)\]>\"']+")
 # 匹配日志行前缀括号标签 "[GUI]" "[INFO]" 等
 _BRACKET_TAG_RE = re.compile(r"^\[([A-Z_a-z0-9/\s]+)\] ?")
 MAX_QUEUE_ARCHIVE_SLOTS = 10
+LEFT_NAV_TAB_WIDTH = 18
 OVERLAY_REFRESH_MS = 1200
 OVERLAY_TRANSPARENT_COLOR = "#010101"
 OVERLAY_RESIZE_MARGIN = 8
@@ -161,6 +162,13 @@ def sanitize_log_message(message: str) -> str:
     for pattern in SENSITIVE_LOG_PATTERNS:
         sanitized = pattern.sub(lambda match: f"{match.group(1)}=<hidden>", sanitized)
     return sanitized
+
+
+def _pad_display_text(text: str, width: int) -> str:
+    display_width = 0
+    for ch in str(text):
+        display_width += 1 if ord(ch) < 128 else 2
+    return str(text) + (" " * max(0, width - display_width))
 
 
 
@@ -374,15 +382,15 @@ queue_archive:
 class ControlPanelApp:
     # --- 主题配色 ---
     _THEME_DARK: dict[str, str] = {
-        "bg": "#07101e", "bg2": "#0e1f3c", "surface": "#0a1830",
+        "bg": "#07101e", "bg2": "#060c18", "surface": "#071224",
         "accent": "#00e5ff", "accent_dim": "#00b8d9",
         "fg": "#cce8ff", "fg2": "#7ec8e3",
-        "border": "#1a3555",
-        "btn_bg": "#091830", "btn_active": "#102848",
-        "input_bg": "#060e1c",
-        "select_bg": "#003a5a", "select_fg": "#00e5ff",
-        "status_ok": "#00cc77", "warn": "#ff5555",
-        "ts": "#00cc55", "ev": "#9ec7e6",
+        "border": "#19506a",
+        "btn_bg": "#00283c", "btn_active": "#003a5a",
+        "input_bg": "#000a16",
+        "select_bg": "#003a5a", "select_fg": "#ffffff",
+        "status_ok": "#2ecc71", "warn": "#ff3b5c",
+        "ts": "#2ecc71", "ev": "#9ec7e6",
     }
     _THEME_LIGHT: dict[str, str] = {
         "bg": "#eef3fa", "bg2": "#dde6f3", "surface": "#ffffff",
@@ -462,6 +470,7 @@ class ControlPanelApp:
         self._dark_mode: bool = False
         self._all_text_widgets: list[tk.Text] = []
         self._status_label: ttk.Label | None = None
+        self._brand_label: ttk.Label | None = None
         self._ws_light_label: ttk.Label | None = None
         self._theme_btn: ttk.Button | None = None
         self._settings_hint_label: ttk.Label | None = None
@@ -582,13 +591,14 @@ class ControlPanelApp:
         # Notebook 标签页
         style.configure(
             "TNotebook",
-            background=t["bg"], bordercolor=t["border"], tabmargins=(2, 4, 0, 0),
+            background=t["bg"], bordercolor=t["border"], tabmargins=(0, 0, 8, 0), tabposition="wn",
         )
         style.configure(
             "TNotebook.Tab",
             background=t["bg2"], foreground=t["fg2"],
-            padding=(10, 4), focuscolor=t["bg2"],
+            padding=(14, 9), focuscolor=t["bg2"],
             bordercolor=t["border"],
+            width=LEFT_NAV_TAB_WIDTH,
         )
         style.map(
             "TNotebook.Tab",
@@ -654,6 +664,8 @@ class ControlPanelApp:
             self.log_text.tag_raise("link")  # link 优先级高于 ev/warn
 
         # 硬编码颜色的标签引用
+        if self._brand_label is not None:
+            self._brand_label.configure(foreground=t["accent"])
         if self._status_label is not None:
             self._status_label.configure(foreground=t["status_ok"])
         if self._ws_light_label is not None:
@@ -690,6 +702,9 @@ class ControlPanelApp:
         style.configure("TLabelframe.Label", font=font_bold)
         style.configure("Treeview", font=font, rowheight=size + 10)
         style.configure("Treeview.Heading", font=font_bold)
+        if self._brand_label is not None:
+            mono = "Consolas" if sys.platform == "win32" else ("Menlo" if sys.platform == "darwin" else "Monospace")
+            self._brand_label.configure(font=(mono, size, "bold"))
         if hasattr(self, "log_text"):
             mono = "Consolas" if sys.platform == "win32" else ("Menlo" if sys.platform == "darwin" else "Monospace")
             mono_font = (mono, size)
@@ -699,6 +714,10 @@ class ControlPanelApp:
 
     def _toggle_theme(self) -> None:
         self._apply_theme(not self._dark_mode)
+
+    @staticmethod
+    def _left_nav_label(index: int, label: str) -> str:
+        return _pad_display_text(f"{index:02d}  {label}", LEFT_NAV_TAB_WIDTH)
 
     def _apply_root_icon(self) -> None:
         icon_candidates = (
@@ -728,6 +747,9 @@ class ControlPanelApp:
         top = ttk.Frame(main)
         top.grid(row=0, column=0, sticky="ew", pady=(0, 8))
 
+        self._brand_label = ttk.Label(top, text=f"[ BILIPDJ ] v{APP_VERSION}")
+        self._brand_label.pack(side="left", padx=(0, 12))
+
         btn_bar = ttk.Frame(top)
         btn_bar.pack(side="left")
         ttk.Button(btn_bar, text="启动后端", command=self.start_server).grid(row=0, column=0, padx=(0, 6))
@@ -739,7 +761,7 @@ class ControlPanelApp:
         self._status_label = ttk.Label(top, textvariable=self.status_var)
         self._status_label.pack(side="left", padx=(16, 0))
 
-        self._theme_btn = ttk.Button(top, text="☀ 明亮", command=self._toggle_theme)
+        self._theme_btn = ttk.Button(top, text="🌙 暗夜", command=self._toggle_theme)
         self._theme_btn.pack(side="right")
 
         # --- 标签页 ---
@@ -748,52 +770,52 @@ class ControlPanelApp:
 
         # Tab 0: 日志
         log_tab = ttk.Frame(notebook, padding=8)
-        notebook.add(log_tab, text="日志")
+        notebook.add(log_tab, text=self._left_nav_label(0, "日志"))
         self._build_log_tab(log_tab)
 
         # Tab 1: 当前排队
         queue_tab = ttk.Frame(notebook, padding=8)
-        notebook.add(queue_tab, text="当前排队")
+        notebook.add(queue_tab, text=self._left_nav_label(1, "当前排队"))
         self._build_queue_tab(queue_tab)
 
         # Tab 2: 黑名单
         blacklist_tab = ttk.Frame(notebook, padding=8)
-        notebook.add(blacklist_tab, text="黑名单")
+        notebook.add(blacklist_tab, text=self._left_nav_label(2, "黑名单"))
         self._build_blacklist_tab(blacklist_tab)
 
         # Tab 3: 设置
         settings_tab = ttk.Frame(notebook, padding=8)
-        notebook.add(settings_tab, text="设置")
+        notebook.add(settings_tab, text=self._left_nav_label(3, "设置"))
         self._build_settings_tab(settings_tab)
 
         # Tab 4: 透明窗口
         overlay_tab = ttk.Frame(notebook, padding=8)
-        notebook.add(overlay_tab, text="透明窗口")
+        notebook.add(overlay_tab, text=self._left_nav_label(4, "透明窗口"))
         self._build_overlay_tab(overlay_tab)
 
         # Tab 5: 权限
         quanxian_tab = ttk.Frame(notebook, padding=8)
-        notebook.add(quanxian_tab, text="权限")
+        notebook.add(quanxian_tab, text=self._left_nav_label(5, "权限"))
         self._build_quanxian_tab(quanxian_tab)
 
         # Tab 6: 开关
         kaiguan_tab = ttk.Frame(notebook, padding=8)
-        notebook.add(kaiguan_tab, text="开关")
+        notebook.add(kaiguan_tab, text=self._left_nav_label(6, "开关"))
         self._build_kaiguan_tab(kaiguan_tab)
 
         # Tab 7: 性能
         perf_tab = ttk.Frame(notebook, padding=8)
-        notebook.add(perf_tab, text="性能")
+        notebook.add(perf_tab, text=self._left_nav_label(7, "性能"))
         self._build_perf_tab(perf_tab)
 
         # Tab 8: 样式设置
         style_tab = ttk.Frame(notebook, padding=8)
-        notebook.add(style_tab, text="样式设置")
+        notebook.add(style_tab, text=self._left_nav_label(8, "样式设置"))
         self._build_style_tab(style_tab)
 
         # Tab 9: 关于
         about_tab = ttk.Frame(notebook, padding=8)
-        notebook.add(about_tab, text="关于")
+        notebook.add(about_tab, text=self._left_nav_label(9, "关于"))
         self._build_about_tab(about_tab)
 
         self._apply_theme(self._dark_mode)
