@@ -1,8 +1,8 @@
 # 弹幕排队姬（Bilipdj）
 [更新日志](./UPDATE.md) |
-[Ai请看](./ai.md) 
-[readme](./README.md) 
-[教程](./GUIDE.md)
+[Ai请看](./ai.md) | 
+[readme](./README.md) | 
+[教程](./GUIDE.md) | 
 
 [![更新日志](https://img.shields.io/badge/更新日志-UPDATE.md-blue)](UPDATE.md) 
 [![使用教程](https://img.shields.io/badge/使用教程-GUIDE.md-green)](GUIDE.md) 
