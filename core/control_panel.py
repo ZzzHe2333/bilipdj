@@ -3170,7 +3170,7 @@ class ControlPanelApp:
             self._overlay_style = dict(self._load_style_data())
             self._redraw_overlay()
 
-    def _save_style(self) -> None:
+    def _save_style(self) -> bool:
         data: dict[str, Any] = {}
         for key, var in self._style_vars.items():
             value = var.get().strip()
@@ -3193,7 +3193,7 @@ class ControlPanelApp:
         except Exception as exc:
             self._append_log(f"[GUI] 样式写入文件失败: {exc}")
             self._style_save_status_var.set("保存失败")
-            return
+            return False
         port = self.port_var.get().strip() or "9816"
         url = f"http://127.0.0.1:{port}/api/style"
         body = json.dumps(data).encode("utf-8")
@@ -3209,6 +3209,7 @@ class ControlPanelApp:
         if self._overlay_window_alive():
             self._overlay_style = dict(self._load_style_data())
             self._redraw_overlay()
+        return True
 
     def _reset_style(self) -> None:
         for key, var in self._style_vars.items():
@@ -3345,10 +3346,9 @@ class ControlPanelApp:
 
         btn_bar = ttk.Frame(left)
         btn_bar.grid(row=len(fields) + 3, column=0, columnspan=3, sticky="w", pady=(12, 0))
-        ttk.Button(btn_bar, text="保存样式", command=self._save_style).grid(row=0, column=0, padx=(0, 8))
-        ttk.Button(btn_bar, text="恢复默认", command=self._reset_style).grid(row=0, column=1)
+        ttk.Button(btn_bar, text="恢复默认", command=self._reset_style).grid(row=0, column=0)
         self._style_save_status_var = tk.StringVar(value="")
-        ttk.Label(btn_bar, textvariable=self._style_save_status_var, foreground="#0a0").grid(row=0, column=2, padx=(12, 0))
+        ttk.Label(btn_bar, textvariable=self._style_save_status_var, foreground="#0a0").grid(row=0, column=1, padx=(12, 0))
 
         self._style_preview_canvas = tk.Canvas(right, highlightthickness=0)
         self._style_preview_canvas.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
@@ -3923,7 +3923,6 @@ class ControlPanelApp:
 
         btn_bar = ttk.Frame(frame)
         btn_bar.grid(row=len(KAIGUAN_LABELS), column=0, sticky="w", pady=(12, 0))
-        ttk.Button(btn_bar, text="保存开关", command=self._save_kaiguan).pack(side="left", padx=(0, 8))
         ttk.Button(btn_bar, text="刷新开关", command=self._load_kaiguan).pack(side="left")
         self._load_kaiguan()
 
@@ -4009,7 +4008,7 @@ class ControlPanelApp:
                 val = raw.get(key, default)
                 var.set(bool(val) if isinstance(val, bool) else default)
 
-    def _save_kaiguan(self) -> None:
+    def _save_kaiguan(self) -> bool:
         payload = {key: var.get() for key, var in self._kaiguan_vars.items()}
         port = self.port_var.get().strip() or "9816"
         body = json.dumps(payload).encode("utf-8")
@@ -4026,6 +4025,7 @@ class ControlPanelApp:
         except Exception:
             self._write_kaiguan_local(payload)
             self._append_log("[GUI] 功能开关已保存到本地（后端未运行，下次启动生效）")
+        return True
 
     def _write_kaiguan_local(self, payload: dict[str, bool]) -> None:
         try:
@@ -4126,6 +4126,10 @@ class ControlPanelApp:
             self._apply_overlay_settings_to_window()
             self._overlay_style = dict(self._load_style_data())
             self._redraw_overlay()
+        if hasattr(self, "_kaiguan_vars"):
+            self._load_kaiguan()
+        if hasattr(self, "_style_vars"):
+            self._refresh_style_state()
         self.status_var.set("已加载配置")
         self._append_log("[GUI] 已加载配置")
 
@@ -4382,6 +4386,9 @@ class ControlPanelApp:
                 self.gather_config(),
             )
             backend_server.save_config(config)
+            self._save_kaiguan()
+            if not self._save_style():
+                raise OSError("样式设置保存失败")
             self._prev_platform_config_slot = platform_slot
             self.status_var.set("配置保存成功")
             self._append_log("[GUI] 配置保存成功")
