@@ -845,7 +845,7 @@ class ControlPanelApp:
         page_defs = (
             ("日志", self._build_log_tab), ("当前排队", self._build_queue_tab), ("设置", self._build_settings_tab),
             ("透明窗口", self._build_overlay_tab), ("权限", self._build_quanxian_tab), ("性能", self._build_perf_tab),
-            ("送礼插队", self._build_gift_queue_tab), ("关于", self._build_about_tab),
+            ("关于", self._build_about_tab),
         )
         for index, (label, builder) in enumerate(page_defs):
             row = tk.Frame(nav, bd=0, highlightthickness=0)
@@ -3506,6 +3506,7 @@ class ControlPanelApp:
         blacklist_inner = self._add_scrollable_settings_page(settings_tabs, "黑名单")
         switches_inner = self._add_scrollable_settings_page(settings_tabs, "开关")
         style_inner = self._add_scrollable_settings_page(settings_tabs, "样式设置")
+        gift_queue_inner = self._add_scrollable_settings_page(settings_tabs, "送礼插队")
 
         # 保存配置/刷新按钮放在 canvas 外（固定底部）
         btn_bar = ttk.Frame(frame)
@@ -3700,6 +3701,7 @@ class ControlPanelApp:
         self._build_blacklist_tab(blacklist_inner)
         self._build_kaiguan_tab(switches_inner)
         self._build_style_tab(style_inner)
+        self._build_gift_queue_tab(gift_queue_inner)
 
     def _add_scrollable_settings_page(self, notebook: ttk.Notebook, title: str) -> ttk.Frame:
         page = ttk.Frame(notebook, padding=(0, 8, 0, 0))
