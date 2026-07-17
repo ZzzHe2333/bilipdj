@@ -8,6 +8,7 @@ datas = [
 ]
 
 hiddenimports = [
+    "core.mirrorchyan",
     "core.server",
     "qrcode",
     "qrcode.main",

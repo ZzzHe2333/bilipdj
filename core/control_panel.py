@@ -421,6 +421,9 @@ class ControlPanelApp:
         self.roomid_var = tk.StringVar(value="3049445")
         self.uid_var = tk.StringVar(value="0")
         self.cookie_var = tk.StringVar(value="")
+        self.bilibili_room_url_var = tk.StringVar(value="")
+        self.gift_queue_enabled_var = tk.BooleanVar(value=False)
+        self.gift_queue_names_var = tk.StringVar(value="辣条")
         self.log_level_var = tk.StringVar(value="INFO")
         self.retention_days_var = tk.StringVar(value="7")
         self.queue_enabled_var = tk.BooleanVar(value=True)
@@ -814,9 +817,13 @@ class ControlPanelApp:
         notebook.add(style_tab, text=self._left_nav_label(8, "样式设置"))
         self._build_style_tab(style_tab)
 
+        gift_tab = ttk.Frame(notebook, padding=8)
+        notebook.add(gift_tab, text=self._left_nav_label(9, "送礼插队"))
+        self._build_gift_queue_tab(gift_tab)
+
         # Tab 9: 关于
         about_tab = ttk.Frame(notebook, padding=8)
-        notebook.add(about_tab, text=self._left_nav_label(9, "关于"))
+        notebook.add(about_tab, text=self._left_nav_label(10, "关于"))
         self._build_about_tab(about_tab)
 
         self._apply_theme(self._dark_mode)
@@ -1205,7 +1212,8 @@ class ControlPanelApp:
     def _fetch_bilibili_params(self) -> None:
         """Resolve the room, logged-in account and danmu discovery without exposing tokens."""
         try:
-            room_id = _coerce_int_field(self.roomid_var.get(), 0, "B站直播间号")
+            from core.bilibili_protocol import extract_bilibili_room_id
+            room_id = extract_bilibili_room_id(self.bilibili_room_url_var.get()) or _coerce_int_field(self.roomid_var.get(), 0, "B站直播间号")
         except ValueError as exc:
             self._bilibili_fetch_status_var.set(str(exc))
             return
@@ -1225,6 +1233,16 @@ class ControlPanelApp:
                 self.root.after(0, lambda exc=exc: self._bilibili_fetch_status_var.set(f"获取失败：{exc}"))
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    def _build_gift_queue_tab(self, frame: ttk.Frame) -> None:
+        frame.columnconfigure(0, weight=1)
+        box = ttk.LabelFrame(frame, text="送礼插队规则（默认关闭）", padding=18)
+        box.grid(row=0, column=0, sticky="ew")
+        box.columnconfigure(1, weight=1)
+        ttk.Checkbutton(box, text="启用送礼插队", variable=self.gift_queue_enabled_var).grid(row=0, column=0, columnspan=2, sticky="w", pady=6)
+        ttk.Label(box, text="允许的礼物名称").grid(row=1, column=0, sticky="w", pady=6)
+        ttk.Entry(box, textvariable=self.gift_queue_names_var).grid(row=1, column=1, sticky="ew", pady=6)
+        ttk.Label(box, text="多个礼物用逗号分隔。赠送者获得一次“插队”资格；使用后永久记录，不可重复领取。\n礼物类型和上舰信息可从 /api/gifts/state 读取。", wraplength=760).grid(row=2, column=0, columnspan=2, sticky="w", pady=(10, 0))
 
     def _apply_bilibili_room_config(self, result: dict[str, Any]) -> None:
         real_room_id = _coerce_int_field(result.get("room_id"), 0, "真实房间号")
@@ -3492,13 +3510,16 @@ class ControlPanelApp:
         ttk.Button(bilibili_frame, text="一键获取监听配置", command=self._fetch_bilibili_params).grid(
             row=0, column=2, columnspan=2, padx=(16, 0), sticky="ew", pady=4
         )
-        ttk.Label(bilibili_frame, text="登录 UID").grid(row=1, column=0, sticky="w", pady=4)
-        ttk.Entry(bilibili_frame, textvariable=self.uid_var, width=24).grid(row=1, column=1, sticky="ew", pady=4)
-        ttk.Button(bilibili_frame, text="扫码获取 Cookie", command=self.open_config).grid(row=1, column=2, columnspan=2, padx=(16, 0), sticky="ew", pady=4)
-        ttk.Label(bilibili_frame, text="用户 Cookie").grid(row=2, column=0, sticky="w", pady=4)
-        ttk.Entry(bilibili_frame, textvariable=self.cookie_var, width=48, show="●").grid(row=2, column=1, columnspan=3, sticky="ew", pady=4)
+        ttk.Label(bilibili_frame, text="直播间网页链接").grid(row=1, column=0, sticky="w", pady=4)
+        ttk.Entry(bilibili_frame, textvariable=self.bilibili_room_url_var).grid(row=1, column=1, columnspan=2, sticky="ew", pady=4)
+        ttk.Button(bilibili_frame, text="从链接获取", command=self._fetch_bilibili_params).grid(row=1, column=3, padx=(6, 0), sticky="ew", pady=4)
+        ttk.Label(bilibili_frame, text="登录 UID").grid(row=2, column=0, sticky="w", pady=4)
+        ttk.Entry(bilibili_frame, textvariable=self.uid_var, width=24).grid(row=2, column=1, sticky="ew", pady=4)
+        ttk.Button(bilibili_frame, text="扫码获取 Cookie", command=self.open_config).grid(row=2, column=2, columnspan=2, padx=(16, 0), sticky="ew", pady=4)
+        ttk.Label(bilibili_frame, text="用户 Cookie").grid(row=3, column=0, sticky="w", pady=4)
+        ttk.Entry(bilibili_frame, textvariable=self.cookie_var, width=48, show="●").grid(row=3, column=1, columnspan=3, sticky="ew", pady=4)
         ttk.Label(bilibili_frame, textvariable=self._bilibili_fetch_status_var, wraplength=760).grid(
-            row=3, column=0, columnspan=4, sticky="w", pady=(6, 2)
+            row=4, column=0, columnspan=4, sticky="w", pady=(6, 2)
         )
 
         douyin_frame = ttk.LabelFrame(platform_forms, text="抖音参数", padding=8)
@@ -3887,6 +3908,11 @@ class ControlPanelApp:
                 },
             }
         )
+        myjs_cfg = config.get("myjs", {}) if isinstance(config.get("myjs", {}), dict) else {}
+        self.gift_queue_enabled_var.set(bool(myjs_cfg.get("gift_queue_enabled", False)))
+        gift_names = myjs_cfg.get("gift_queue_names", [])
+        if isinstance(gift_names, list):
+            self.gift_queue_names_var.set(", ".join(str(x) for x in gift_names if str(x).strip()) or "辣条")
         ui_cfg = config.get("ui", {})
         self._set_overlay_settings(ui_cfg.get("overlay_window", DEFAULT_OVERLAY_SETTINGS))
         self.auto_start_var.set(bool(ui_cfg.get("auto_start_backend", False)))
@@ -3948,7 +3974,10 @@ class ControlPanelApp:
                 "slots": MAX_QUEUE_ARCHIVE_SLOTS,
                 "active_slot": self._get_selected_platform_slot(),
             },
-            "myjs": {},
+            "myjs": {
+                "gift_queue_enabled": bool(self.gift_queue_enabled_var.get()),
+                "gift_queue_names": [x.strip() for x in self.gift_queue_names_var.get().replace("，", ",").split(",") if x.strip()],
+            },
             "logging": {
                 "level": self.log_level_var.get().strip().upper() or "INFO",
                 "retention_days": _coerce_int_field(self.retention_days_var.get(), 7, "日志保留天数"),

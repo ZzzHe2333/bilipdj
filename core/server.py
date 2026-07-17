@@ -695,6 +695,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "admins": [],
         "ban_admins": [],
         "jianzhang": [],
+        "gift_queue_enabled": False,
+        "gift_queue_names": [],
+        "gift_queue_used_uids": [],
     },
     "ui": {
         "startup_splash_seconds": 5,
@@ -1720,6 +1723,12 @@ class QueueManager:
         self._super_admins: list[str] = []
         self._kaiguan: dict[str, bool] = dict(DEFAULT_KAIGUAN)
         self._last_danmu_event: dict[str, Any] = {}
+        self._gift_queue_enabled = False
+        self._gift_queue_names: set[str] = set()
+        self._gift_queue_credits: dict[int, str] = {}
+        self._gift_queue_used_uids: set[int] = set()
+        self._gift_catalog: dict[int, dict[str, Any]] = {}
+        self._last_gift_event: dict[str, Any] = {}
 
     def load_config(self, myjs_cfg: dict[str, Any], anchor_uid: int = 0) -> None:
         with self._lock:
@@ -1729,6 +1738,9 @@ class QueueManager:
                 self._blacklist = [str(x) for x in myjs_cfg["ban_admins"] if x]
             if isinstance(myjs_cfg.get("jianzhang"), list):
                 self._jianzhang = [str(x) for x in myjs_cfg["jianzhang"] if x]
+            self._gift_queue_enabled = bool(myjs_cfg.get("gift_queue_enabled", False))
+            self._gift_queue_names = set(_normalize_string_list(myjs_cfg.get("gift_queue_names", [])))
+            self._gift_queue_used_uids = {_to_int(x) for x in _normalize_string_list(myjs_cfg.get("gift_queue_used_uids", [])) if _to_int(x) > 0}
             if myjs_cfg.get("paidui_list_length_max") is not None:
                 self._max_length = max(1, _to_int(myjs_cfg["paidui_list_length_max"], 100))
             if isinstance(myjs_cfg.get("all_suoyourenbukepaidui"), bool):
@@ -1773,6 +1785,9 @@ class QueueManager:
         myjs_cfg["admins"] = list(self._admins)
         myjs_cfg["ban_admins"] = list(self._blacklist)
         myjs_cfg["jianzhang"] = list(self._jianzhang)
+        myjs_cfg["gift_queue_enabled"] = self._gift_queue_enabled
+        myjs_cfg["gift_queue_names"] = sorted(self._gift_queue_names)
+        myjs_cfg["gift_queue_used_uids"] = sorted(str(x) for x in self._gift_queue_used_uids)
         current["myjs"] = _normalize_myjs_config(myjs_cfg)
         save_config(current)
         self._reload_runtime_config()
@@ -2107,6 +2122,34 @@ class QueueManager:
         with self._lock:
             return copy.deepcopy(self._last_danmu_event)
 
+    def get_gift_state(self) -> dict[str, Any]:
+        with self._lock:
+            return {"enabled": self._gift_queue_enabled, "gift_names": sorted(self._gift_queue_names), "used_uids": sorted(self._gift_queue_used_uids), "catalog": list(self._gift_catalog.values()), "last_event": copy.deepcopy(self._last_gift_event)}
+
+    def process_live_event(self, payload: dict[str, Any]) -> None:
+        cmd = str(payload.get("cmd", "") or "").split(":", 1)[0]
+        if cmd not in {"SEND_GIFT", "COMBO_SEND", "GUARD_BUY"}:
+            return
+        data = payload.get("data", {})
+        if not isinstance(data, dict):
+            return
+        uid = _to_int(data.get("uid", 0))
+        uname = str(data.get("uname", data.get("username", "")) or "")
+        is_guard = cmd == "GUARD_BUY"
+        gift_name = str(data.get("giftName", data.get("gift_name", "大航海" if is_guard else "")) or "")
+        gift_id = _to_int(data.get("giftId", data.get("gift_id", 0)))
+        count = max(1, _to_int(data.get("num", 1), 1))
+        event = {"type": "LIVE_GIFT_EVENT", "platform": "bilibili", "event": "guard_buy" if is_guard else "gift", "uid": uid, "uname": uname, "gift": {"id": gift_id, "name": gift_name, "count": count, "coin_type": str(data.get("coin_type", "") or ""), "price": _to_int(data.get("price", 0))}, "guard_level": _to_int(data.get("guard_level", 0)), "received_at": dt.datetime.now(dt.timezone.utc).isoformat()}
+        with self._lock:
+            if gift_id or gift_name:
+                self._gift_catalog[gift_id] = dict(event["gift"])
+            self._last_gift_event = copy.deepcopy(event)
+            if cmd == "SEND_GIFT" and self._gift_queue_enabled and gift_name in self._gift_queue_names and uid > 0 and uid not in self._gift_queue_used_uids and uid not in self._gift_queue_credits:
+                self._gift_queue_credits[uid] = gift_name
+                event["queue_credit_granted"] = True
+        self._ws_hub.broadcast_json(None, event)
+        self._logger.info("[礼物] %s(%s) %s x%s", uname, uid, gift_name, count)
+
     def process_danmu_json(self, payload: dict[str, Any]) -> None:
         cmd = str(payload.get("cmd", "") or "").strip()
         if not cmd.startswith("DANMU_MSG"):
@@ -2149,7 +2192,7 @@ class QueueManager:
         perm = "黑名单" if is_blacklisted else ("主播" if is_anchor else ("super_admin" if uname in self._super_admins else ("房管" if is_admin_flag else (guard_name or ("管理员" if uname in self._admins else "普通用户")))))
         self._logger.info("[弹幕] %s(%s%s): %s", uname, perm, medal_text, msg)
 
-        modified, note = self._process(uname, msg, is_anchor, is_admin_flag, is_guard, guard_level)
+        modified, note = self._process(uid, uname, msg, is_anchor, is_admin_flag, is_guard, guard_level)
         if modified:
             self._broadcast_and_archive(uname, msg)
             self._logger.info(
@@ -2207,6 +2250,7 @@ class QueueManager:
 
     def _process(
         self,
+        uid: int,
         uname: str,
         msg: str,
         is_anchor: bool,
@@ -2240,6 +2284,13 @@ class QueueManager:
             if index < 0:
                 can_join = len(self._persons) < self._max_length or has_op
                 new_item: str | None = None
+
+                if msg == "插队" and uid in self._gift_queue_credits:
+                    self._insert_queue_item_unlocked(0, uname)
+                    self._gift_queue_credits.pop(uid, None)
+                    self._gift_queue_used_uids.add(uid)
+                    self._persist_myjs_state_unlocked()
+                    modified = True
 
                 join_master_enabled = kg.get("paidui", True)
                 if msg == "排队" and join_master_enabled:
@@ -3228,6 +3279,10 @@ class ApiHandler(BaseHTTPRequestHandler):
             qm = getattr(self.server, "queue_manager", None)
             event = qm.get_last_danmu_event() if qm is not None else {}
             self._write_json({"status": "ok", "event": event})
+            return
+        if parsed.path == "/api/gifts/state":
+            qm = getattr(self.server, "queue_manager", None)
+            self._write_json({"status": "ok", **(qm.get_gift_state() if qm is not None else {})})
             return
 
         if parsed.path == "/api/queue/state":

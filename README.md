@@ -158,6 +158,14 @@ GET http://127.0.0.1:9816/api/danmu/identity/latest
 
 接口不返回 Cookie、弹幕鉴权 token 等登录凭据。
 
+### 送礼与上舰事件
+
+后端会把 `SEND_GIFT`、`COMBO_SEND`、`GUARD_BUY` 标准化为 `LIVE_GIFT_EVENT`，并通过 `GET /api/gifts/state` 提供最近事件与运行期间识别到的礼物类型。GUI 的“送礼插队”标签默认关闭；启用并配置礼物名称后，每个 UID 最多获得一次“插队”资格。
+
+### MirrorChyan 预接入
+
+`core/mirrorchyan.py` 已实现官方 `latest` API 客户端并进入打包隐藏依赖，但 `MirrorChyanSettings.enabled` 默认是 `False`，当前启动流程不会调用它，也不会发送 CDK 或自动下载更新。
+
 ## 运行数据与日志
 
 - 日志目录：`log/`（按日期命名，保留天数可配置）

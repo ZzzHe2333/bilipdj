@@ -14,6 +14,7 @@ import threading
 import time
 import urllib.error
 import urllib.parse
+import urllib.parse
 import urllib.request
 import zlib
 from typing import Any
@@ -491,6 +492,18 @@ def fetch_bilibili_room_config(roomid: int, cookie: str = "") -> dict[str, Any]:
 
 
 GUARD_LEVEL_NAMES = {0: "", 1: "总督", 2: "提督", 3: "舰长"}
+
+
+def extract_bilibili_room_id(value: str | int) -> int:
+    """Extract only the room path/id; query parameters are intentionally discarded."""
+    text = str(value or "").strip()
+    if text.isdigit():
+        return int(text)
+    parsed = urllib.parse.urlparse(text if "://" in text else f"https://{text}")
+    if parsed.netloc.lower() not in {"live.bilibili.com", "www.live.bilibili.com"}:
+        return 0
+    segment = parsed.path.strip("/").split("/", 1)[0]
+    return int(segment) if segment.isdigit() else 0
 
 
 def parse_bilibili_danmu_identity(payload: dict[str, Any], *, anchor_uid: int = 0) -> dict[str, Any]:
@@ -1008,6 +1021,8 @@ class BilibiliDanmuRelay(threading.Thread):
                 if hasattr(self.server, "queue_manager"):
                     self.server.queue_manager.process_danmu_json(parsed_msg)
             else:
+                if hasattr(self.server, "queue_manager"):
+                    self.server.queue_manager.process_live_event(parsed_msg)
                 self.server.ws_hub.broadcast_text(None, text)
         return True
 
@@ -1058,4 +1073,5 @@ __all__ = [
     "resolve_bilibili_login",
     "fetch_bilibili_room_config",
     "parse_bilibili_danmu_identity",
+    "extract_bilibili_room_id",
 ]
