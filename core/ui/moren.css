@@ -15,10 +15,26 @@
     --queue-glow-sm: 0 0 8px rgba(0,229,255,0.7);
     --queue-glow-lg: 0 0 22px rgba(0,229,255,0.35);
 }
-html, body { margin: 0; background: transparent !important; color: var(--text-color); font-family: var(--queue-font-family); }
-.wk { width: 100%; height: 80%; text-overflow: ellipsis; white-space: nowrap; }
-.div { width: 60%; height: 90%; line-height: 1.3; font-family: var(--queue-font-family); font-size: var(--queue-font-size); font-weight: var(--queue-font-weight); font-style: var(--queue-font-style); float: left; margin-top: 5%; text-align: left; overflow: hidden; }
-.div span { -webkit-text-stroke: 2px var(--text-stroke); color: var(--neon); text-shadow: var(--queue-glow-sm), var(--queue-glow-lg); display: block; }
+html, body { margin: 0; min-height: 100%; background: transparent !important; color: var(--text-color); font-family: var(--queue-font-family); }
+.wk { position: relative; width: min(92%, 720px); min-height: 72vh; margin: 4vh auto; padding: 22px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--neon) 38%, transparent); border-radius: 24px; background: linear-gradient(145deg, rgba(8, 18, 38, .88), rgba(4, 10, 24, .72)); box-shadow: 0 24px 80px rgba(0,0,0,.34), inset 0 1px rgba(255,255,255,.08); backdrop-filter: blur(18px); }
+.wk::before { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--neon) 18%, transparent), transparent 38%); }
+.queue-header { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 18px; border-bottom: 1px solid rgba(255,255,255,.1); }
+.queue-header h1 { margin: 4px 0 0; font-size: clamp(22px, 4vw, 34px); letter-spacing: .08em; }
+.queue-kicker { color: var(--neon); font-size: 11px; font-weight: 800; letter-spacing: .28em; }
+.connection-badge { display: inline-flex; align-items: center; gap: 7px; padding: 7px 11px; border: 1px solid rgba(255,255,255,.12); border-radius: 999px; background: rgba(255,255,255,.06); color: rgba(255,255,255,.68); font-size: 12px; }
+.connection-badge::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 10px #f59e0b; }
+.connection-badge.is-online::before { background: #34d399; box-shadow: 0 0 12px #34d399; }
+.div { position: relative; display: grid; gap: 10px; margin-top: 18px; max-height: 58vh; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--neon) transparent; }
+.queue-item { display: grid; grid-template-columns: 44px 1fr; align-items: center; min-height: 54px; padding: 8px 14px 8px 8px; border: 1px solid rgba(255,255,255,.08); border-radius: 14px; background: linear-gradient(90deg, rgba(255,255,255,.08), rgba(255,255,255,.025)); animation: queueEnter .28s ease-out both; }
+.queue-number { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: color-mix(in srgb, var(--neon) 14%, transparent); color: var(--neon); font-size: 12px; font-weight: 800; }
+.queue-content { overflow: hidden; color: var(--neon); font-size: var(--queue-font-size); font-weight: var(--queue-font-weight); font-style: var(--queue-font-style); text-overflow: ellipsis; text-shadow: var(--queue-glow-sm); white-space: nowrap; }
+.empty-state { position: relative; display: grid; place-items: center; gap: 8px; padding: 10vh 20px; color: rgba(255,255,255,.65); text-align: center; }
+.empty-state[hidden] { display: none; }
+.empty-state small { color: rgba(255,255,255,.4); }
+.empty-icon { color: var(--neon); font-size: 32px; filter: drop-shadow(0 0 12px var(--neon)); }
+@keyframes queueEnter { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .queue-item { animation: none; } }
+@media (max-width: 520px) { .wk { width: auto; margin: 12px; padding: 16px; border-radius: 18px; } .queue-header h1 { font-size: 23px; } .connection-badge { padding: 6px 9px; } }
 .div span.pdj-confirm-pending { animation: pdjPendingBlink 0.7s infinite alternate; }
 @keyframes pdjPendingBlink {
     from { color: var(--neon); text-shadow: 0 0 8px rgba(0,229,255,0.9), 0 0 28px rgba(0,229,255,0.5); opacity: 1; }

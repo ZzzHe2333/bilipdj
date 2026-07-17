@@ -5,6 +5,8 @@ var zroomid = 0;
 var zuid = 0;
 var ws = null;
 var pdjConnected = false;
+var pdjReconnectTimer = null;
+var pdjReconnectAttempt = 0;
 
 // ---------- 工具函数 ----------
 
@@ -33,10 +35,33 @@ function PDJ_ReloadStylesheet() {
 
 function PDJ_RenderQueue(queue) {
     if (!Array.isArray(queue)) return;
-    var html = queue.map(function(item) {
-        return "<span>" + escapeHtml(String(item || "")) + "<br></span>";
-    }).join("");
-    document.getElementById("danmu").innerHTML = html;
+    var container = document.getElementById("danmu");
+    var empty = document.getElementById("emptyState");
+    if (!container) return;
+    var fragment = document.createDocumentFragment();
+    queue.forEach(function(item, index) {
+        var row = document.createElement("div");
+        row.className = "queue-item";
+        row.setAttribute("role", "listitem");
+        var number = document.createElement("span");
+        number.className = "queue-number";
+        number.textContent = String(index + 1).padStart(2, "0");
+        var content = document.createElement("span");
+        content.className = "queue-content";
+        content.textContent = String(item || "");
+        row.appendChild(number);
+        row.appendChild(content);
+        fragment.appendChild(row);
+    });
+    container.replaceChildren(fragment);
+    if (empty) empty.hidden = queue.length > 0;
+}
+
+function PDJ_SetConnectionBadge(connected) {
+    var badge = document.getElementById("connectionBadge");
+    if (!badge) return;
+    badge.textContent = connected ? "实时连接" : "正在重连";
+    badge.classList.toggle("is-online", connected);
 }
 
 // ---------- 配置加载（仅读取 roomid / uid，供状态显示用） ----------
@@ -75,6 +100,9 @@ async function PDJ_Connect() {
 
     ws.onopen = function() {
         pdjConnected = true;
+        pdjReconnectAttempt = 0;
+        if (pdjReconnectTimer) clearTimeout(pdjReconnectTimer);
+        PDJ_SetConnectionBadge(true);
         var statusEl = document.getElementById("status");
         if (statusEl) statusEl.textContent = "已连接";
         PDJ_EmitStatus("connected");
@@ -83,9 +111,11 @@ async function PDJ_Connect() {
 
     ws.onclose = function() {
         pdjConnected = false;
+        PDJ_SetConnectionBadge(false);
         PDJ_EmitStatus("disconnected");
         console.log("[PDJ] WebSocket 断开，2 秒后重连…");
-        setTimeout(PDJ_Connect, 2000);
+        var delay = Math.min(15000, 1000 * Math.pow(1.7, pdjReconnectAttempt++));
+        pdjReconnectTimer = setTimeout(PDJ_Connect, delay);
     };
 
     ws.onerror = function(err) {
@@ -129,4 +159,5 @@ async function PDJ_Connect() {
 }
 
 PDJ_ReloadStylesheet();
+PDJ_RenderQueue([]);
 PDJ_Connect();

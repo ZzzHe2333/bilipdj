@@ -1,0 +1,26 @@
+name: Quality and API compatibility
+
+on:
+  push:
+    branches: [now]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  source-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m compileall -q core scripts
+      - run: python scripts/scan_secrets.py
+      - name: Check public platform endpoints
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: python scripts/check_api_health.py

@@ -57,10 +57,18 @@ jobs:
           python3 -c "import tkinter; print('tkinter OK')"
           pip list | grep -i "^http " && echo "WARNING: http package installed" || echo "http package not installed (OK)"
 
-      - name: Build macOS executable
+      - name: Scan tracked files for secrets
+        run: python3 scripts/scan_secrets.py
+
+      - name: Build macOS executable (${{ inputs.arch }})
         run: |
           chmod +x package-macos-local.sh
-          ./package-macos-local.sh --install-deps
+          chmod +x scripts/package-arm64.sh scripts/package-amd64.sh
+          if [[ "${{ inputs.arch }}" == "arm64" ]]; then
+            ./scripts/package-arm64.sh --install-deps
+          else
+            ./scripts/package-amd64.sh --install-deps
+          fi
 
       - name: Create release tarball
         run: |

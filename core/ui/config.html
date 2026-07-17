@@ -146,27 +146,35 @@
     <link rel="stylesheet" href="pdj_design.css">
 </head>
 <body>
-    <div class="panel">
-        <h3>弹幕排队姬 - 登录配置</h3>
+    <main class="config-shell">
+      <section class="config-intro">
+        <span class="eyebrow">BILIPDJ · ACCOUNT</span>
+        <h1>连接你的<br><em>直播间</em></h1>
+        <p>一次配置，自动接入 Bilibili 实时弹幕。登录信息只保存在运行本机，不会上传到仓库。</p>
+        <div class="privacy-note"><span>✓</span><div><strong>本地隐私保护</strong><small>Cookie 不会显示在日志中，也不会进入构建产物。</small></div></div>
+      </section>
+      <section class="panel">
+        <div class="panel-heading"><span class="step">01</span><div><h3>账号连接</h3><p>扫码是最简单且推荐的方式</p></div></div>
 
         <div class="row">
-            <label for="uid">UID</label>
-            <input id="uid" type="number" inputmode="numeric" placeholder="扫码登录后可自动识别">
+            <label for="uid">Bilibili UID <small>扫码后自动识别</small></label>
+            <input id="uid" type="number" inputmode="numeric" placeholder="例如 12345678">
         </div>
 
         <div class="row">
-            <label for="cookie">Cookie</label>
-            <textarea id="cookie" rows="4" placeholder="粘贴 Bilibili Cookie，至少包含 SESSDATA"></textarea>
+            <label for="cookie">登录凭据 <small>至少包含 SESSDATA</small></label>
+            <textarea id="cookie" rows="4" placeholder="可手动粘贴 Cookie，或使用下方扫码自动填写"></textarea>
         </div>
 
         <div class="actions">
-            <button id="save-btn" type="button">保存登录</button>
-            <button id="qr-btn" type="button">扫码自动获取 Cookie</button>
-            <span id="status-text" class="hint">正在初始化页面...</span>
+            <button id="qr-btn" class="primary" type="button">▣ 扫码连接</button>
+            <button id="save-btn" type="button">保存配置</button>
         </div>
 
-        <div class="tip">扫码按钮可立即打开，不需要等待配置读取完成。</div>
-    </div>
+        <div id="status-text" class="status-card"><span class="pulse"></span>正在初始化页面...</div>
+        <div class="tip">扫码窗口可以立即打开，无需等待配置加载。</div>
+      </section>
+    </main>
 
     <script>
         (function () {

@@ -129,6 +129,24 @@ powershell -ExecutionPolicy Bypass -File .\package-windows-local.ps1 -InstallDep
 脚本会构建 `dist\bilipdj\main.exe` 并自动将 `dist\paiduijitm.exe` 复制至主程序目录。
 CI（`package-windows-x64.yml`）同样调用此脚本，将 onedir 打包成 zip 发布。
 
+### 按架构打包
+
+构建必须在与目标架构一致的原生 runner 上执行，避免生成“文件名正确但无法运行”的伪跨架构产物：
+
+- `scripts/package-arm64.sh`：macOS Apple Silicon / Linux arm64 runner
+- `scripts/package-amd64.sh`：macOS Intel / Linux amd64 runner
+- `scripts/package-amd64.ps1`：Windows amd64 runner
+
+GitHub Actions 的 macOS 工作流可选择 `arm64` 或 `x86_64`，两条路径会分别调用对应的架构校验脚本。发布前会运行 `scripts/scan_secrets.py`，拒绝把 Cookie、Token 或私钥打入产物。
+
+### API 健康检查
+
+```bash
+python scripts/check_api_health.py
+```
+
+此检查不读取本地 Cookie：它会分层验证 Bilibili 房间解析/弹幕服务器接口，以及抖音直播页解析。抖音完整弹幕轮询需要真实开播房间和有效登录态，因此默认不会把“需要 Cookie 或当前未开播”误报成 API 过期。
+
 ## 运行数据与日志
 
 - 日志目录：`log/`（按日期命名，保留天数可配置）

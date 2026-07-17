@@ -382,24 +382,24 @@ queue_archive:
 class ControlPanelApp:
     # --- 主题配色 ---
     _THEME_DARK: dict[str, str] = {
-        "bg": "#07101e", "bg2": "#060c18", "surface": "#071224",
-        "accent": "#00e5ff", "accent_dim": "#00b8d9",
-        "fg": "#cce8ff", "fg2": "#7ec8e3",
-        "border": "#19506a",
-        "btn_bg": "#00283c", "btn_active": "#003a5a",
-        "input_bg": "#000a16",
-        "select_bg": "#003a5a", "select_fg": "#ffffff",
-        "status_ok": "#2ecc71", "warn": "#ff3b5c",
-        "ts": "#2ecc71", "ev": "#9ec7e6",
+        "bg": "#090d18", "bg2": "#101727", "surface": "#151d2f",
+        "accent": "#8b7cff", "accent_dim": "#6d5ee8",
+        "fg": "#f4f3ff", "fg2": "#9ba5bd",
+        "border": "#2a3550",
+        "btn_bg": "#1b2540", "btn_active": "#29365a",
+        "input_bg": "#0d1424",
+        "select_bg": "#6d5ee8", "select_fg": "#ffffff",
+        "status_ok": "#3ddc97", "warn": "#ff6b81",
+        "ts": "#56d6c9", "ev": "#c3cae0",
     }
     _THEME_LIGHT: dict[str, str] = {
-        "bg": "#eef3fa", "bg2": "#dde6f3", "surface": "#ffffff",
-        "accent": "#0078c8", "accent_dim": "#005fa0",
-        "fg": "#1a2a40", "fg2": "#4a6080",
-        "border": "#b0c8e0",
-        "btn_bg": "#dae6f5", "btn_active": "#b8d4f0",
-        "input_bg": "#f4f8ff",
-        "select_bg": "#0078c8", "select_fg": "#ffffff",
+        "bg": "#f4f6fb", "bg2": "#eaedf5", "surface": "#ffffff",
+        "accent": "#6757d9", "accent_dim": "#5142bc",
+        "fg": "#20263a", "fg2": "#687089",
+        "border": "#d5d9e7",
+        "btn_bg": "#f0efff", "btn_active": "#e1defe",
+        "input_bg": "#fbfbfe",
+        "select_bg": "#6757d9", "select_fg": "#ffffff",
         "status_ok": "#007a40", "warn": "#cc1100",
         "ts": "#1a8a30", "ev": "#334466",
     }
@@ -467,7 +467,7 @@ class ControlPanelApp:
         self.ws_text_var = tk.StringVar(value="直播间链接状态：未连接")
 
         # --- 主题状态 ---
-        self._dark_mode: bool = False
+        self._dark_mode: bool = True
         self._all_text_widgets: list[tk.Text] = []
         self._status_label: ttk.Label | None = None
         self._brand_label: ttk.Label | None = None
@@ -537,7 +537,7 @@ class ControlPanelApp:
             "TButton",
             background=t["btn_bg"], foreground=t["accent"],
             bordercolor=t["border"], darkcolor=t["border"], lightcolor=t["border"],
-            focuscolor=t["btn_bg"], relief="flat", padding=(8, 4),
+            focuscolor=t["btn_bg"], relief="flat", padding=(12, 8),
         )
         style.map(
             "TButton",
@@ -548,7 +548,7 @@ class ControlPanelApp:
         # 输入框
         style.configure(
             "TEntry",
-            fieldbackground=t["input_bg"], foreground=t["fg"],
+            fieldbackground=t["input_bg"], foreground=t["fg"], padding=(8, 7),
             insertcolor=t["accent"], bordercolor=t["border"],
             focuscolor=t["border"], selectbackground=t["select_bg"], selectforeground=t["select_fg"],
         )
@@ -596,7 +596,7 @@ class ControlPanelApp:
         style.configure(
             "TNotebook.Tab",
             background=t["bg2"], foreground=t["fg2"],
-            padding=(14, 9), focuscolor=t["bg2"],
+            padding=(18, 13), focuscolor=t["bg2"],
             bordercolor=t["border"],
             width=LEFT_NAV_TAB_WIDTH,
         )
@@ -611,7 +611,7 @@ class ControlPanelApp:
             "Treeview",
             background=t["surface"], foreground=t["fg"],
             fieldbackground=t["surface"], bordercolor=t["border"],
-            rowheight=22,
+            rowheight=32,
         )
         style.configure(
             "Treeview.Heading",
@@ -736,7 +736,7 @@ class ControlPanelApp:
                 continue
 
     def _build_ui(self) -> None:
-        main = ttk.Frame(self.root, padding=12)
+        main = ttk.Frame(self.root, padding=20)
         main.grid(sticky="nsew")
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
@@ -745,18 +745,18 @@ class ControlPanelApp:
 
         # --- 顶部：服务器控制按钮和状态 ---
         top = ttk.Frame(main)
-        top.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        top.grid(row=0, column=0, sticky="ew", pady=(0, 16))
 
-        self._brand_label = ttk.Label(top, text=f"[ BILIPDJ ] v{APP_VERSION}")
-        self._brand_label.pack(side="left", padx=(0, 12))
+        self._brand_label = ttk.Label(top, text=f"BILIPDJ  ·  LIVE STUDIO   v{APP_VERSION}")
+        self._brand_label.pack(side="left", padx=(0, 22))
 
         btn_bar = ttk.Frame(top)
         btn_bar.pack(side="left")
-        ttk.Button(btn_bar, text="启动后端", command=self.start_server).grid(row=0, column=0, padx=(0, 6))
-        ttk.Button(btn_bar, text="停止后端", command=self.stop_server).grid(row=0, column=1, padx=(0, 6))
-        ttk.Button(btn_bar, text="配置页", command=self.open_config).grid(row=0, column=2, padx=(0, 6))
-        ttk.Button(btn_bar, text="排队展示页", command=self.open_web).grid(row=0, column=3, padx=(0, 6))
-        ttk.Button(btn_bar, text="透明弹窗", command=self.open_overlay_window).grid(row=0, column=4)
+        ttk.Button(btn_bar, text="▶  启动服务", command=self.start_server).grid(row=0, column=0, padx=(0, 8))
+        ttk.Button(btn_bar, text="■  停止", command=self.stop_server).grid(row=0, column=1, padx=(0, 8))
+        ttk.Button(btn_bar, text="⚙  登录配置", command=self.open_config).grid(row=0, column=2, padx=(0, 8))
+        ttk.Button(btn_bar, text="↗  队列看板", command=self.open_web).grid(row=0, column=3, padx=(0, 8))
+        ttk.Button(btn_bar, text="▣  OBS 弹窗", command=self.open_overlay_window).grid(row=0, column=4)
 
         self._status_label = ttk.Label(top, textvariable=self.status_var)
         self._status_label.pack(side="left", padx=(16, 0))

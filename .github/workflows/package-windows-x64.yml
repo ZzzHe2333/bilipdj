@@ -56,7 +56,8 @@ jobs:
       - name: Build Windows executable (x64)
         shell: pwsh
         run: |
-          .\package-windows-local.ps1 -InstallDependencies
+          python scripts\scan_secrets.py
+          .\scripts\package-amd64.ps1 -InstallDependencies
 
       - name: Create release zip
         shell: pwsh

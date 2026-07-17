@@ -2,6 +2,12 @@
 config.yaml
 kaiguan.yaml
 quanxian.yaml
+core/config.yaml
+core/kaiguan.yaml
+core/quanxian.yaml
+core/platform_config_archive*.json
+core/*cookie*
+core/*token*
 core/cd/
 tmp*
 log/
@@ -150,6 +156,13 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets.*
 .envrc
 .venv
 env/
