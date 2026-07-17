@@ -14,7 +14,7 @@ import urllib.error
 import urllib.request
 import webbrowser
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 from typing import Any
 
 if sys.platform == "win32":
@@ -82,7 +82,7 @@ LOG_LEVEL_OPTIONS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 _LEVEL_ORDER = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 4}
 _LOG_LEVEL_RE = re.compile(r"\[(DEBUG|INFO|WARNING|ERROR|CRITICAL)\]")
 # 匹配后端日志完整时间戳前缀：2026-04-09 12:34:56,789 [INFO] name:
-_LOG_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2} (\d{2}:\d{2}:\d{2}),\d+ \[(?:DEBUG|INFO|WARNING|ERROR|CRITICAL)\] [^:]+: (.*)")
+_LOG_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2} (\d{2}:\d{2}:\d{2}),\d+ \[(DEBUG|INFO|WARNING|ERROR|CRITICAL)\] [^:]+: (.*)")
 # 匹配面板显示格式 "HH:MM:SS 内容"
 _PANEL_TS_RE = re.compile(r"^(\d{2}:\d{2}:\d{2}) (.*)", re.DOTALL)
 # 匹配日志中的 URL（用于可点击链接）
@@ -90,7 +90,7 @@ _URL_RE = re.compile(r"https?://[^\s,，）)\]>\"']+")
 # 匹配日志行前缀括号标签 "[GUI]" "[INFO]" 等
 _BRACKET_TAG_RE = re.compile(r"^\[([A-Z_a-z0-9/\s]+)\] ?")
 MAX_QUEUE_ARCHIVE_SLOTS = 10
-LEFT_NAV_TAB_WIDTH = 18
+LEFT_NAV_TAB_WIDTH = 16
 OVERLAY_REFRESH_MS = 1200
 OVERLAY_TRANSPARENT_COLOR = "#010101"
 OVERLAY_RESIZE_MARGIN = 8
@@ -382,15 +382,15 @@ queue_archive:
 class ControlPanelApp:
     # --- 主题配色 ---
     _THEME_DARK: dict[str, str] = {
-        "bg": "#090d18", "bg2": "#101727", "surface": "#151d2f",
-        "accent": "#8b7cff", "accent_dim": "#6d5ee8",
-        "fg": "#f4f3ff", "fg2": "#9ba5bd",
-        "border": "#2a3550",
-        "btn_bg": "#1b2540", "btn_active": "#29365a",
-        "input_bg": "#0d1424",
-        "select_bg": "#6d5ee8", "select_fg": "#ffffff",
-        "status_ok": "#3ddc97", "warn": "#ff6b81",
-        "ts": "#56d6c9", "ev": "#c3cae0",
+        "bg": "#090E1A", "bg2": "#0D1424", "surface": "#111A2C",
+        "accent": "#7C6CF2", "accent_dim": "#9184FF",
+        "fg": "#E6EDF7", "fg2": "#8A9AB3",
+        "border": "#26334D", "disabled": "#56647A",
+        "btn_bg": "#18233A", "btn_active": "#22304D",
+        "input_bg": "#0D1424",
+        "select_bg": "#7C6CF2", "select_fg": "#FFFFFF",
+        "status_ok": "#32D583", "warn": "#F5B942", "error": "#F97066",
+        "ts": "#64748B", "info": "#60A5FA", "danmu": "#A78BFA", "event": "#22C55E", "ev": "#D8E0EC",
     }
     _THEME_LIGHT: dict[str, str] = {
         "bg": "#f4f6fb", "bg2": "#eaedf5", "surface": "#ffffff",
@@ -401,7 +401,8 @@ class ControlPanelApp:
         "input_bg": "#fbfbfe",
         "select_bg": "#6757d9", "select_fg": "#ffffff",
         "status_ok": "#007a40", "warn": "#cc1100",
-        "ts": "#1a8a30", "ev": "#334466",
+        "error": "#d92d20", "disabled": "#98a2b3",
+        "ts": "#667085", "info": "#1570ef", "danmu": "#7f56d9", "event": "#039855", "ev": "#344054",
     }
 
     def __init__(self, root: tk.Tk) -> None:
@@ -476,6 +477,7 @@ class ControlPanelApp:
         self.overlay_scale_var = tk.StringVar(value=str(DEFAULT_OVERLAY_SETTINGS["scale"]))
         self.ws_light_var = tk.StringVar(value="🔴")
         self.ws_text_var = tk.StringVar(value="直播间链接状态：未连接")
+        self.header_status_var = tk.StringVar(value="服务未启动 · 房间 3049445")
         self._bilibili_fetch_status_var = tk.StringVar(value="填写房间号与 Cookie 后可一键获取监听配置")
 
         # --- 主题状态 ---
@@ -485,10 +487,21 @@ class ControlPanelApp:
         self._brand_label: ttk.Label | None = None
         self._ws_light_label: ttk.Label | None = None
         self._theme_btn: ttk.Button | None = None
+        self._header_dot_label: ttk.Label | None = None
+        self._nav_frame: tk.Frame | None = None
+        self._nav_items: list[tuple[tk.Frame, tk.Button, tk.Frame]] = []
+        self._content_pages: list[ttk.Frame] = []
+        self._active_page = 0
         self._settings_hint_label: ttk.Label | None = None
         self._settings_canvas: tk.Canvas | None = None
         self._platform_hint_label: ttk.Label | None = None
         self.ui_font_size_var = tk.StringVar(value="10")
+        self.log_search_var = tk.StringVar(value="")
+        self.log_errors_only_var = tk.BooleanVar(value=False)
+        self.log_danmu_only_var = tk.BooleanVar(value=False)
+        self.log_auto_scroll_var = tk.BooleanVar(value=True)
+        self.log_wrap_var = tk.BooleanVar(value=True)
+        self._log_records: list[tuple[str, str, str]] = []
 
         # --- 抖音参数获取 ---
         self.douyin_fetch_url_var = tk.StringVar(value="")
@@ -517,6 +530,8 @@ class ControlPanelApp:
         self._overlay_font_path = self._detect_overlay_font_path()
 
         self._build_ui()
+        for var in (self.status_var, self.ws_text_var, self.roomid_var):
+            var.trace_add("write", lambda *_: self._refresh_header_status())
         self.ui_font_size_var.trace_add("write", lambda *_: self._apply_ui_font_size())
         self.load_from_file()
         self._append_log("[GUI] 初始化完成 — 后端尚未启动，请点击「启动后端」")
@@ -556,6 +571,19 @@ class ControlPanelApp:
             background=[("active", t["btn_active"]), ("pressed", t["select_bg"]), ("disabled", t["bg2"])],
             foreground=[("active", t["fg"]), ("pressed", t["select_fg"]), ("disabled", t["fg2"])],
         )
+        style.configure("Primary.TButton", background=t["accent"], foreground="#ffffff", borderwidth=0, padding=(16, 9))
+        style.map("Primary.TButton", background=[("active", t["accent_dim"]), ("pressed", t["accent_dim"])])
+        style.configure("Danger.TButton", background=t["bg2"], foreground=t["error"], bordercolor=t["error"], borderwidth=1, padding=(16, 8))
+        style.map("Danger.TButton", background=[("active", t["btn_active"])], foreground=[("active", t["error"])])
+        style.configure("Icon.TButton", background=t["btn_bg"], foreground=t["fg"], borderwidth=0, padding=(9, 7))
+        style.configure("Nav.TButton", background=t["bg2"], foreground=t["fg2"], borderwidth=0, relief="flat", anchor="w", padding=(13, 11))
+        style.map("Nav.TButton", background=[("active", t["btn_active"])], foreground=[("active", t["fg"])])
+        style.configure("NavSelected.TButton", background=t["btn_active"], foreground=t["fg"], borderwidth=0, relief="flat", anchor="w", padding=(13, 11))
+        style.map("NavSelected.TButton", background=[("active", t["btn_active"])])
+        style.configure("Card.TFrame", background=t["surface"], bordercolor=t["border"], borderwidth=1, relief="solid")
+        style.configure("Card.TLabel", background=t["surface"], foreground=t["fg"])
+        style.configure("Muted.Card.TLabel", background=t["surface"], foreground=t["fg2"])
+        style.configure("Toolbar.TFrame", background=t["surface"])
 
         # 输入框
         style.configure(
@@ -600,16 +628,16 @@ class ControlPanelApp:
                 indicatorcolor=[("selected", t["accent"]), ("active", t["accent_dim"])],
             )
 
-        # Notebook 标签页
+        # 兼容旧页面中仍存在的 Notebook
         style.configure(
             "TNotebook",
-            background=t["bg"], bordercolor=t["border"], tabmargins=(0, 0, 8, 0), tabposition="wn",
+            background=t["bg"], borderwidth=0, tabmargins=(0, 0, 8, 0), tabposition="wn",
         )
         style.configure(
             "TNotebook.Tab",
             background=t["bg2"], foreground=t["fg2"],
             padding=(18, 13), focuscolor=t["bg2"],
-            bordercolor=t["border"],
+            borderwidth=0,
             width=LEFT_NAV_TAB_WIDTH,
         )
         style.map(
@@ -669,6 +697,11 @@ class ControlPanelApp:
             _mono = ("Consolas", 9) if sys.platform == "win32" else ("Menlo", 10) if sys.platform == "darwin" else ("Monospace", 10)
             self.log_text.tag_configure("ts", foreground=t["ts"], font=_mono)
             self.log_text.tag_configure("sep", foreground=t["border"])
+            self.log_text.tag_configure("level_info", foreground=t["info"], font=(*_mono[:1], _mono[1], "bold"))
+            self.log_text.tag_configure("level_danmu", foreground=t["danmu"], font=(*_mono[:1], _mono[1], "bold"))
+            self.log_text.tag_configure("level_event", foreground=t["event"], font=(*_mono[:1], _mono[1], "bold"))
+            self.log_text.tag_configure("level_warning", foreground=t["warn"], font=(*_mono[:1], _mono[1], "bold"))
+            self.log_text.tag_configure("level_error", foreground=t["error"], font=(*_mono[:1], _mono[1], "bold"))
             self.log_text.tag_configure("bracket", foreground=t["accent_dim"], font=(*_mono[:1], _mono[1], "bold"))
             self.log_text.tag_configure("ev", foreground=t["ev"])
             self.log_text.tag_configure("warn", foreground=t["warn"])
@@ -682,6 +715,16 @@ class ControlPanelApp:
             self._status_label.configure(foreground=t["status_ok"])
         if self._ws_light_label is not None:
             self._ws_light_label.configure(foreground=t["status_ok"])
+        if self._header_dot_label is not None:
+            running = self._backend_is_running()
+            self._header_dot_label.configure(foreground=t["status_ok"] if running else t["error"])
+        if self._nav_frame is not None:
+            self._nav_frame.configure(bg=t["bg2"])
+        for row, button, indicator in self._nav_items:
+            row.configure(bg=t["bg2"])
+            selected = self._nav_items.index((row, button, indicator)) == self._active_page
+            indicator.configure(bg=t["accent"] if selected else t["bg2"])
+            button.configure(bg=t["btn_active"] if selected else t["bg2"], fg=t["fg"] if selected else t["fg2"], activebackground=t["btn_active"], activeforeground=t["fg"], font=("Microsoft YaHei UI", 11, "bold" if selected else "normal"))
         if self._settings_hint_label is not None:
             self._settings_hint_label.configure(foreground=t["fg2"])
         if self._platform_hint_label is not None:
@@ -691,7 +734,7 @@ class ControlPanelApp:
 
         # 主题切换按钮文字
         if self._theme_btn is not None:
-            self._theme_btn.configure(text="☀ 明亮" if dark else "🌙 暗夜")
+            self._theme_btn.configure(text="☀" if dark else "☾")
 
         self._apply_ui_font_size()
 
@@ -706,6 +749,8 @@ class ControlPanelApp:
         style = ttk.Style(self.root)
         style.configure("TLabel", font=font)
         style.configure("TButton", font=font)
+        style.configure("Nav.TButton", font=(fn, size + 1))
+        style.configure("NavSelected.TButton", font=(fn, size + 1, "bold"))
         style.configure("TEntry", font=font)
         style.configure("TCombobox", font=font)
         style.configure("TCheckbutton", font=font)
@@ -715,10 +760,9 @@ class ControlPanelApp:
         style.configure("Treeview", font=font, rowheight=size + 10)
         style.configure("Treeview.Heading", font=font_bold)
         if self._brand_label is not None:
-            mono = "Consolas" if sys.platform == "win32" else ("Menlo" if sys.platform == "darwin" else "Monospace")
-            self._brand_label.configure(font=(mono, size, "bold"))
+            self._brand_label.configure(font=(fn, size + 5, "bold"))
         if hasattr(self, "log_text"):
-            mono = "Consolas" if sys.platform == "win32" else ("Menlo" if sys.platform == "darwin" else "Monospace")
+            mono = "Cascadia Mono" if sys.platform == "win32" else ("Menlo" if sys.platform == "darwin" else "Monospace")
             mono_font = (mono, size)
             self.log_text.configure(font=mono_font)
             self.log_text.tag_configure("ts", font=mono_font)
@@ -748,93 +792,94 @@ class ControlPanelApp:
                 continue
 
     def _build_ui(self) -> None:
-        main = ttk.Frame(self.root, padding=20)
+        main = ttk.Frame(self.root, padding=(20, 14, 20, 20))
         main.grid(sticky="nsew")
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         main.columnconfigure(0, weight=1)
         main.rowconfigure(1, weight=1)
 
-        # --- 顶部：服务器控制按钮和状态 ---
+        # --- 顶部：品牌、合并状态与分组操作 ---
         top = ttk.Frame(main)
-        top.grid(row=0, column=0, sticky="ew", pady=(0, 16))
+        top.grid(row=0, column=0, sticky="ew", pady=(0, 14), ipady=5)
+        top.columnconfigure(1, weight=1)
 
-        self._brand_label = ttk.Label(top, text=f"BILIPDJ  ·  LIVE STUDIO   v{APP_VERSION}")
-        self._brand_label.pack(side="left", padx=(0, 22))
+        self._brand_label = ttk.Label(top, text="弹幕排队姬")
+        self._brand_label.grid(row=0, column=0, sticky="w", padx=(0, 22))
+
+        status_box = ttk.Frame(top)
+        status_box.grid(row=0, column=1, sticky="w")
+        self._header_dot_label = ttk.Label(status_box, text="●", font=("Segoe UI Symbol", 11, "bold"))
+        self._header_dot_label.pack(side="left")
+        ttk.Label(status_box, textvariable=self.header_status_var).pack(side="left", padx=(7, 0))
 
         btn_bar = ttk.Frame(top)
-        btn_bar.pack(side="left")
-        ttk.Button(btn_bar, text="▶  启动服务", command=self.start_server).grid(row=0, column=0, padx=(0, 8))
-        ttk.Button(btn_bar, text="■  停止", command=self.stop_server).grid(row=0, column=1, padx=(0, 8))
-        ttk.Button(btn_bar, text="⚙  登录配置", command=self.open_config).grid(row=0, column=2, padx=(0, 8))
-        ttk.Button(btn_bar, text="↗  队列看板", command=self.open_web).grid(row=0, column=3, padx=(0, 8))
-        ttk.Button(btn_bar, text="▣  OBS 弹窗", command=self.open_overlay_window).grid(row=0, column=4)
+        btn_bar.grid(row=0, column=2, sticky="e")
+        ttk.Button(btn_bar, text="启动服务", style="Primary.TButton", command=self.start_server).grid(row=0, column=0, padx=(0, 8))
+        ttk.Button(btn_bar, text="停止", style="Danger.TButton", command=self.stop_server).grid(row=0, column=1, padx=(0, 8))
+        ttk.Button(btn_bar, text="登录配置", command=self.open_config).grid(row=0, column=2, padx=(0, 8))
+        ttk.Button(btn_bar, text="队列看板", command=self.open_web).grid(row=0, column=3, padx=(0, 8))
+        ttk.Button(btn_bar, text="OBS 弹窗", command=self.open_overlay_window).grid(row=0, column=4, padx=(0, 8))
+        self._theme_btn = ttk.Button(btn_bar, text="☀", width=3, style="Icon.TButton", command=self._toggle_theme)
+        self._theme_btn.grid(row=0, column=5)
 
-        self._status_label = ttk.Label(top, textvariable=self.status_var)
-        self._status_label.pack(side="left", padx=(16, 0))
+        # --- 左侧导航 + 单层内容区 ---
+        shell = ttk.Frame(main)
+        shell.grid(row=1, column=0, sticky="nsew")
+        shell.columnconfigure(1, weight=1)
+        shell.rowconfigure(0, weight=1)
+        nav = tk.Frame(shell, width=166, bd=0, highlightthickness=0)
+        nav.grid(row=0, column=0, sticky="nsw", padx=(0, 14))
+        nav.grid_propagate(False)
+        self._nav_frame = nav
+        content = ttk.Frame(shell, style="Card.TFrame", padding=14)
+        content.grid(row=0, column=1, sticky="nsew")
+        content.columnconfigure(0, weight=1)
+        content.rowconfigure(0, weight=1)
 
-        self._theme_btn = ttk.Button(top, text="🌙 暗夜", command=self._toggle_theme)
-        self._theme_btn.pack(side="right")
-
-        # --- 标签页 ---
-        notebook = ttk.Notebook(main)
-        notebook.grid(row=1, column=0, sticky="nsew")
-
-        # Tab 0: 日志
-        log_tab = ttk.Frame(notebook, padding=8)
-        notebook.add(log_tab, text=self._left_nav_label(0, "日志"))
-        self._build_log_tab(log_tab)
-
-        # Tab 1: 当前排队
-        queue_tab = ttk.Frame(notebook, padding=8)
-        notebook.add(queue_tab, text=self._left_nav_label(1, "当前排队"))
-        self._build_queue_tab(queue_tab)
-
-        # Tab 2: 黑名单
-        blacklist_tab = ttk.Frame(notebook, padding=8)
-        notebook.add(blacklist_tab, text=self._left_nav_label(2, "黑名单"))
-        self._build_blacklist_tab(blacklist_tab)
-
-        # Tab 3: 设置
-        settings_tab = ttk.Frame(notebook, padding=8)
-        notebook.add(settings_tab, text=self._left_nav_label(3, "设置"))
-        self._build_settings_tab(settings_tab)
-
-        # Tab 4: 透明窗口
-        overlay_tab = ttk.Frame(notebook, padding=8)
-        notebook.add(overlay_tab, text=self._left_nav_label(4, "透明窗口"))
-        self._build_overlay_tab(overlay_tab)
-
-        # Tab 5: 权限
-        quanxian_tab = ttk.Frame(notebook, padding=8)
-        notebook.add(quanxian_tab, text=self._left_nav_label(5, "权限"))
-        self._build_quanxian_tab(quanxian_tab)
-
-        # Tab 6: 开关
-        kaiguan_tab = ttk.Frame(notebook, padding=8)
-        notebook.add(kaiguan_tab, text=self._left_nav_label(6, "开关"))
-        self._build_kaiguan_tab(kaiguan_tab)
-
-        # Tab 7: 性能
-        perf_tab = ttk.Frame(notebook, padding=8)
-        notebook.add(perf_tab, text=self._left_nav_label(7, "性能"))
-        self._build_perf_tab(perf_tab)
-
-        # Tab 8: 样式设置
-        style_tab = ttk.Frame(notebook, padding=8)
-        notebook.add(style_tab, text=self._left_nav_label(8, "样式设置"))
-        self._build_style_tab(style_tab)
-
-        gift_tab = ttk.Frame(notebook, padding=8)
-        notebook.add(gift_tab, text=self._left_nav_label(9, "送礼插队"))
-        self._build_gift_queue_tab(gift_tab)
-
-        # Tab 9: 关于
-        about_tab = ttk.Frame(notebook, padding=8)
-        notebook.add(about_tab, text=self._left_nav_label(10, "关于"))
-        self._build_about_tab(about_tab)
+        page_defs = (
+            ("日志", self._build_log_tab), ("当前排队", self._build_queue_tab), ("黑名单", self._build_blacklist_tab),
+            ("设置", self._build_settings_tab), ("透明窗口", self._build_overlay_tab), ("权限", self._build_quanxian_tab),
+            ("开关", self._build_kaiguan_tab), ("性能", self._build_perf_tab), ("样式设置", self._build_style_tab),
+            ("送礼插队", self._build_gift_queue_tab), ("关于", self._build_about_tab),
+        )
+        for index, (label, builder) in enumerate(page_defs):
+            row = tk.Frame(nav, bd=0, highlightthickness=0)
+            row.pack(fill="x", pady=1)
+            indicator = tk.Frame(row, width=3, bd=0)
+            indicator.pack(side="left", fill="y")
+            button = tk.Button(row, text=label, command=lambda i=index: self._show_page(i), anchor="w", padx=13, pady=10, bd=0, relief="flat", highlightthickness=0, cursor="hand2")
+            button.pack(side="left", fill="x", expand=True)
+            self._nav_items.append((row, button, indicator))
+            page = ttk.Frame(content, padding=2)
+            page.grid(row=0, column=0, sticky="nsew")
+            builder(page)
+            self._content_pages.append(page)
 
         self._apply_theme(self._dark_mode)
+        self._show_page(0)
+        self._refresh_header_status()
+
+    def _show_page(self, index: int) -> None:
+        if not self._content_pages:
+            return
+        self._active_page = max(0, min(index, len(self._content_pages) - 1))
+        self._content_pages[self._active_page].tkraise()
+        theme = self._THEME_DARK if self._dark_mode else self._THEME_LIGHT
+        for item_index, (row, button, indicator) in enumerate(self._nav_items):
+            selected = item_index == self._active_page
+            button.configure(bg=theme["btn_active"] if selected else theme["bg2"], fg=theme["fg"] if selected else theme["fg2"], activebackground=theme["btn_active"], activeforeground=theme["fg"], font=("Microsoft YaHei UI", 11, "bold" if selected else "normal"))
+            row.configure(bg=theme["bg2"])
+            indicator.configure(bg=theme["accent"] if selected else theme["bg2"])
+
+    def _refresh_header_status(self) -> None:
+        running = self._backend_is_running()
+        room = self.roomid_var.get().strip() or "--"
+        connection = "已连接" if "已连接" in self.ws_text_var.get() and "未连接" not in self.ws_text_var.get() else ("服务运行中" if running else "服务未启动")
+        self.header_status_var.set(f"{connection} · 房间 {room}")
+        if self._header_dot_label is not None:
+            theme = self._THEME_DARK if self._dark_mode else self._THEME_LIGHT
+            self._header_dot_label.configure(foreground=theme["status_ok"] if running else theme["error"])
 
     def _build_queue_tab(self, frame: ttk.Frame) -> None:
         frame.columnconfigure(0, weight=1)
@@ -3385,16 +3430,33 @@ class ControlPanelApp:
         frame.columnconfigure(0, weight=1)
         frame.rowconfigure(1, weight=1)
 
-        # 连接状态指示
-        status_bar = ttk.Frame(frame)
-        status_bar.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        # 标题与日志工具
+        status_bar = ttk.Frame(frame, style="Toolbar.TFrame")
+        status_bar.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        status_bar.columnconfigure(1, weight=1)
+        ttk.Label(status_bar, text="运行日志", style="Card.TLabel", font=("Microsoft YaHei UI", 15, "bold")).grid(row=0, column=0, sticky="w")
+        tools = ttk.Frame(status_bar, style="Toolbar.TFrame")
+        tools.grid(row=0, column=1, sticky="e")
+        search = ttk.Entry(tools, textvariable=self.log_search_var, width=18)
+        search.grid(row=0, column=0, padx=(0, 6))
+        search.bind("<KeyRelease>", lambda _e: self._refresh_log_view())
+        ttk.Checkbutton(tools, text="仅错误", variable=self.log_errors_only_var, command=self._refresh_log_view).grid(row=0, column=1, padx=3)
+        ttk.Checkbutton(tools, text="仅弹幕", variable=self.log_danmu_only_var, command=self._refresh_log_view).grid(row=0, column=2, padx=3)
+        ttk.Checkbutton(tools, text="自动换行", variable=self.log_wrap_var, command=self._toggle_log_wrap).grid(row=0, column=3, padx=3)
+        ttk.Checkbutton(tools, text="自动滚动", variable=self.log_auto_scroll_var).grid(row=0, column=4, padx=3)
+        ttk.Button(tools, text="清空", command=self._clear_log).grid(row=0, column=5, padx=(6, 3))
+        ttk.Button(tools, text="复制", command=self._copy_log).grid(row=0, column=6, padx=3)
+        ttk.Button(tools, text="导出", command=self._export_log).grid(row=0, column=7, padx=(3, 0))
+
+        connection_bar = ttk.Frame(frame, style="Toolbar.TFrame")
+        connection_bar.grid(row=2, column=0, sticky="ew", pady=(10, 0))
         self._ws_light_label = ttk.Label(
-            status_bar,
+            connection_bar,
             textvariable=self.ws_light_var,
-            font=("Arial", 14, "bold"),
+            style="Card.TLabel", font=("Segoe UI Symbol", 10, "bold"),
         )
         self._ws_light_label.pack(side="left")
-        ttk.Label(status_bar, textvariable=self.ws_text_var).pack(side="left", padx=(8, 0))
+        ttk.Label(connection_bar, textvariable=self.ws_text_var, style="Muted.Card.TLabel").pack(side="left", padx=(7, 0))
 
         # 日志文本
         log_frame = ttk.Frame(frame)
@@ -3402,12 +3464,30 @@ class ControlPanelApp:
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
         _sys_font = ("Microsoft YaHei UI", 9) if sys.platform == "win32" else ("PingFang SC", 11) if sys.platform == "darwin" else ("Sans", 10)
-        self.log_text = tk.Text(log_frame, height=18, wrap="word", state="disabled", font=_sys_font)
+        self.log_text = tk.Text(log_frame, height=18, wrap="word", state="disabled", font=_sys_font, bd=0, highlightthickness=0, padx=12, pady=10, spacing1=2, spacing3=4)
         self._all_text_widgets.append(self.log_text)
         self.log_text.grid(row=0, column=0, sticky="nsew")
         log_scroll = ttk.Scrollbar(log_frame, orient="vertical", command=self.log_text.yview)
         log_scroll.grid(row=0, column=1, sticky="ns")
         self.log_text.configure(yscrollcommand=log_scroll.set)
+
+    def _toggle_log_wrap(self) -> None:
+        if hasattr(self, "log_text"):
+            self.log_text.configure(wrap="word" if self.log_wrap_var.get() else "none")
+
+    def _clear_log(self) -> None:
+        self._log_records.clear()
+        self._refresh_log_view()
+
+    def _copy_log(self) -> None:
+        text = self.log_text.get("1.0", "end-1c")
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+
+    def _export_log(self) -> None:
+        target = filedialog.asksaveasfilename(title="导出运行日志", defaultextension=".log", filetypes=(("日志文件", "*.log"), ("文本文件", "*.txt")))
+        if target:
+            Path(target).write_text(self.log_text.get("1.0", "end-1c"), encoding="utf-8")
 
     def _build_settings_tab(self, frame: ttk.Frame) -> None:
         frame.columnconfigure(0, weight=1)
@@ -4089,32 +4169,67 @@ class ControlPanelApp:
         if last < len(text):
             self.log_text.insert("end", text[last:], base_tag)
 
+    @staticmethod
+    def _classify_log(message: str, warn: bool = False) -> str:
+        upper = message.upper()
+        if warn or "[ERROR]" in upper or "CRITICAL" in upper or "失败" in message or "错误" in message:
+            return "ERROR"
+        if "[WARNING]" in upper or "[WARN]" in upper or "警告" in message:
+            return "WARNING"
+        if "DANMU" in upper or "[弹幕]" in message or "弹幕：" in message:
+            return "DANMU"
+        if "EVENT" in upper or "_UPDATE" in upper or "LIVE_GIFT_EVENT" in upper:
+            return "EVENT"
+        return "INFO"
+
+    def _render_log_record(self, timestamp: str, level: str, text: str) -> None:
+        self.log_text.insert("end", timestamp, "ts")
+        self.log_text.insert("end", "  ", "sep")
+        self.log_text.insert("end", f"{level:<7}", f"level_{level.lower()}")
+        self.log_text.insert("end", "  ", "sep")
+        self._insert_with_links(text.rstrip() + "\n", "ev")
+
+    def _refresh_log_view(self) -> None:
+        if not hasattr(self, "log_text"):
+            return
+        needle = self.log_search_var.get().strip().casefold()
+        self.log_text.configure(state="normal")
+        self.log_text.delete("1.0", "end")
+        for timestamp, level, text in self._log_records:
+            if self.log_errors_only_var.get() and level not in {"ERROR", "WARNING"}:
+                continue
+            if self.log_danmu_only_var.get() and level != "DANMU":
+                continue
+            if needle and needle not in f"{timestamp} {level} {text}".casefold():
+                continue
+            self._render_log_record(timestamp, level, text)
+        if self.log_auto_scroll_var.get():
+            self.log_text.see("end")
+        self.log_text.configure(state="disabled")
+
     def _append_log(self, message: str, warn: bool = False) -> None:
         import time as _t
-        self.log_text.configure(state="normal")
         # 补时间戳前缀
         if not _PANEL_TS_RE.match(message):
             message = f"{_t.strftime('%H:%M:%S')} {message}"
         m = _PANEL_TS_RE.match(message)
         ts_part = m.group(1) if m else _t.strftime('%H:%M:%S')
         ev_part = (m.group(2) if m else message).rstrip()
-
-        self.log_text.insert("end", ts_part, "ts")
-        self.log_text.insert("end", " │ ", "sep")
-
-        # 检测括号前缀 [TAG] 并单独着色
-        bm = _BRACKET_TAG_RE.match(ev_part)
-        if bm and not warn:
-            bracket_text = ev_part[:bm.end()]
-            rest = ev_part[bm.end():]
-            self.log_text.insert("end", bracket_text, "bracket")
-            self._insert_with_links(rest + "\n", "ev")
-        elif warn:
-            self._insert_with_links(ev_part + "\n", "warn")
-        else:
-            self._insert_with_links(ev_part + "\n", "ev")
-
-        self.log_text.see("end")
+        level = self._classify_log(ev_part, warn)
+        # 去掉重复的 [INFO]/[GUI] 前缀，固定列中已经展示类型。
+        ev_part = _BRACKET_TAG_RE.sub("", ev_part, count=1)
+        self._log_records.append((ts_part, level, ev_part))
+        if len(self._log_records) > 10000:
+            del self._log_records[:1000]
+        self.log_text.configure(state="normal")
+        needle = self.log_search_var.get().strip().casefold()
+        visible = not (self.log_errors_only_var.get() and level not in {"ERROR", "WARNING"})
+        visible = visible and not (self.log_danmu_only_var.get() and level != "DANMU")
+        visible = visible and (not needle or needle in f"{ts_part} {level} {ev_part}".casefold())
+        if visible:
+            self._render_log_record(ts_part, level, ev_part)
+        if self.log_auto_scroll_var.get():
+            self.log_text.see("end")
         self.log_text.configure(state="disabled")
 
     def _enqueue_log(self, message: str) -> None:
@@ -4135,7 +4250,7 @@ class ControlPanelApp:
         # 将后端完整时间戳 "2026-04-09 12:34:56,ms [LEVEL] name: msg" → "12:34:56 msg"
         ts_match = _LOG_TS_RE.match(inner)
         if ts_match:
-            panel_line = f"{ts_match.group(1)} {ts_match.group(2)}"
+            panel_line = f"{ts_match.group(1)} [{ts_match.group(2)}] {ts_match.group(3)}"
         else:
             panel_line = inner
 
@@ -4375,7 +4490,8 @@ def main() -> None:
     except tk.TclError:
         pass
     app = ControlPanelApp(root)
-    root.minsize(760, 560)
+    root.geometry("1180x720")
+    root.minsize(1040, 620)
     root.update_idletasks()
     root.deiconify()
     try:
