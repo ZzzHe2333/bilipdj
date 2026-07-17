@@ -172,6 +172,8 @@ GET http://127.0.0.1:9816/api/danmu/identity/latest
 
 `core/mirrorchyan.py` 已实现官方 `latest` API 客户端并进入打包隐藏依赖，但 `MirrorChyanSettings.enabled` 默认是 `False`，当前启动流程不会调用它，也不会发送 CDK 或自动下载更新。
 
+预载入
+
 ## 运行数据与日志
 
 - 日志目录：`log/`（按日期命名，保留天数可配置）
