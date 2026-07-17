@@ -1296,7 +1296,7 @@ class ControlPanelApp:
         box = ttk.LabelFrame(frame, text="送礼插队规则（默认关闭）", padding=18)
         box.grid(row=0, column=0, sticky="ew")
         box.columnconfigure(1, weight=1)
-        ttk.Checkbutton(box, text="启用送礼插队", variable=self.gift_queue_enabled_var).grid(row=0, column=0, columnspan=2, sticky="w", pady=6)
+        ttk.Checkbutton(box, text="启用 B站礼物插队", variable=self.gift_queue_enabled_var).grid(row=0, column=0, columnspan=2, sticky="w", pady=6)
         from core.bilibili_gifts import GIFT_BATTERIES
         ttk.Label(box, text="指定礼物（可多选）").grid(row=1, column=0, sticky="nw", pady=6)
         self.gift_listbox = tk.Listbox(box, selectmode="multiple", exportselection=False, height=10)
@@ -1453,6 +1453,15 @@ class ControlPanelApp:
     def _refresh_platform_settings_visibility(self, _event=None) -> None:
         platform_value = self._platform_label_to_value(self.platform_var.get())
         self.platform_var.set(self._platform_value_to_label(platform_value))
+        gift_page = getattr(self, "_bilibili_gift_settings_page", None)
+        settings_notebook = getattr(self, "settings_notebook", None)
+        if gift_page is not None and settings_notebook is not None:
+            if platform_value == "bilibili":
+                settings_notebook.tab(gift_page, state="normal", text="B站礼物")
+            else:
+                if settings_notebook.select() == str(gift_page):
+                    settings_notebook.select(1)  # 平台参数
+                settings_notebook.tab(gift_page, state="hidden")
         if not hasattr(self, "_platform_frame_map"):
             return
         for key, frame in self._platform_frame_map.items():
@@ -3506,7 +3515,8 @@ class ControlPanelApp:
         blacklist_inner = self._add_scrollable_settings_page(settings_tabs, "黑名单")
         switches_inner = self._add_scrollable_settings_page(settings_tabs, "开关")
         style_inner = self._add_scrollable_settings_page(settings_tabs, "样式设置")
-        gift_queue_inner = self._add_scrollable_settings_page(settings_tabs, "送礼插队")
+        gift_queue_inner = self._add_scrollable_settings_page(settings_tabs, "B站礼物")
+        self._bilibili_gift_settings_page = gift_queue_inner.master.master
 
         # 保存配置/刷新按钮放在 canvas 外（固定底部）
         btn_bar = ttk.Frame(frame)
