@@ -160,7 +160,9 @@ GET http://127.0.0.1:9816/api/danmu/identity/latest
 
 ### 送礼与上舰事件
 
-后端会把 `SEND_GIFT`、`COMBO_SEND`、`GUARD_BUY` 标准化为 `LIVE_GIFT_EVENT`，并通过 `GET /api/gifts/state` 提供最近事件与运行期间识别到的礼物类型。GUI 的“送礼插队”标签默认关闭；启用并配置礼物名称后，每个 UID 最多获得一次“插队”资格。
+后端会把 `SEND_GIFT`、`COMBO_SEND`、`GUARD_BUY` 标准化为 `LIVE_GIFT_EVENT`，并通过 `GET /api/gifts/state` 提供最近事件、内置 77 种礼物及运行期间识别到的礼物类型。GUI 的“送礼插队”标签默认关闭，可按一个或多个指定礼物、最低电池数（10 电池 = 1 元）授予排队资格，并设置每次可排人数、插入名次及是否允许重复获得资格。“仅允许礼物排队”会临时把插入名次设为 0，关闭后恢复原名次。
+
+用户发送 `插队 名字1 名字2` 时会按名字的输入顺序处理；不带名字时使用送礼者昵称。未开启重复插队时，每个 UID 只能使用一次资格。
 
 ### MirrorChyan 预接入
 

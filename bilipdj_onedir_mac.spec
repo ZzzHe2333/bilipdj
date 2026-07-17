@@ -10,6 +10,7 @@ datas = [
 hiddenimports = [
     "core.mirrorchyan",
     "core.server",
+    "core.bilibili_gifts",
     "qrcode",
     "qrcode.main",
     "qrcode.constants",

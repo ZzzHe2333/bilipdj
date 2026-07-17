@@ -424,6 +424,14 @@ class ControlPanelApp:
         self.bilibili_room_url_var = tk.StringVar(value="")
         self.gift_queue_enabled_var = tk.BooleanVar(value=False)
         self.gift_queue_names_var = tk.StringVar(value="辣条")
+        self.gift_battery_min_var = tk.StringVar(value="0")
+        self.gift_allow_multiple_var = tk.BooleanVar(value=False)
+        self.gift_slots_per_gift_var = tk.StringVar(value="1")
+        self.gift_insert_rank_var = tk.StringVar(value="1")
+        self.gift_saved_insert_rank_var = tk.StringVar(value="1")
+        self.gift_only_var = tk.BooleanVar(value=False)
+        self.gift_condition_hint_var = tk.StringVar(value="")
+        self.gift_listbox: tk.Listbox | None = None
         self.log_level_var = tk.StringVar(value="INFO")
         self.retention_days_var = tk.StringVar(value="7")
         self.queue_enabled_var = tk.BooleanVar(value=True)
@@ -1240,9 +1248,51 @@ class ControlPanelApp:
         box.grid(row=0, column=0, sticky="ew")
         box.columnconfigure(1, weight=1)
         ttk.Checkbutton(box, text="启用送礼插队", variable=self.gift_queue_enabled_var).grid(row=0, column=0, columnspan=2, sticky="w", pady=6)
-        ttk.Label(box, text="允许的礼物名称").grid(row=1, column=0, sticky="w", pady=6)
-        ttk.Entry(box, textvariable=self.gift_queue_names_var).grid(row=1, column=1, sticky="ew", pady=6)
-        ttk.Label(box, text="多个礼物用逗号分隔。赠送者获得一次“插队”资格；使用后永久记录，不可重复领取。\n礼物类型和上舰信息可从 /api/gifts/state 读取。", wraplength=760).grid(row=2, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        from core.bilibili_gifts import GIFT_BATTERIES
+        ttk.Label(box, text="指定礼物（可多选）").grid(row=1, column=0, sticky="nw", pady=6)
+        self.gift_listbox = tk.Listbox(box, selectmode="multiple", exportselection=False, height=10)
+        for name, batteries in GIFT_BATTERIES.items():
+            self.gift_listbox.insert("end", f"{name} · {'自定义' if batteries is None else str(batteries) + ' 电池'}")
+        self.gift_listbox.grid(row=1, column=1, sticky="ew", pady=6)
+        self.gift_listbox.bind("<<ListboxSelect>>", lambda _e: self._update_gift_condition_hint())
+        ttk.Label(box, text="最低电池数").grid(row=2, column=0, sticky="w", pady=6)
+        ttk.Entry(box, textvariable=self.gift_battery_min_var).grid(row=2, column=1, sticky="ew", pady=6)
+        ttk.Label(box, text="每次可排人数").grid(row=3, column=0, sticky="w", pady=6)
+        ttk.Entry(box, textvariable=self.gift_slots_per_gift_var).grid(row=3, column=1, sticky="ew", pady=6)
+        ttk.Label(box, text="插入名次（0=队尾）").grid(row=4, column=0, sticky="w", pady=6)
+        ttk.Entry(box, textvariable=self.gift_insert_rank_var).grid(row=4, column=1, sticky="ew", pady=6)
+        ttk.Checkbutton(box, text="允许多次插队（每次合格送礼继续累加名额）", variable=self.gift_allow_multiple_var).grid(row=5, column=0, columnspan=2, sticky="w", pady=6)
+        ttk.Checkbutton(box, text="仅允许礼物排队（临时将插入名次设为 0）", variable=self.gift_only_var, command=self._toggle_gift_only).grid(row=6, column=0, columnspan=2, sticky="w", pady=6)
+        ttk.Label(box, textvariable=self.gift_condition_hint_var, wraplength=760).grid(row=7, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        for var in (self.gift_queue_enabled_var, self.gift_battery_min_var, self.gift_slots_per_gift_var, self.gift_insert_rank_var, self.gift_allow_multiple_var):
+            var.trace_add("write", lambda *_: self._update_gift_condition_hint())
+        self._update_gift_condition_hint()
+
+    def _selected_gift_names(self) -> list[str]:
+        from core.bilibili_gifts import GIFT_BATTERIES
+        names = list(GIFT_BATTERIES)
+        return [names[i] for i in self.gift_listbox.curselection()] if self.gift_listbox else []
+
+    def _toggle_gift_only(self) -> None:
+        if self.gift_only_var.get():
+            current = max(0, _coerce_int_field(self.gift_insert_rank_var.get(), 1, "插入名次"))
+            if current > 0:
+                self.gift_saved_insert_rank_var.set(str(current))
+            self.gift_insert_rank_var.set("0")
+        else:
+            self.gift_insert_rank_var.set(str(max(1, _coerce_int_field(self.gift_saved_insert_rank_var.get(), 1, "原插入名次"))))
+        self._update_gift_condition_hint()
+
+    def _update_gift_condition_hint(self) -> None:
+        gifts = self._selected_gift_names()
+        battery = self.gift_battery_min_var.get().strip() or "0"
+        slots = self.gift_slots_per_gift_var.get().strip() or "1"
+        rank = self.gift_insert_rank_var.get().strip() or "1"
+        gift_text = "、".join(gifts) if gifts else "未指定礼物"
+        repeat = "可重复累加" if self.gift_allow_multiple_var.get() else "每个用户仅一次"
+        enabled = "已启用" if self.gift_queue_enabled_var.get() else "已关闭"
+        battery_text = f"单次电池数 ≥ {battery}" if battery.lstrip("+").isdigit() and int(battery) > 0 else "未启用电池门槛"
+        self.gift_condition_hint_var.set(f"条件：{enabled}；送出 [{gift_text}] 或 {battery_text}；每次可排 {slots} 名；插入名次 {rank}；{repeat}。有名字按输入顺序处理，无名字使用送礼者本人。")
 
     def _apply_bilibili_room_config(self, result: dict[str, Any]) -> None:
         real_room_id = _coerce_int_field(result.get("room_id"), 0, "真实房间号")
@@ -3913,6 +3963,20 @@ class ControlPanelApp:
         gift_names = myjs_cfg.get("gift_queue_names", [])
         if isinstance(gift_names, list):
             self.gift_queue_names_var.set(", ".join(str(x) for x in gift_names if str(x).strip()) or "辣条")
+            if self.gift_listbox is not None:
+                from core.bilibili_gifts import GIFT_BATTERIES
+                selected = {str(x) for x in gift_names}
+                self.gift_listbox.selection_clear(0, "end")
+                for index, name in enumerate(GIFT_BATTERIES):
+                    if name in selected:
+                        self.gift_listbox.selection_set(index)
+        self.gift_battery_min_var.set(str(myjs_cfg.get("gift_queue_min_batteries", 0)))
+        self.gift_allow_multiple_var.set(bool(myjs_cfg.get("gift_queue_allow_multiple", False)))
+        self.gift_slots_per_gift_var.set(str(myjs_cfg.get("gift_queue_slots_per_gift", 1)))
+        self.gift_saved_insert_rank_var.set(str(myjs_cfg.get("gift_queue_saved_insert_rank", 1)))
+        self.gift_only_var.set(bool(myjs_cfg.get("gift_queue_only", False)))
+        self.gift_insert_rank_var.set("0" if self.gift_only_var.get() else str(myjs_cfg.get("gift_queue_insert_rank", 1)))
+        self._update_gift_condition_hint()
         ui_cfg = config.get("ui", {})
         self._set_overlay_settings(ui_cfg.get("overlay_window", DEFAULT_OVERLAY_SETTINGS))
         self.auto_start_var.set(bool(ui_cfg.get("auto_start_backend", False)))
@@ -3976,7 +4040,13 @@ class ControlPanelApp:
             },
             "myjs": {
                 "gift_queue_enabled": bool(self.gift_queue_enabled_var.get()),
-                "gift_queue_names": [x.strip() for x in self.gift_queue_names_var.get().replace("，", ",").split(",") if x.strip()],
+                "gift_queue_names": self._selected_gift_names(),
+                "gift_queue_min_batteries": max(0, _coerce_int_field(self.gift_battery_min_var.get(), 0, "最低电池数")),
+                "gift_queue_allow_multiple": bool(self.gift_allow_multiple_var.get()),
+                "gift_queue_slots_per_gift": max(1, _coerce_int_field(self.gift_slots_per_gift_var.get(), 1, "每次可排人数")),
+                "gift_queue_insert_rank": max(0, _coerce_int_field(self.gift_insert_rank_var.get(), 1, "插入名次")),
+                "gift_queue_saved_insert_rank": max(1, _coerce_int_field(self.gift_saved_insert_rank_var.get(), 1, "原插入名次")),
+                "gift_queue_only": bool(self.gift_only_var.get()),
             },
             "logging": {
                 "level": self.log_level_var.get().strip().upper() or "INFO",
