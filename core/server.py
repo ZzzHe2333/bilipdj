@@ -299,7 +299,7 @@ def _merge_config(defaults: dict[str, Any], custom: dict[str, Any]) -> dict[str,
     return merged
 
 
-MYJS_LIST_KEYS = {"admins", "ban_admins", "jianzhang"}
+MYJS_LIST_KEYS = {"admins", "ban_admins", "jianzhang", "daily_queue_counts"}
 
 
 def _normalize_string_list(value: Any) -> list[str]:
@@ -691,6 +691,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "callback": {"enabled": False, "url": "", "auth_token": "", "timeout_seconds": 5},
     "myjs": {
         "paidui_list_length_max": 100,
+        "daily_queue_limit": 0,
+        "daily_queue_reset_time": "04:00",
+        "daily_queue_period": "",
+        "daily_queue_counts": [],
         "all_suoyourenbukepaidui": False,
         "fangguan_can_doing": False,
         "jianzhangchadui": False,
@@ -1726,6 +1730,10 @@ class QueueManager:
         self._jianzhang: list[str] = []
         self._anchor_uid: int = 0
         self._max_length: int = 100
+        self._daily_queue_limit: int = 0
+        self._daily_queue_reset_time: str = "04:00"
+        self._daily_queue_period: str = ""
+        self._daily_queue_counts: dict[str, int] = {}
         self._fangguan_can_doing: bool = False
         self._jianzhangchadui: bool = False
         self._all_disabled: bool = False
@@ -1768,6 +1776,25 @@ class QueueManager:
                 self._gift_queue_insert_rank = 0
             if myjs_cfg.get("paidui_list_length_max") is not None:
                 self._max_length = max(1, _to_int(myjs_cfg["paidui_list_length_max"], 100))
+            self._daily_queue_limit = min(999, max(0, _to_int(myjs_cfg.get("daily_queue_limit", 0))))
+            reset_time = str(myjs_cfg.get("daily_queue_reset_time", "04:00") or "04:00").strip()
+            self._daily_queue_reset_time = reset_time if re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", reset_time) else "04:00"
+            self._daily_queue_period = str(myjs_cfg.get("daily_queue_period", "") or "")
+            raw_counts = myjs_cfg.get("daily_queue_counts", {})
+            if isinstance(raw_counts, str):
+                try:
+                    raw_counts = json.loads(raw_counts)
+                except json.JSONDecodeError:
+                    raw_counts = {}
+            if isinstance(raw_counts, list):
+                parsed_counts: dict[str, int] = {}
+                for item in raw_counts:
+                    identity, separator, count = str(item).rpartition("=")
+                    if separator and identity:
+                        parsed_counts[identity] = max(0, _to_int(count))
+                raw_counts = parsed_counts
+            self._daily_queue_counts = {str(key): max(0, _to_int(value)) for key, value in raw_counts.items() if str(key).strip()} if isinstance(raw_counts, dict) else {}
+            self._refresh_daily_queue_period_unlocked()
             if isinstance(myjs_cfg.get("all_suoyourenbukepaidui"), bool):
                 self._all_disabled = myjs_cfg["all_suoyourenbukepaidui"]
             if isinstance(myjs_cfg.get("fangguan_can_doing"), bool):
@@ -1804,6 +1831,10 @@ class QueueManager:
         current = load_config()
         myjs_cfg = _normalize_myjs_config(current.get("myjs", {}))
         myjs_cfg["paidui_list_length_max"] = self._max_length
+        myjs_cfg["daily_queue_limit"] = self._daily_queue_limit
+        myjs_cfg["daily_queue_reset_time"] = self._daily_queue_reset_time
+        myjs_cfg["daily_queue_period"] = self._daily_queue_period
+        myjs_cfg["daily_queue_counts"] = [f"{key}={value}" for key, value in sorted(self._daily_queue_counts.items())]
         myjs_cfg["all_suoyourenbukepaidui"] = self._all_disabled
         myjs_cfg["fangguan_can_doing"] = self._fangguan_can_doing
         myjs_cfg["jianzhangchadui"] = self._jianzhangchadui
@@ -1817,6 +1848,21 @@ class QueueManager:
         current["myjs"] = _normalize_myjs_config(myjs_cfg)
         save_config(current)
         self._reload_runtime_config()
+
+    def _daily_queue_period_key(self, now: dt.datetime | None = None) -> str:
+        current = now or dt.datetime.now()
+        hour, minute = (int(part) for part in self._daily_queue_reset_time.split(":"))
+        reset_today = current.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        period_date = current.date() if current >= reset_today else (current.date() - dt.timedelta(days=1))
+        return f"{period_date.isoformat()}@{self._daily_queue_reset_time}"
+
+    def _refresh_daily_queue_period_unlocked(self, now: dt.datetime | None = None) -> bool:
+        period = self._daily_queue_period_key(now)
+        if period == self._daily_queue_period:
+            return False
+        self._daily_queue_period = period
+        self._daily_queue_counts.clear()
+        return True
 
     def _persist_quanxian_state_unlocked(self) -> None:
         current_quanxian = load_quanxian()
@@ -2375,7 +2421,19 @@ class QueueManager:
                     modified = True
 
                 if new_item is not None and can_join:
+                    if not has_op and self._daily_queue_limit > 0:
+                        self._refresh_daily_queue_period_unlocked()
+                        daily_identity = str(uid) if uid > 0 else f"name-{hashlib.sha256(uname.encode('utf-8')).hexdigest()[:24]}"
+                        used_count = self._daily_queue_counts.get(daily_identity, 0)
+                        if used_count >= self._daily_queue_limit:
+                            return False, (
+                                f"今日排队次数已达上限（{self._daily_queue_limit} 次），"
+                                f"每天 {self._daily_queue_reset_time} 重置"
+                            )
                     self._append_queue_item_unlocked(new_item)
+                    if not has_op and self._daily_queue_limit > 0:
+                        self._daily_queue_counts[daily_identity] = used_count + 1
+                        self._persist_myjs_state_unlocked()
                     modified = True
                 elif new_item is not None and not can_join and not has_op:
                     return False, "队列已满，无法加入排队"

@@ -436,6 +436,11 @@ class ControlPanelApp:
         self.log_level_var = tk.StringVar(value="INFO")
         self.retention_days_var = tk.StringVar(value="7")
         self.queue_enabled_var = tk.BooleanVar(value=True)
+        self.daily_queue_unlimited_var = tk.BooleanVar(value=True)
+        self.daily_queue_limit_var = tk.StringVar(value="1")
+        self.daily_queue_reset_hour_var = tk.StringVar(value="04")
+        self.daily_queue_reset_minute_var = tk.StringVar(value="00")
+        self._daily_queue_limit_spinbox: ttk.Spinbox | None = None
         self.queue_slot_var = tk.StringVar(value="1")
         self.queue_slot_choice_var = tk.IntVar(value=1)
         self.platform_config_slot_var = tk.StringVar(value="1")
@@ -3599,7 +3604,28 @@ class ControlPanelApp:
             basic_frame,
             text="切换平台配置槽位后，会立即载入该槽位保存的平台和参数。",
         )
-        self._settings_hint_label.grid(row=5, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        self._settings_hint_label.grid(row=7, column=0, columnspan=4, sticky="w", pady=(6, 0))
+
+        ttk.Label(basic_frame, text="每日排队次数").grid(row=5, column=0, sticky="w", pady=4)
+        ttk.Checkbutton(
+            basic_frame,
+            text="不限制",
+            variable=self.daily_queue_unlimited_var,
+            command=self._toggle_daily_queue_limit_ui,
+        ).grid(row=5, column=1, sticky="w", pady=4)
+        ttk.Label(basic_frame, text="每人最多").grid(row=5, column=2, sticky="w", padx=(16, 0), pady=4)
+        limit_box = ttk.Spinbox(basic_frame, from_=1, to=999, textvariable=self.daily_queue_limit_var, width=8)
+        limit_box.grid(row=5, column=3, sticky="w", pady=4)
+        self._daily_queue_limit_spinbox = limit_box
+
+        ttk.Label(basic_frame, text="次数重置时间").grid(row=6, column=0, sticky="w", pady=4)
+        reset_box = ttk.Frame(basic_frame)
+        reset_box.grid(row=6, column=1, columnspan=3, sticky="w", pady=4)
+        ttk.Spinbox(reset_box, from_=0, to=23, format="%02.0f", textvariable=self.daily_queue_reset_hour_var, width=4).pack(side="left")
+        ttk.Label(reset_box, text=":").pack(side="left", padx=4)
+        ttk.Spinbox(reset_box, from_=0, to=59, format="%02.0f", textvariable=self.daily_queue_reset_minute_var, width=4).pack(side="left")
+        ttk.Label(reset_box, text="（默认每天 04:00）").pack(side="left", padx=(8, 0))
+        self._toggle_daily_queue_limit_ui()
 
         platform_frame = ttk.Frame(platform_inner, padding=10)
         platform_frame.grid(row=0, column=0, sticky="ew")
@@ -3712,6 +3738,10 @@ class ControlPanelApp:
         self._build_kaiguan_tab(switches_inner)
         self._build_style_tab(style_inner)
         self._build_gift_queue_tab(gift_queue_inner)
+
+    def _toggle_daily_queue_limit_ui(self) -> None:
+        if self._daily_queue_limit_spinbox is not None:
+            self._daily_queue_limit_spinbox.configure(state="disabled" if self.daily_queue_unlimited_var.get() else "normal")
 
     def _add_scrollable_settings_page(self, notebook: ttk.Notebook, title: str) -> ttk.Frame:
         page = ttk.Frame(notebook, padding=(0, 8, 0, 0))
@@ -4062,6 +4092,13 @@ class ControlPanelApp:
             }
         )
         myjs_cfg = config.get("myjs", {}) if isinstance(config.get("myjs", {}), dict) else {}
+        daily_limit = min(999, max(0, _coerce_int_field(myjs_cfg.get("daily_queue_limit", 0), 0, "每日排队次数")))
+        self.daily_queue_unlimited_var.set(daily_limit == 0)
+        self.daily_queue_limit_var.set(str(daily_limit if daily_limit > 0 else 1))
+        reset_match = re.fullmatch(r"([01]\d|2[0-3]):([0-5]\d)", str(myjs_cfg.get("daily_queue_reset_time", "04:00") or "04:00"))
+        self.daily_queue_reset_hour_var.set(reset_match.group(1) if reset_match else "04")
+        self.daily_queue_reset_minute_var.set(reset_match.group(2) if reset_match else "00")
+        self._toggle_daily_queue_limit_ui()
         self.gift_queue_enabled_var.set(bool(myjs_cfg.get("gift_queue_enabled", False)))
         gift_names = myjs_cfg.get("gift_queue_names", [])
         if isinstance(gift_names, list):
@@ -4142,6 +4179,8 @@ class ControlPanelApp:
                 "active_slot": self._get_selected_platform_slot(),
             },
             "myjs": {
+                "daily_queue_limit": 0 if self.daily_queue_unlimited_var.get() else min(999, max(1, _coerce_int_field(self.daily_queue_limit_var.get(), 1, "每日排队次数"))),
+                "daily_queue_reset_time": f"{min(23, max(0, _coerce_int_field(self.daily_queue_reset_hour_var.get(), 4, '重置小时'))):02d}:{min(59, max(0, _coerce_int_field(self.daily_queue_reset_minute_var.get(), 0, '重置分钟'))):02d}",
                 "gift_queue_enabled": bool(self.gift_queue_enabled_var.get()),
                 "gift_queue_names": self._selected_gift_names(),
                 "gift_queue_min_batteries": max(0, _coerce_int_field(self.gift_battery_min_var.get(), 0, "最低电池数")),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import datetime as dt
 import unittest
 
 from core.bilibili_protocol import extract_bilibili_room_id
@@ -59,6 +60,19 @@ class GiftQueueTests(unittest.TestCase):
         queue.process_live_event(payload)
         queue.process_live_event(payload)
         self.assertEqual(queue._gift_queue_credits, {9: 4})
+
+    def test_daily_queue_limit_and_four_am_reset_period(self) -> None:
+        queue = QueueManager(Hub(), object(), logging.getLogger("daily-limit-test"))
+        queue.load_config({"daily_queue_limit": 1, "daily_queue_reset_time": "04:00"})
+        queue._persist_myjs_state_unlocked = lambda: None
+        changed, _ = queue._process(11, "每日用户", "排队", False, False, False, 0)
+        self.assertTrue(changed)
+        queue._process(11, "每日用户", "取消排队", False, False, False, 0)
+        changed, note = queue._process(11, "每日用户", "排队", False, False, False, 0)
+        self.assertFalse(changed)
+        self.assertIn("1 次", note or "")
+        self.assertEqual(queue._daily_queue_period_key(dt.datetime(2026, 7, 17, 3, 59)), "2026-07-16@04:00")
+        self.assertEqual(queue._daily_queue_period_key(dt.datetime(2026, 7, 17, 4, 0)), "2026-07-17@04:00")
 
     def test_guard_buy_is_normalized_without_granting_credit(self) -> None:
         hub = Hub()
