@@ -494,6 +494,7 @@ class ControlPanelApp:
         self._active_page = 0
         self._settings_hint_label: ttk.Label | None = None
         self._settings_canvas: tk.Canvas | None = None
+        self._settings_canvases: list[tk.Canvas] = []
         self._platform_hint_label: ttk.Label | None = None
         self.ui_font_size_var = tk.StringVar(value="10")
         self.log_search_var = tk.StringVar(value="")
@@ -645,6 +646,9 @@ class ControlPanelApp:
             background=[("selected", t["surface"]), ("active", t["btn_active"])],
             foreground=[("selected", t["accent"]), ("active", t["fg"])],
         )
+        style.configure("Settings.TNotebook", background=t["surface"], borderwidth=0, tabposition="n", tabmargins=(0, 0, 0, 10))
+        style.configure("Settings.TNotebook.Tab", background=t["surface"], foreground=t["fg2"], borderwidth=0, padding=(18, 10))
+        style.map("Settings.TNotebook.Tab", background=[("selected", t["btn_active"]), ("active", t["btn_bg"])], foreground=[("selected", t["accent"]), ("active", t["fg"])])
 
         # Treeview
         style.configure(
@@ -729,8 +733,8 @@ class ControlPanelApp:
             self._settings_hint_label.configure(foreground=t["fg2"])
         if self._platform_hint_label is not None:
             self._platform_hint_label.configure(foreground=t["fg2"])
-        if self._settings_canvas is not None:
-            self._settings_canvas.configure(background=t["bg"])
+        for canvas in self._settings_canvases:
+            canvas.configure(background=t["bg"])
 
         # 主题切换按钮文字
         if self._theme_btn is not None:
@@ -756,6 +760,7 @@ class ControlPanelApp:
         style.configure("TCheckbutton", font=font)
         style.configure("TRadiobutton", font=font)
         style.configure("TNotebook.Tab", font=font)
+        style.configure("Settings.TNotebook.Tab", font=(fn, size + 1, "bold"))
         style.configure("TLabelframe.Label", font=font_bold)
         style.configure("Treeview", font=font, rowheight=size + 10)
         style.configure("Treeview.Heading", font=font_bold)
@@ -838,9 +843,8 @@ class ControlPanelApp:
         content.rowconfigure(0, weight=1)
 
         page_defs = (
-            ("日志", self._build_log_tab), ("当前排队", self._build_queue_tab), ("黑名单", self._build_blacklist_tab),
-            ("设置", self._build_settings_tab), ("透明窗口", self._build_overlay_tab), ("权限", self._build_quanxian_tab),
-            ("开关", self._build_kaiguan_tab), ("性能", self._build_perf_tab), ("样式设置", self._build_style_tab),
+            ("日志", self._build_log_tab), ("当前排队", self._build_queue_tab), ("设置", self._build_settings_tab),
+            ("透明窗口", self._build_overlay_tab), ("权限", self._build_quanxian_tab), ("性能", self._build_perf_tab),
             ("送礼插队", self._build_gift_queue_tab), ("关于", self._build_about_tab),
         )
         for index, (label, builder) in enumerate(page_defs):
@@ -3493,35 +3497,15 @@ class ControlPanelApp:
         frame.columnconfigure(0, weight=1)
         frame.rowconfigure(0, weight=1)
 
-        # 可滚动容器
-        _cv = tk.Canvas(frame, highlightthickness=0, bd=0)
-        _cv.grid(row=0, column=0, sticky="nsew")
-        _vsb = ttk.Scrollbar(frame, orient="vertical", command=_cv.yview)
-        _vsb.grid(row=0, column=1, sticky="ns")
-        _cv.configure(yscrollcommand=_vsb.set)
-        self._settings_canvas = _cv
+        settings_tabs = ttk.Notebook(frame, style="Settings.TNotebook")
+        settings_tabs.grid(row=0, column=0, columnspan=2, sticky="nsew")
+        self.settings_notebook = settings_tabs
 
-        inner = ttk.Frame(_cv)
-        inner.columnconfigure(0, weight=1)
-        _win_id = _cv.create_window((0, 0), window=inner, anchor="nw")
-
-        def _on_inner_configure(*_):
-            _cv.configure(scrollregion=_cv.bbox("all"))
-
-        def _on_canvas_configure(ev):
-            _cv.itemconfigure(_win_id, width=ev.width)
-
-        inner.bind("<Configure>", _on_inner_configure)
-        _cv.bind("<Configure>", _on_canvas_configure)
-
-        def _on_enter(_e=None):
-            _cv.bind_all("<MouseWheel>", lambda e: _cv.yview_scroll(int(-e.delta / 120), "units"))
-
-        def _on_leave(_e=None):
-            _cv.unbind_all("<MouseWheel>")
-
-        _cv.bind("<Enter>", _on_enter)
-        _cv.bind("<Leave>", _on_leave)
+        basic_inner = self._add_scrollable_settings_page(settings_tabs, "基础设置")
+        platform_inner = self._add_scrollable_settings_page(settings_tabs, "平台参数")
+        blacklist_inner = self._add_scrollable_settings_page(settings_tabs, "黑名单")
+        switches_inner = self._add_scrollable_settings_page(settings_tabs, "开关")
+        style_inner = self._add_scrollable_settings_page(settings_tabs, "样式设置")
 
         # 保存配置/刷新按钮放在 canvas 外（固定底部）
         btn_bar = ttk.Frame(frame)
@@ -3529,7 +3513,7 @@ class ControlPanelApp:
         ttk.Button(btn_bar, text="保存配置", command=self.save_to_file).grid(row=0, column=0, padx=(0, 8))
         ttk.Button(btn_bar, text="刷新配置", command=self.load_from_file).grid(row=0, column=1)
 
-        basic_frame = ttk.LabelFrame(inner, text="基础设置", padding=10)
+        basic_frame = ttk.Frame(basic_inner, padding=10)
         basic_frame.grid(row=0, column=0, sticky="ew")
         basic_frame.columnconfigure(1, weight=1)
         basic_frame.columnconfigure(3, weight=1)
@@ -3606,8 +3590,8 @@ class ControlPanelApp:
         )
         self._settings_hint_label.grid(row=5, column=0, columnspan=4, sticky="w", pady=(6, 0))
 
-        platform_frame = ttk.LabelFrame(inner, text="平台参数", padding=10)
-        platform_frame.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        platform_frame = ttk.Frame(platform_inner, padding=10)
+        platform_frame.grid(row=0, column=0, sticky="ew")
         platform_frame.columnconfigure(1, weight=1)
 
         ttk.Label(platform_frame, text="当前平台").grid(row=0, column=0, sticky="w", pady=4)
@@ -3713,6 +3697,33 @@ class ControlPanelApp:
             **reserved_frames,
         }
         self._refresh_platform_settings_visibility()
+        self._build_blacklist_tab(blacklist_inner)
+        self._build_kaiguan_tab(switches_inner)
+        self._build_style_tab(style_inner)
+
+    def _add_scrollable_settings_page(self, notebook: ttk.Notebook, title: str) -> ttk.Frame:
+        page = ttk.Frame(notebook, padding=(0, 8, 0, 0))
+        page.columnconfigure(0, weight=1)
+        page.rowconfigure(0, weight=1)
+        notebook.add(page, text=title)
+
+        canvas = tk.Canvas(page, highlightthickness=0, bd=0)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(page, orient="vertical", command=canvas.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns", padx=(8, 0))
+        canvas.configure(yscrollcommand=scrollbar.set)
+        self._settings_canvases.append(canvas)
+        if self._settings_canvas is None:
+            self._settings_canvas = canvas
+
+        inner = ttk.Frame(canvas)
+        inner.columnconfigure(0, weight=1)
+        window_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind("<Configure>", lambda _e, cv=canvas: cv.configure(scrollregion=cv.bbox("all")))
+        canvas.bind("<Configure>", lambda event, cv=canvas, item=window_id: cv.itemconfigure(item, width=event.width))
+        canvas.bind("<Enter>", lambda _e, cv=canvas: cv.bind_all("<MouseWheel>", lambda event: cv.yview_scroll(int(-event.delta / 120), "units")))
+        canvas.bind("<Leave>", lambda _e, cv=canvas: cv.unbind_all("<MouseWheel>"))
+        return inner
 
     def _build_overlay_tab(self, frame: ttk.Frame) -> None:
         frame.columnconfigure(0, weight=1)
