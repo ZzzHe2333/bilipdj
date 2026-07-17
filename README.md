@@ -147,6 +147,16 @@ python scripts/check_api_health.py
 
 此检查不读取本地 Cookie：它会分层验证 Bilibili 房间解析/弹幕服务器接口，以及抖音直播页解析。抖音完整弹幕轮询需要真实开播房间和有效登录态，因此默认不会把“需要 Cookie 或当前未开播”误报成 API 过期。
 
+### 标准化弹幕身份接口
+
+Bilibili `DANMU_MSG` 会被转换为 WebSocket 内部事件 `DANMU_EVENT`，其中 `identity` 包含主播、房管、舰长/提督/总督以及粉丝牌名称和等级。最近一次解析结果也可以从本机接口读取：
+
+```text
+GET http://127.0.0.1:9816/api/danmu/identity/latest
+```
+
+接口不返回 Cookie、弹幕鉴权 token 等登录凭据。
+
 ## 运行数据与日志
 
 - 日志目录：`log/`（按日期命名，保留天数可配置）

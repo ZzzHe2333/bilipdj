@@ -452,6 +452,95 @@ def _bilibili_get_danmu_server_info(roomid: int, cookie: str = "") -> dict[str, 
     return {"code": 0, "msg": "ok", "message": "ok", "data": normalized_data}
 
 
+def fetch_bilibili_room_config(roomid: int, cookie: str = "") -> dict[str, Any]:
+    """Resolve a room and validate everything required by the danmu listener.
+
+    Tokens and Cookie values are deliberately omitted from the returned mapping so it is
+    safe to display in the GUI and logs.
+    """
+    requested_room_id = _to_int(roomid, 0)
+    if requested_room_id <= 0:
+        raise ValueError("Bilibili room id must be a positive integer")
+    room_payload = _bilibili_room_init(requested_room_id, cookie)
+    if _to_int(room_payload.get("code", -1), -1) != 0:
+        raise RuntimeError(f"room_init failed: code={room_payload.get('code')}")
+    room_data = room_payload.get("data", {})
+    if not isinstance(room_data, dict):
+        raise RuntimeError("room_init returned invalid data")
+    real_room_id = _to_int(room_data.get("room_id", requested_room_id), requested_room_id)
+    danmu_payload = _bilibili_get_danmu_server_info(real_room_id, cookie)
+    danmu_data = danmu_payload.get("data", {}) if isinstance(danmu_payload, dict) else {}
+    hosts = danmu_data.get("host_server_list", []) if isinstance(danmu_data, dict) else []
+    if _to_int(danmu_payload.get("code", -1), -1) != 0 or not danmu_data.get("token") or not hosts:
+        raise RuntimeError(f"danmu discovery failed: code={danmu_payload.get('code')}")
+    login = resolve_bilibili_login(cookie, fallback_uid=0)
+    return {
+        "requested_room_id": requested_room_id,
+        "room_id": real_room_id,
+        "short_id": _to_int(room_data.get("short_id", 0), 0),
+        "anchor_uid": _to_int(room_data.get("uid", 0), 0),
+        "live_status": _to_int(room_data.get("live_status", 0), 0),
+        "is_hidden": bool(room_data.get("is_hidden", False)),
+        "is_locked": bool(room_data.get("is_locked", False)),
+        "encrypted": bool(room_data.get("encrypted", False)),
+        "danmu_server_count": len(hosts),
+        "auth_uid": _to_int(login.get("uid", 0), 0),
+        "auth_uname": str(login.get("uname", "") or ""),
+        "is_login": bool(login.get("is_login", False)),
+    }
+
+
+GUARD_LEVEL_NAMES = {0: "", 1: "总督", 2: "提督", 3: "舰长"}
+
+
+def parse_bilibili_danmu_identity(payload: dict[str, Any], *, anchor_uid: int = 0) -> dict[str, Any]:
+    """Normalize the user/role fields in a Bilibili ``DANMU_MSG`` packet."""
+    info = payload.get("info", []) if isinstance(payload, dict) else []
+    if not isinstance(info, list):
+        info = []
+    user = info[2] if len(info) > 2 and isinstance(info[2], list) else []
+    medal = info[3] if len(info) > 3 and isinstance(info[3], list) else []
+    uid = _to_int(user[0], 0) if user else 0
+    uname = str(user[1] or "") if len(user) > 1 else ""
+    is_room_admin = _to_int(user[2], 0) == 1 if len(user) > 2 else False
+    medal_level = _to_int(medal[0], 0) if medal else 0
+    medal_name = str(medal[1] or "") if len(medal) > 1 else ""
+    medal_anchor_name = str(medal[2] or "") if len(medal) > 2 else ""
+    medal_room_id = _to_int(medal[3], 0) if len(medal) > 3 else 0
+    guard_level = _to_int(medal[10], 0) if len(medal) > 10 else 0
+    if guard_level not in GUARD_LEVEL_NAMES:
+        guard_level = 0
+    is_anchor = uid > 0 and anchor_uid > 0 and uid == anchor_uid
+    roles = []
+    if is_anchor:
+        roles.append("anchor")
+    if is_room_admin:
+        roles.append("room_admin")
+    if guard_level:
+        roles.append("guard")
+    if medal_name and medal_level > 0:
+        roles.append("fan_medal")
+    if not roles:
+        roles.append("viewer")
+    return {
+        "uid": uid,
+        "uname": uname,
+        "roles": roles,
+        "is_anchor": is_anchor,
+        "is_room_admin": is_room_admin,
+        "is_guard": guard_level > 0,
+        "guard_level": guard_level,
+        "guard_name": GUARD_LEVEL_NAMES[guard_level],
+        "has_fan_medal": bool(medal_name and medal_level > 0),
+        "fan_medal": {
+            "name": medal_name,
+            "level": medal_level,
+            "anchor_name": medal_anchor_name,
+            "room_id": medal_room_id,
+        },
+    }
+
+
 class BilibiliDanmuRelay(threading.Thread):
     def __init__(self, server: Any) -> None:
         super().__init__(name="bilibili-danmu-relay", daemon=True)
@@ -967,4 +1056,6 @@ __all__ = [
     "build_qr_png_base64",
     "get_initial_model",
     "resolve_bilibili_login",
+    "fetch_bilibili_room_config",
+    "parse_bilibili_danmu_identity",
 ]

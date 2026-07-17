@@ -463,8 +463,9 @@ class ControlPanelApp:
         self.overlay_width_var = tk.StringVar(value=str(DEFAULT_OVERLAY_SETTINGS["width"]))
         self.overlay_height_var = tk.StringVar(value=str(DEFAULT_OVERLAY_SETTINGS["height"]))
         self.overlay_scale_var = tk.StringVar(value=str(DEFAULT_OVERLAY_SETTINGS["scale"]))
-        self.ws_light_var = tk.StringVar(value="●")
+        self.ws_light_var = tk.StringVar(value="🔴")
         self.ws_text_var = tk.StringVar(value="直播间链接状态：未连接")
+        self._bilibili_fetch_status_var = tk.StringVar(value="填写房间号与 Cookie 后可一键获取监听配置")
 
         # --- 主题状态 ---
         self._dark_mode: bool = True
@@ -1200,6 +1201,49 @@ class ControlPanelApp:
         if url_room_id:
             info.room_id = url_room_id
         return info, map_room_status(info.room_status)
+
+    def _fetch_bilibili_params(self) -> None:
+        """Resolve the room, logged-in account and danmu discovery without exposing tokens."""
+        try:
+            room_id = _coerce_int_field(self.roomid_var.get(), 0, "B站直播间号")
+        except ValueError as exc:
+            self._bilibili_fetch_status_var.set(str(exc))
+            return
+        if room_id <= 0:
+            self._bilibili_fetch_status_var.set("请先填写有效的 B站直播间号")
+            return
+        cookie = self.cookie_var.get().strip()
+        self._bilibili_fetch_status_var.set("正在解析房间、账号和弹幕服务器…")
+
+        def _worker() -> None:
+            try:
+                from core.bilibili_protocol import fetch_bilibili_room_config
+
+                result = fetch_bilibili_room_config(room_id, cookie)
+                self.root.after(0, lambda result=result: self._apply_bilibili_room_config(result))
+            except Exception as exc:  # noqa: BLE001
+                self.root.after(0, lambda exc=exc: self._bilibili_fetch_status_var.set(f"获取失败：{exc}"))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _apply_bilibili_room_config(self, result: dict[str, Any]) -> None:
+        real_room_id = _coerce_int_field(result.get("room_id"), 0, "真实房间号")
+        if real_room_id > 0:
+            self.roomid_var.set(str(real_room_id))
+        auth_uid = _coerce_int_field(result.get("auth_uid"), 0, "登录 UID")
+        if auth_uid > 0:
+            self.uid_var.set(str(auth_uid))
+        live_labels = {0: "未开播", 1: "直播中", 2: "轮播中"}
+        live_status = _coerce_int_field(result.get("live_status"), 0, "直播状态")
+        account = str(result.get("auth_uname", "") or "")
+        account_text = f"登录账号 {account}/{auth_uid}" if account else (f"登录 UID {auth_uid}" if auth_uid else "游客监听")
+        text = (
+            f"获取成功 · 真实房间 {real_room_id} · 主播 UID {result.get('anchor_uid', 0)} · "
+            f"{live_labels.get(live_status, f'状态 {live_status}')} · "
+            f"弹幕服务器 {result.get('danmu_server_count', 0)} 个 · {account_text}"
+        )
+        self._bilibili_fetch_status_var.set(text)
+        self._append_log(f"[GUI] B站监听配置已获取：{text}")
 
     def _should_refresh_douyin_live_info_before_save(self) -> bool:
         try:
@@ -3445,12 +3489,16 @@ class ControlPanelApp:
         bilibili_frame.columnconfigure(3, weight=1)
         ttk.Label(bilibili_frame, text="直播间号").grid(row=0, column=0, sticky="w", pady=4)
         ttk.Entry(bilibili_frame, textvariable=self.roomid_var, width=24).grid(row=0, column=1, sticky="ew", pady=4)
-        ttk.Label(bilibili_frame, text="UID").grid(row=0, column=2, sticky="w", padx=(16, 0), pady=4)
-        ttk.Entry(bilibili_frame, textvariable=self.uid_var, width=24).grid(row=0, column=3, sticky="ew", pady=4)
-        ttk.Label(bilibili_frame, text="Cookie").grid(row=1, column=0, sticky="w", pady=4)
-        ttk.Entry(bilibili_frame, textvariable=self.cookie_var, width=48).grid(row=1, column=1, columnspan=2, sticky="ew", pady=4)
-        ttk.Button(bilibili_frame, text="获取", command=self.open_config, width=6).grid(
-            row=1, column=3, padx=(6, 0), sticky="w", pady=4
+        ttk.Button(bilibili_frame, text="一键获取监听配置", command=self._fetch_bilibili_params).grid(
+            row=0, column=2, columnspan=2, padx=(16, 0), sticky="ew", pady=4
+        )
+        ttk.Label(bilibili_frame, text="登录 UID").grid(row=1, column=0, sticky="w", pady=4)
+        ttk.Entry(bilibili_frame, textvariable=self.uid_var, width=24).grid(row=1, column=1, sticky="ew", pady=4)
+        ttk.Button(bilibili_frame, text="扫码获取 Cookie", command=self.open_config).grid(row=1, column=2, columnspan=2, padx=(16, 0), sticky="ew", pady=4)
+        ttk.Label(bilibili_frame, text="用户 Cookie").grid(row=2, column=0, sticky="w", pady=4)
+        ttk.Entry(bilibili_frame, textvariable=self.cookie_var, width=48, show="●").grid(row=2, column=1, columnspan=3, sticky="ew", pady=4)
+        ttk.Label(bilibili_frame, textvariable=self._bilibili_fetch_status_var, wraplength=760).grid(
+            row=3, column=0, columnspan=4, sticky="w", pady=(6, 2)
         )
 
         douyin_frame = ttk.LabelFrame(platform_forms, text="抖音参数", padding=8)
@@ -4168,6 +4216,8 @@ class ControlPanelApp:
     def stop_server(self) -> None:
         if not self.server_proc or self.server_proc.poll() is not None:
             self.status_var.set("后端未运行")
+            self.ws_light_var.set("🔴")
+            self.ws_text_var.set("直播间链接状态：后端未启动")
             return
 
         self.server_proc.terminate()
@@ -4176,6 +4226,8 @@ class ControlPanelApp:
         except subprocess.TimeoutExpired:
             self.server_proc.kill()
         self.status_var.set("后端已停止")
+        self.ws_light_var.set("🔴")
+        self.ws_text_var.set("直播间链接状态：后端未启动")
         self._append_log("[GUI] 后端已停止")
 
     _FREE_NOTICE = (

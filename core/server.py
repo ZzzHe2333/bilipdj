@@ -1719,6 +1719,7 @@ class QueueManager:
         self._all_disabled: bool = False
         self._super_admins: list[str] = []
         self._kaiguan: dict[str, bool] = dict(DEFAULT_KAIGUAN)
+        self._last_danmu_event: dict[str, Any] = {}
 
     def load_config(self, myjs_cfg: dict[str, Any], anchor_uid: int = 0) -> None:
         with self._lock:
@@ -2102,6 +2103,10 @@ class QueueManager:
         )
         self._queue_archive.write_snapshot(actor, msg, queue_entries)
 
+    def get_last_danmu_event(self) -> dict[str, Any]:
+        with self._lock:
+            return copy.deepcopy(self._last_danmu_event)
+
     def process_danmu_json(self, payload: dict[str, Any]) -> None:
         cmd = str(payload.get("cmd", "") or "").strip()
         if not cmd.startswith("DANMU_MSG"):
@@ -2111,34 +2116,38 @@ class QueueManager:
         if not isinstance(info, list) or len(info) < 3:
             return
 
-        msg = str(info[1]) if len(info) > 1 else ""
-        user_info = info[2] if len(info) > 2 and isinstance(info[2], list) else []
-        uid = _to_int(user_info[0]) if len(user_info) > 0 else 0
-        uname = str(user_info[1]) if len(user_info) > 1 else ""
-        is_admin_flag = _to_int(user_info[2]) == 1 if len(user_info) > 2 else False
-
         with self._lock:
             anchor_uid = self._anchor_uid
-            is_blacklisted = uname in self._blacklist
-        is_anchor = uid > 0 and anchor_uid > 0 and uid == anchor_uid
-
-        medal_info = info[3] if len(info) > 3 else None
-        guard_level = 0
-        if isinstance(medal_info, list):
-            for idx in (10, 11, 12):
-                if idx < len(medal_info):
-                    gl = _to_int(medal_info[idx])
-                    if 1 <= gl <= 3:
-                        guard_level = gl
-                        break
-        is_guard = guard_level > 0
+        identity = bilibili_protocol.parse_bilibili_danmu_identity(payload, anchor_uid=anchor_uid)
+        msg = str(info[1]) if len(info) > 1 else ""
+        uid = _to_int(identity.get("uid", 0))
+        uname = str(identity.get("uname", "") or "")
+        is_admin_flag = bool(identity.get("is_room_admin", False))
+        is_anchor = bool(identity.get("is_anchor", False))
+        guard_level = _to_int(identity.get("guard_level", 0))
+        is_guard = bool(identity.get("is_guard", False))
 
         if not uname or not msg:
             return
 
+        event = {
+            "type": "DANMU_EVENT",
+            "platform": "bilibili",
+            "message": msg,
+            "identity": identity,
+            "received_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        }
+        with self._lock:
+            is_blacklisted = uname in self._blacklist
+            self._last_danmu_event = copy.deepcopy(event)
+        self._ws_hub.broadcast_json(None, event)
+
         # 所有弹幕打印到 INFO
-        perm = "黑名单" if is_blacklisted else ("主播" if is_anchor else ("super_admin" if uname in self._super_admins else ("管理员" if uname in self._admins or (is_admin_flag and self._fangguan_can_doing) else ("舰长" if is_guard else "普通用户"))))
-        self._logger.info("[弹幕] %s(%s): %s", uname, perm, msg)
+        guard_name = str(identity.get("guard_name", "") or "")
+        medal = identity.get("fan_medal", {})
+        medal_text = f" 粉丝牌={medal.get('name')}Lv.{medal.get('level')}" if identity.get("has_fan_medal") else ""
+        perm = "黑名单" if is_blacklisted else ("主播" if is_anchor else ("super_admin" if uname in self._super_admins else ("房管" if is_admin_flag else (guard_name or ("管理员" if uname in self._admins else "普通用户")))))
+        self._logger.info("[弹幕] %s(%s%s): %s", uname, perm, medal_text, msg)
 
         modified, note = self._process(uname, msg, is_anchor, is_admin_flag, is_guard, guard_level)
         if modified:
@@ -3213,6 +3222,12 @@ class ApiHandler(BaseHTTPRequestHandler):
                     "danmu_last_chat_seen_at": str(relay_status.get("last_chat_seen_at", "") or ""),
                 }
             )
+            return
+
+        if parsed.path == "/api/danmu/identity/latest":
+            qm = getattr(self.server, "queue_manager", None)
+            event = qm.get_last_danmu_event() if qm is not None else {}
+            self._write_json({"status": "ok", "event": event})
             return
 
         if parsed.path == "/api/queue/state":
