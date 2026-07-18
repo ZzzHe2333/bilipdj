@@ -1,0 +1,61 @@
+name: Inspect v1.0.6 package run
+
+on:
+  push:
+    branches: [now]
+    paths:
+      - .github/workflows/inspect-package-v1.0.6.yml
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: now
+          fetch-depth: 0
+
+      - name: Wait for package run and collect status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow_path="package-once-windows-x64-v1.0.6.yml"
+          run_id=""
+          for _ in $(seq 1 60); do
+            response="$(gh api "repos/${GH_REPO}/actions/workflows/${workflow_path}/runs?per_page=10")"
+            run_id="$(jq -r '[.workflow_runs[] | select(.event == "push")][0].id // empty' <<<"$response")"
+            status="$(jq -r '[.workflow_runs[] | select(.event == "push")][0].status // empty' <<<"$response")"
+            if [[ -n "$run_id" && "$status" == "completed" ]]; then
+              break
+            fi
+            sleep 10
+          done
+          if [[ -z "$run_id" ]]; then
+            echo '{"error":"package workflow run not found"}' > package-v1.0.6-status.json
+          else
+            gh api "repos/${GH_REPO}/actions/runs/${run_id}" > /tmp/run.json
+            gh api "repos/${GH_REPO}/actions/runs/${run_id}/jobs?per_page=100" > /tmp/jobs.json
+            jq -n \
+              --slurpfile run /tmp/run.json \
+              --slurpfile jobs /tmp/jobs.json \
+              '{run: {id: $run[0].id, status: $run[0].status, conclusion: $run[0].conclusion, html_url: $run[0].html_url, head_sha: $run[0].head_sha, created_at: $run[0].created_at, updated_at: $run[0].updated_at}, jobs: [$jobs[0].jobs[] | {id, name, status, conclusion, steps: [.steps[] | {name, status, conclusion, number}]}]}' \
+              > package-v1.0.6-status.json
+          fi
+
+      - name: Commit status and remove inspector
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git pull --ff-only origin now
+          git rm .github/workflows/inspect-package-v1.0.6.yml
+          git add package-v1.0.6-status.json
+          git commit -m "chore: record v1.0.6 package status"
+          git push origin HEAD:now
