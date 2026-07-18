@@ -1,0 +1,9 @@
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "/home/runner/work/bilipdj/bilipdj/core/server.py", line 30, in <module>
+    from . import bilibili_protocol, douyin_protocol
+  File "/home/runner/work/bilipdj/bilipdj/core/douyin_protocol.py", line 18, in <module>
+    from . import douyin_live_pb2
+  File "/home/runner/work/bilipdj/bilipdj/core/douyin_live_pb2.py", line 5, in <module>
+    from google.protobuf import descriptor as _descriptor
+ModuleNotFoundError: No module named 'google'
