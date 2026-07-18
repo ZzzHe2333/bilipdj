@@ -1,0 +1,48 @@
+name: Validate auto-updater Windows build once
+
+on:
+  push:
+    branches: [now]
+    paths:
+      - .github/workflows/validate-auto-updater-windows-once.yml
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  validate:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/auto-updater
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run tests
+        shell: pwsh
+        run: |
+          python -m pip install -r requirements.txt
+          python -m compileall -q core tests
+          python -m unittest discover -s tests -v
+          python scripts\scan_secrets.py
+      - name: Build all Windows executables
+        shell: pwsh
+        run: |
+          .\scripts\package-amd64.ps1 -InstallDependencies
+          if (-not (Test-Path dist\bilipdj\main.exe)) { throw 'main.exe missing' }
+          if (-not (Test-Path dist\bilipdj\paiduijitm.exe)) { throw 'paiduijitm.exe missing' }
+          if (-not (Test-Path dist\bilipdj\updater.exe)) { throw 'updater.exe missing' }
+      - name: Verify release checksum generation
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist\bilipdj\* -DestinationPath auto-updater-test.zip -Force
+          $hash = (Get-FileHash -Algorithm SHA256 auto-updater-test.zip).Hash.ToLowerInvariant()
+          "$hash  auto-updater-test.zip" | Set-Content auto-updater-test.zip.sha256 -Encoding ascii
+          if ((Get-Item auto-updater-test.zip.sha256).Length -lt 64) { throw 'checksum missing' }
+      - name: Report success to PR
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr comment 36 --body "Windows x64 validation passed: all tests passed; main.exe, paiduijitm.exe and updater.exe were built; SHA-256 release output was verified."
