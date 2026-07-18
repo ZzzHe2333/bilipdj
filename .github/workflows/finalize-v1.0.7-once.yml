@@ -24,6 +24,7 @@ jobs:
         run: |
           git fetch origin release/v1.0.7
           git checkout -B release/v1.0.7 origin/release/v1.0.7
+          python -m pip install -r requirements.txt
           python scripts/prepare_v1_0_7.py
           python -m compileall -q core tests
           python -m unittest discover -s tests -v
@@ -36,12 +37,10 @@ jobs:
           git add core/control_panel.py UPDATE.md RELEASE_NOTES.md .github/workflows/package-windows-x64.yml
           git commit -m 'release: prepare v1.0.7'
           git push origin HEAD:release/v1.0.7
-      - name: Remove temporary workflow from now
+      - name: Remove temporary workflows from now
         run: |
           git checkout now
           git pull --ff-only origin now
-          git rm .github/workflows/finalize-v1.0.7-once.yml
-          git commit -m 'chore: remove v1.0.7 finalizer'
+          git rm -f --ignore-unmatch .github/workflows/finalize-v1.0.7-once.yml .github/workflows/inspect-finalize-v1.0.7.yml .github/workflows/diagnose-v1.0.7-once.yml
+          git commit -m 'chore: remove v1.0.7 temporary workflows'
           git push origin HEAD:now
-
-# Trigger after workflow registration.
