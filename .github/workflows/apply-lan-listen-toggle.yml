@@ -1,0 +1,401 @@
+name: Apply LAN listen toggle
+
+on:
+  pull_request:
+    branches: [now]
+    paths:
+      - .github/workflows/apply-lan-listen-toggle.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Add configurable LAN listening
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f"{label}: expected 1 match, found {count}")
+              return text.replace(old, new, 1)
+
+          server_path = Path("core/server.py")
+          server = server_path.read_text(encoding="utf-8")
+
+          server = replace_once(
+              server,
+              '''def _merge_config(defaults: dict[str, Any], custom: dict[str, Any]) -> dict[str, Any]:
+              merged = dict(defaults)
+              for key, value in custom.items():
+                  if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+                      merged[key] = _merge_config(merged[key], value)
+                  else:
+                      merged[key] = value
+              return merged
+
+
+          MYJS_LIST_KEYS''',
+              '''def _merge_config(defaults: dict[str, Any], custom: dict[str, Any]) -> dict[str, Any]:
+              merged = dict(defaults)
+              for key, value in custom.items():
+                  if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+                      merged[key] = _merge_config(merged[key], value)
+                  else:
+                      merged[key] = value
+              return merged
+
+
+          LAN_LISTEN_HOSTS = {"0.0.0.0", "::", "[::]"}
+
+
+          def normalize_server_config(raw: Any) -> dict[str, Any]:
+              source = raw if isinstance(raw, dict) else {}
+              configured_host = str(source.get("host", DEFAULT_HOST) or DEFAULT_HOST).strip()
+              if "lan_listen" in source:
+                  lan_listen = bool(source.get("lan_listen", False))
+              else:
+                  # 兼容旧配置：此前直接填写 0.0.0.0 / :: 即代表局域网监听。
+                  lan_listen = configured_host in LAN_LISTEN_HOSTS
+              try:
+                  port = int(source.get("port", DEFAULT_PORT))
+              except (TypeError, ValueError):
+                  port = DEFAULT_PORT
+              return {
+                  "host": "0.0.0.0" if lan_listen else DEFAULT_HOST,
+                  "port": port,
+                  "lan_listen": lan_listen,
+              }
+
+
+          MYJS_LIST_KEYS''',
+              "server config normalizer",
+          )
+
+          server = replace_once(
+              server,
+              '    "server": {"host": DEFAULT_HOST, "port": DEFAULT_PORT},',
+              '    "server": {"host": DEFAULT_HOST, "port": DEFAULT_PORT, "lan_listen": False},',
+              "server defaults",
+          )
+
+          server = replace_once(
+              server,
+              '''    raw_config = _read_raw_config()
+              merged = _normalize_runtime_platform_config(_merge_config(DEFAULT_CONFIG, raw_config))
+              platform_archive_cfg = merged.get("platform_config_archive", {})''',
+              '''    raw_config = _read_raw_config()
+              merged = _normalize_runtime_platform_config(_merge_config(DEFAULT_CONFIG, raw_config))
+              raw_server = raw_config.get("server", {}) if isinstance(raw_config, dict) else {}
+              merged["server"] = normalize_server_config(raw_server)
+              platform_archive_cfg = merged.get("platform_config_archive", {})''',
+              "load normalized server config",
+          )
+
+          server = replace_once(
+              server,
+              '    server = config.get("server", {})\n    platform_name =',
+              '    server = normalize_server_config(config.get("server", {}))\n    config["server"] = server\n    platform_name =',
+              "save normalized server config",
+          )
+
+          server = replace_once(
+              server,
+              '''server:
+              host: {server.get('host', DEFAULT_HOST)}
+              port: {_to_int(server.get('port', DEFAULT_PORT), DEFAULT_PORT)}''',
+              '''server:
+              host: {server.get('host', DEFAULT_HOST)}
+              port: {_to_int(server.get('port', DEFAULT_PORT), DEFAULT_PORT)}
+              lan_listen: {'true' if bool(server.get('lan_listen', False)) else 'false'}''',
+              "render LAN setting",
+          )
+
+          server = replace_once(
+              server,
+              '''        payload = {
+                      "roomid": int(bilibili_cfg.get("roomid", 0)),''',
+              '''        payload = {
+                      "server": normalize_server_config(cfg.get("server", {})),
+                      "roomid": int(bilibili_cfg.get("roomid", 0)),''',
+              "expose server config",
+          )
+
+          server = replace_once(
+              server,
+              '''            current_cfg = self.server.runtime_config if isinstance(self.server.runtime_config, dict) else {}
+                  incoming_platform = _normalize_platform_name(''',
+              '''            current_cfg = self.server.runtime_config if isinstance(self.server.runtime_config, dict) else {}
+                  current_server = current_cfg.get("server", {}) if isinstance(current_cfg.get("server", {}), dict) else {}
+                  incoming_server = payload.get("server", {})
+                  server_payload = normalize_server_config(
+                      {**current_server, **incoming_server}
+                      if isinstance(incoming_server, dict)
+                      else current_server
+                  )
+                  incoming_platform = _normalize_platform_name(''',
+              "accept server config API payload",
+          )
+
+          server = replace_once(
+              server,
+              '''                {
+                          "platform": incoming_platform,
+                          "bilibili": {"roomid": roomid, "uid": uid, "cookie": cookie},''',
+              '''                {
+                          "server": server_payload,
+                          "platform": incoming_platform,
+                          "bilibili": {"roomid": roomid, "uid": uid, "cookie": cookie},''',
+              "persist server API payload",
+          )
+
+          server = replace_once(
+              server,
+              '''    config = load_config()
+              host = os.getenv("DANMUJI_BACKEND_HOST", str(config.get("server", {}).get("host", DEFAULT_HOST)))
+              port = int(os.getenv("DANMUJI_BACKEND_PORT", int(config.get("server", {}).get("port", DEFAULT_PORT))))''',
+              '''    config = load_config()
+              server_config = normalize_server_config(config.get("server", {}))
+              host = os.getenv("DANMUJI_BACKEND_HOST", str(server_config["host"]))
+              port = int(os.getenv("DANMUJI_BACKEND_PORT", int(server_config["port"])))''',
+              "resolve startup host",
+          )
+
+          server_path.write_text(server, encoding="utf-8")
+
+          panel_path = Path("core/control_panel.py")
+          panel = panel_path.read_text(encoding="utf-8")
+
+          panel = replace_once(
+              panel,
+              '        self.host_var = tk.StringVar(value="0.0.0.0")\n        self.port_var =',
+              '        self.host_var = tk.StringVar(value="127.0.0.1")\n        self.lan_listen_var = tk.BooleanVar(value=False)\n        self.port_var =',
+              "GUI LAN variable",
+          )
+
+          panel = replace_once(
+              panel,
+              '''    content = f"""# 弹幕排队姬 全局配置
+          server:
+            host: {server.get('host', '0.0.0.0')}
+            port: {int(server.get('port', 9816))}''',
+              '''    raw_host = str(server.get("host", "127.0.0.1") or "127.0.0.1").strip()
+              lan_listen = bool(server.get("lan_listen", raw_host in {"0.0.0.0", "::", "[::]"}))
+              listen_host = "0.0.0.0" if lan_listen else "127.0.0.1"
+
+              content = f"""# 弹幕排队姬 全局配置
+          server:
+            host: {listen_host}
+            port: {int(server.get('port', 9816))}
+            lan_listen: {'true' if lan_listen else 'false'}''',
+              "fallback config LAN setting",
+          )
+
+          panel = replace_once(
+              panel,
+              '            ("监听地址", self.host_var),',
+              '            ("监听地址（自动）", self.host_var),',
+              "automatic host label",
+          )
+
+          panel = replace_once(
+              panel,
+              '''        for row_idx, (label, var) in enumerate(fields):
+                  ttk.Label(basic_frame, text=label).grid(row=row_idx, column=0, sticky="w", pady=4)
+                  ttk.Entry(basic_frame, textvariable=var, width=26).grid(row=row_idx, column=1, sticky="ew", pady=4)''',
+              '''        for row_idx, (label, var) in enumerate(fields):
+                  ttk.Label(basic_frame, text=label).grid(row=row_idx, column=0, sticky="w", pady=4)
+                  entry = ttk.Entry(basic_frame, textvariable=var, width=26)
+                  entry.grid(row=row_idx, column=1, sticky="ew", pady=4)
+                  if var is self.host_var:
+                      entry.configure(state="readonly")''',
+              "readonly automatic host",
+          )
+
+          panel = replace_once(
+              panel,
+              '''        ttk.Checkbutton(basic_frame, text="启用排队存档", variable=self.queue_enabled_var).grid(
+                  row=3, column=1, sticky="w", pady=4
+              )
+              ttk.Checkbutton(basic_frame, text="启动时自动运行后端", variable=self.auto_start_var).grid(
+                  row=3, column=3, sticky="w", pady=4
+              )
+
+              ttk.Label(basic_frame, text="语言").grid(row=4, column=0, sticky="w", pady=4)
+              ttk.Combobox(
+                  basic_frame,
+                  textvariable=self.language_var,
+                  values=["中文"],
+                  state="readonly",
+                  width=12,
+              ).grid(row=4, column=1, sticky="w", pady=4)
+
+              ttk.Label(basic_frame, text="界面字体大小").grid(row=4, column=2, sticky="w", padx=(16, 0), pady=4)
+              ttk.Combobox(
+                  basic_frame,
+                  textvariable=self.ui_font_size_var,
+                  values=["9", "10", "11", "12", "13", "14"],
+                  state="readonly",
+                  width=8,
+              ).grid(row=4, column=3, sticky="w", pady=4)
+
+              self._settings_hint_label = ttk.Label(
+                  basic_frame,
+                  text="切换平台配置槽位后，会立即载入该槽位保存的平台和参数。",
+              )
+              self._settings_hint_label.grid(row=7, column=0, columnspan=4, sticky="w", pady=(6, 0))
+
+              ttk.Label(basic_frame, text="每日排队次数").grid(row=5, column=0, sticky="w", pady=4)
+              ttk.Checkbutton(
+                  basic_frame,
+                  text="不限制",
+                  variable=self.daily_queue_unlimited_var,
+                  command=self._toggle_daily_queue_limit_ui,
+              ).grid(row=5, column=1, sticky="w", pady=4)
+              ttk.Label(basic_frame, text="每人最多").grid(row=5, column=2, sticky="w", padx=(16, 0), pady=4)
+              limit_box = ttk.Spinbox(basic_frame, from_=1, to=999, textvariable=self.daily_queue_limit_var, width=8)
+              limit_box.grid(row=5, column=3, sticky="w", pady=4)
+              self._daily_queue_limit_spinbox = limit_box
+
+              ttk.Label(basic_frame, text="次数重置时间").grid(row=6, column=0, sticky="w", pady=4)
+              reset_box = ttk.Frame(basic_frame)
+              reset_box.grid(row=6, column=1, columnspan=3, sticky="w", pady=4)''',
+              '''        ttk.Checkbutton(
+                  basic_frame,
+                  text="允许局域网访问（监听 0.0.0.0，重启后生效）",
+                  variable=self.lan_listen_var,
+                  command=self._sync_lan_listen_host,
+              ).grid(row=3, column=0, columnspan=4, sticky="w", pady=4)
+
+              ttk.Checkbutton(basic_frame, text="启用排队存档", variable=self.queue_enabled_var).grid(
+                  row=4, column=1, sticky="w", pady=4
+              )
+              ttk.Checkbutton(basic_frame, text="启动时自动运行后端", variable=self.auto_start_var).grid(
+                  row=4, column=3, sticky="w", pady=4
+              )
+
+              ttk.Label(basic_frame, text="语言").grid(row=5, column=0, sticky="w", pady=4)
+              ttk.Combobox(
+                  basic_frame,
+                  textvariable=self.language_var,
+                  values=["中文"],
+                  state="readonly",
+                  width=12,
+              ).grid(row=5, column=1, sticky="w", pady=4)
+
+              ttk.Label(basic_frame, text="界面字体大小").grid(row=5, column=2, sticky="w", padx=(16, 0), pady=4)
+              ttk.Combobox(
+                  basic_frame,
+                  textvariable=self.ui_font_size_var,
+                  values=["9", "10", "11", "12", "13", "14"],
+                  state="readonly",
+                  width=8,
+              ).grid(row=5, column=3, sticky="w", pady=4)
+
+              self._settings_hint_label = ttk.Label(
+                  basic_frame,
+                  text="局域网监听仅开放展示页、队列状态和 WebSocket；Cookie 与管理接口仍仅限本机。",
+              )
+              self._settings_hint_label.grid(row=8, column=0, columnspan=4, sticky="w", pady=(6, 0))
+
+              ttk.Label(basic_frame, text="每日排队次数").grid(row=6, column=0, sticky="w", pady=4)
+              ttk.Checkbutton(
+                  basic_frame,
+                  text="不限制",
+                  variable=self.daily_queue_unlimited_var,
+                  command=self._toggle_daily_queue_limit_ui,
+              ).grid(row=6, column=1, sticky="w", pady=4)
+              ttk.Label(basic_frame, text="每人最多").grid(row=6, column=2, sticky="w", padx=(16, 0), pady=4)
+              limit_box = ttk.Spinbox(basic_frame, from_=1, to=999, textvariable=self.daily_queue_limit_var, width=8)
+              limit_box.grid(row=6, column=3, sticky="w", pady=4)
+              self._daily_queue_limit_spinbox = limit_box
+
+              ttk.Label(basic_frame, text="次数重置时间").grid(row=7, column=0, sticky="w", pady=4)
+              reset_box = ttk.Frame(basic_frame)
+              reset_box.grid(row=7, column=1, columnspan=3, sticky="w", pady=4)''',
+              "LAN checkbox and settings layout",
+          )
+
+          panel = replace_once(
+              panel,
+              '''    def load_from_file(self) -> None:
+                  try:''',
+              '''    def _sync_lan_listen_host(self) -> None:
+                  self.host_var.set("0.0.0.0" if self.lan_listen_var.get() else "127.0.0.1")
+
+              def load_from_file(self) -> None:
+                  try:''',
+              "LAN host sync helper",
+          )
+
+          panel = replace_once(
+              panel,
+              '        self.host_var.set(str(server.get("host", "0.0.0.0")))\n        self.port_var.set',
+              '''        configured_host = str(server.get("host", "127.0.0.1") or "127.0.0.1").strip()
+                  lan_listen = bool(server.get("lan_listen", configured_host in {"0.0.0.0", "::", "[::]"}))
+                  self.lan_listen_var.set(lan_listen)
+                  self._sync_lan_listen_host()
+                  self.port_var.set''',
+              "load LAN setting",
+          )
+
+          panel = replace_once(
+              panel,
+              '''            "server": {
+                      "host": self.host_var.get().strip() or "0.0.0.0",
+                      "port": _coerce_int_field(self.port_var.get(), 9816, "监听端口"),
+                  },''',
+              '''            "server": {
+                      "host": "0.0.0.0" if self.lan_listen_var.get() else "127.0.0.1",
+                      "port": _coerce_int_field(self.port_var.get(), 9816, "监听端口"),
+                      "lan_listen": bool(self.lan_listen_var.get()),
+                  },''',
+              "gather LAN setting",
+          )
+
+          panel_path.write_text(panel, encoding="utf-8")
+          PY
+
+      - name: Validate LAN toggle
+        run: |
+          python -m compileall -q core
+          python - <<'PY'
+          from core import server
+
+          assert server.normalize_server_config({}) == {
+              "host": "127.0.0.1", "port": 9816, "lan_listen": False
+          }
+          assert server.normalize_server_config({"lan_listen": True})["host"] == "0.0.0.0"
+          assert server.normalize_server_config({"host": "0.0.0.0"})["lan_listen"] is True
+          assert server.normalize_server_config({"host": "0.0.0.0", "lan_listen": False})["host"] == "127.0.0.1"
+          panel = open("core/control_panel.py", encoding="utf-8").read()
+          assert "允许局域网访问" in panel
+          assert '"lan_listen": bool(self.lan_listen_var.get())' in panel
+          PY
+          git diff --check
+
+      - name: Commit feature
+        env:
+          HEAD_BRANCH: ${{ github.head_ref }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-lan-listen-toggle.yml
+          git add core/server.py core/control_panel.py
+          git commit -m "feat: add optional LAN listening"
+          git push origin "HEAD:${HEAD_BRANCH}"
