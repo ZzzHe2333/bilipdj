@@ -32,3 +32,5 @@ jobs:
           git add core/control_panel.py UPDATE.md RELEASE_NOTES.md .github/workflows/package-windows-x64.yml
           git commit -m 'release: prepare v1.0.7'
           git push origin HEAD:release/v1.0.7
+
+# Trigger after workflow registration.
