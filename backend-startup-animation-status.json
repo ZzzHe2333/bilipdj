@@ -1,16 +1,16 @@
 {
   "run": {
-    "id": 29635575207,
+    "id": 29635673621,
     "status": "completed",
     "conclusion": "failure",
-    "html_url": "https://github.com/ZzzHe2333/bilipdj/actions/runs/29635575207",
-    "head_sha": "d53c87ce1a165224dfe74ed59dd2da3c09b5864c",
-    "created_at": "2026-07-18T07:20:44Z",
-    "updated_at": "2026-07-18T07:21:00Z"
+    "html_url": "https://github.com/ZzzHe2333/bilipdj/actions/runs/29635673621",
+    "head_sha": "d3598c65bd7378263bb565fafa2bcfee396eeb49",
+    "created_at": "2026-07-18T07:24:13Z",
+    "updated_at": "2026-07-18T07:24:25Z"
   },
   "jobs": [
     {
-      "id": 88057206311,
+      "id": 88057463648,
       "name": "apply",
       "status": "completed",
       "conclusion": "failure",
@@ -40,27 +40,27 @@
           "number": 4
         },
         {
-          "name": "Preserve patch failure",
+          "name": "Install dependencies",
           "status": "completed",
-          "conclusion": "skipped",
+          "conclusion": "success",
           "number": 5
         },
         {
-          "name": "Install dependencies",
+          "name": "Run validation with diagnostics",
           "status": "completed",
           "conclusion": "success",
           "number": 6
         },
         {
-          "name": "Validate patch",
+          "name": "Preserve validation failure",
           "status": "completed",
-          "conclusion": "failure",
+          "conclusion": "skipped",
           "number": 7
         },
         {
           "name": "Commit feature and clean temporary files",
           "status": "completed",
-          "conclusion": "skipped",
+          "conclusion": "failure",
           "number": 8
         },
         {
