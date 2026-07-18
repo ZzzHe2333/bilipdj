@@ -1,0 +1,100 @@
+2026-07-18T07:46:03.8161464Z env:
+2026-07-18T07:46:03.8161788Z   pythonLocation: /opt/hostedtoolcache/Python/3.11.15/x64
+2026-07-18T07:46:03.8162479Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.11.15/x64/lib/pkgconfig
+2026-07-18T07:46:03.8162974Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.15/x64
+2026-07-18T07:46:03.8163462Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.15/x64
+2026-07-18T07:46:03.8163891Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.15/x64
+2026-07-18T07:46:03.8164277Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.11.15/x64/lib
+2026-07-18T07:46:03.8164721Z ##[endgroup]
+2026-07-18T07:46:04.1436429Z test_backend_readiness_is_checked_in_worker_thread (test_backend_startup_animation.BackendStartupAnimationTests.test_backend_readiness_is_checked_in_worker_thread) ... ok
+2026-07-18T07:46:04.1437967Z test_progress_and_button_animation_exist (test_backend_startup_animation.BackendStartupAnimationTests.test_progress_and_button_animation_exist) ... ok
+2026-07-18T07:46:04.1439030Z test_source_is_valid_python (test_backend_startup_animation.BackendStartupAnimationTests.test_source_is_valid_python) ... ok
+2026-07-18T07:46:04.1440415Z test_start_is_deferred_until_ui_can_paint (test_backend_startup_animation.BackendStartupAnimationTests.test_start_is_deferred_until_ui_can_paint) ... ok
+2026-07-18T07:46:04.1441658Z test_startup_save_avoids_dead_backend_http_calls (test_backend_startup_animation.BackendStartupAnimationTests.test_startup_save_avoids_dead_backend_http_calls) ... ok
+2026-07-18T07:46:04.1442572Z test_defaults_to_localhost (test_server_config.NormalizeServerConfigTests.test_defaults_to_localhost) ... ok
+2026-07-18T07:46:04.1443869Z test_explicit_false_overrides_legacy_wildcard_host (test_server_config.NormalizeServerConfigTests.test_explicit_false_overrides_legacy_wildcard_host) ... ok
+2026-07-18T07:46:04.1446077Z test_explicit_lan_listening_uses_wildcard_host (test_server_config.NormalizeServerConfigTests.test_explicit_lan_listening_uses_wildcard_host) ... ok
+2026-07-18T07:46:04.1447937Z test_invalid_port_falls_back_to_default (test_server_config.NormalizeServerConfigTests.test_invalid_port_falls_back_to_default) ... ok
+2026-07-18T07:46:04.1450048Z test_legacy_wildcard_hosts_enable_lan_listening (test_server_config.NormalizeServerConfigTests.test_legacy_wildcard_hosts_enable_lan_listening) ... ok
+2026-07-18T07:46:04.1451222Z 
+2026-07-18T07:46:04.1451659Z ----------------------------------------------------------------------
+2026-07-18T07:46:04.1452386Z Ran 10 tests in 0.055s
+2026-07-18T07:46:04.1452647Z 
+2026-07-18T07:46:04.1452839Z OK
+2026-07-18T07:46:04.2620211Z Secret scan passed (63 tracked files).
+2026-07-18T07:46:04.2748506Z ##[group]Run git config user.name "github-actions[bot]"
+2026-07-18T07:46:04.2749010Z [36;1mgit config user.name "github-actions[bot]"[0m
+2026-07-18T07:46:04.2749458Z [36;1mgit config user.email "41898282+github-actions[bot]@users.noreply.github.com"[0m
+2026-07-18T07:46:04.2749919Z [36;1mgit rm -f --ignore-unmatch \[0m
+2026-07-18T07:46:04.2750317Z [36;1m  .github/workflows/apply-backend-startup-animation-once.yml \[0m
+2026-07-18T07:46:04.2750808Z [36;1m  .github/workflows/apply-backend-startup-animation-v2.yml \[0m
+2026-07-18T07:46:04.2751291Z [36;1m  .github/workflows/apply-backend-startup-animation-v3.yml \[0m
+2026-07-18T07:46:04.2751741Z [36;1m  .github/workflows/apply-backend-startup-animation-v4.yml \[0m
+2026-07-18T07:46:04.2752186Z [36;1m  .github/workflows/apply-backend-startup-animation-v5.yml \[0m
+2026-07-18T07:46:04.2752639Z [36;1m  .github/workflows/apply-backend-startup-animation-v6.yml \[0m
+2026-07-18T07:46:04.2753389Z [36;1m  .github/workflows/apply-backend-startup-animation-v7.yml \[0m
+2026-07-18T07:46:04.2753842Z [36;1m  .github/workflows/apply-backend-startup-animation-v9.yml \[0m
+2026-07-18T07:46:04.2754309Z [36;1m  .github/workflows/apply-backend-startup-animation-v10.yml \[0m
+2026-07-18T07:46:04.2754787Z [36;1m  .github/workflows/export-generated-startup-animation.yml \[0m
+2026-07-18T07:46:04.2755235Z [36;1m  .github/workflows/inspect-backend-startup-animation.yml \[0m
+2026-07-18T07:46:04.2755811Z [36;1m  .github/workflows/inspect-backend-startup-animation-v6.yml \[0m
+2026-07-18T07:46:04.2756310Z [36;1m  .github/workflows/inspect-backend-startup-animation-v9.yml \[0m
+2026-07-18T07:46:04.2756732Z [36;1m  backend-startup-animation-status.json \[0m
+2026-07-18T07:46:04.2757113Z [36;1m  backend-startup-animation-v6-status.json \[0m
+2026-07-18T07:46:04.2757496Z [36;1m  backend-startup-animation-patch.log \[0m
+2026-07-18T07:46:04.2757951Z [36;1m  backend-startup-animation-patch-v3.log \[0m
+2026-07-18T07:46:04.2758343Z [36;1m  backend-startup-animation-validation.log \[0m
+2026-07-18T07:46:04.2758771Z [36;1m  backend-startup-animation-validation-v6.log \[0m
+2026-07-18T07:46:04.2759166Z [36;1m  backend-startup-animation-validation-v7.log[0m
+2026-07-18T07:46:04.2759634Z [36;1mgit add core/control_panel.py tests/test_backend_startup_animation.py[0m
+2026-07-18T07:46:04.2760098Z [36;1mgit commit -m "fix: keep backend startup UI responsive"[0m
+2026-07-18T07:46:04.2760480Z [36;1mgit pull --rebase origin now[0m
+2026-07-18T07:46:04.2760785Z [36;1mgit push origin HEAD:now[0m
+2026-07-18T07:46:04.2795455Z shell: /usr/bin/bash -e {0}
+2026-07-18T07:46:04.2795902Z env:
+2026-07-18T07:46:04.2796273Z   pythonLocation: /opt/hostedtoolcache/Python/3.11.15/x64
+2026-07-18T07:46:04.2796740Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.11.15/x64/lib/pkgconfig
+2026-07-18T07:46:04.2797182Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.15/x64
+2026-07-18T07:46:04.2797647Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.15/x64
+2026-07-18T07:46:04.2798065Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.15/x64
+2026-07-18T07:46:04.2798496Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.11.15/x64/lib
+2026-07-18T07:46:04.2798866Z ##[endgroup]
+2026-07-18T07:46:04.2911479Z rm '.github/workflows/apply-backend-startup-animation-once.yml'
+2026-07-18T07:46:04.2912258Z rm '.github/workflows/apply-backend-startup-animation-v10.yml'
+2026-07-18T07:46:04.2912872Z rm '.github/workflows/apply-backend-startup-animation-v2.yml'
+2026-07-18T07:46:04.2913716Z rm '.github/workflows/apply-backend-startup-animation-v3.yml'
+2026-07-18T07:46:04.2914155Z rm '.github/workflows/apply-backend-startup-animation-v4.yml'
+2026-07-18T07:46:04.2914576Z rm '.github/workflows/apply-backend-startup-animation-v5.yml'
+2026-07-18T07:46:04.2915025Z rm '.github/workflows/apply-backend-startup-animation-v6.yml'
+2026-07-18T07:46:04.2915434Z rm '.github/workflows/apply-backend-startup-animation-v7.yml'
+2026-07-18T07:46:04.2916175Z rm '.github/workflows/apply-backend-startup-animation-v9.yml'
+2026-07-18T07:46:04.2916637Z rm '.github/workflows/export-generated-startup-animation.yml'
+2026-07-18T07:46:04.2917118Z rm '.github/workflows/inspect-backend-startup-animation-v6.yml'
+2026-07-18T07:46:04.2917563Z rm '.github/workflows/inspect-backend-startup-animation-v9.yml'
+2026-07-18T07:46:04.2917989Z rm '.github/workflows/inspect-backend-startup-animation.yml'
+2026-07-18T07:46:04.2918359Z rm 'backend-startup-animation-patch.log'
+2026-07-18T07:46:04.2918734Z rm 'backend-startup-animation-status.json'
+2026-07-18T07:46:04.2919104Z rm 'backend-startup-animation-v6-status.json'
+2026-07-18T07:46:04.2919473Z rm 'backend-startup-animation-validation-v7.log'
+2026-07-18T07:46:04.2952309Z The following paths are ignored by one of your .gitignore files:
+2026-07-18T07:46:04.2952851Z tests
+2026-07-18T07:46:04.2953344Z hint: Use -f if you really want to add them.
+2026-07-18T07:46:04.2953856Z hint: Disable this message with "git config set advice.addIgnoredFile false"
+2026-07-18T07:46:04.2965043Z ##[error]Process completed with exit code 1.
+2026-07-18T07:46:04.3086023Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-07-18T07:46:04.3087099Z Post job cleanup.
+2026-07-18T07:46:04.3802010Z [command]/usr/bin/git version
+2026-07-18T07:46:04.3839436Z git version 2.54.0
+2026-07-18T07:46:04.3875254Z Temporarily overriding HOME='/home/runner/work/_temp/db78a5bf-fb04-4ae1-a1c9-3dacb655736e' before making global git config changes
+2026-07-18T07:46:04.3876652Z Adding repository directory to the temporary git global config as a safe directory
+2026-07-18T07:46:04.3881156Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/bilipdj/bilipdj
+2026-07-18T07:46:04.3913821Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-07-18T07:46:04.3942281Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-07-18T07:46:04.4128167Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-07-18T07:46:04.4158144Z http.https://github.com/.extraheader
+2026-07-18T07:46:04.4168448Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-07-18T07:46:04.4202876Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-07-18T07:46:04.4384286Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-07-18T07:46:04.4402462Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-07-18T07:46:04.4703728Z Cleaning up orphan processes
+2026-07-18T07:46:04.4926476Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-python@v5. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
