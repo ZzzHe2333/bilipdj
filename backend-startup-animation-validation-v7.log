@@ -1,0 +1,42 @@
+=== compileall ===
+*** Error compiling 'core/control_panel.py'...
+Sorry: IndentationError: unindent does not match any outer indentation level (control_panel.py, line 931)
+*** Error compiling 'tests/test_backend_startup_animation.py'...
+  File "tests/test_backend_startup_animation.py", line 33
+    self.assertIn('if switch_queue_slot:
+                  ^
+SyntaxError: unterminated string literal (detected at line 33)
+
+=== unittest ===
+test_backend_startup_animation (unittest.loader._FailedTest.test_backend_startup_animation) ... ERROR
+test_defaults_to_localhost (test_server_config.NormalizeServerConfigTests.test_defaults_to_localhost) ... ok
+test_explicit_false_overrides_legacy_wildcard_host (test_server_config.NormalizeServerConfigTests.test_explicit_false_overrides_legacy_wildcard_host) ... ok
+test_explicit_lan_listening_uses_wildcard_host (test_server_config.NormalizeServerConfigTests.test_explicit_lan_listening_uses_wildcard_host) ... ok
+test_invalid_port_falls_back_to_default (test_server_config.NormalizeServerConfigTests.test_invalid_port_falls_back_to_default) ... ok
+test_legacy_wildcard_hosts_enable_lan_listening (test_server_config.NormalizeServerConfigTests.test_legacy_wildcard_hosts_enable_lan_listening) ... ok
+
+======================================================================
+ERROR: test_backend_startup_animation (unittest.loader._FailedTest.test_backend_startup_animation)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_backend_startup_animation
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/unittest/loader.py", line 419, in _find_test_path
+    module = self._get_module_from_name(name)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/unittest/loader.py", line 362, in _get_module_from_name
+    __import__(name)
+  File "/home/runner/work/bilipdj/bilipdj/tests/test_backend_startup_animation.py", line 33
+    self.assertIn('if switch_queue_slot:
+                  ^
+SyntaxError: unterminated string literal (detected at line 33)
+
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.000s
+
+FAILED (errors=1)
+=== secret scan ===
+Secret scan passed (58 tracked files).
+=== diff check ===
+
+compile=1 test=1 secret=0 diff=0
