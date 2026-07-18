@@ -47,7 +47,10 @@ jobs:
       - name: Verify source version
         shell: pwsh
         run: |
-          python -c "from pathlib import Path; text=Path('core/control_panel.py').read_text(encoding='utf-8-sig'); assert 'APP_VERSION = \"1.0.6\"' in text"
+          $match = Select-String -LiteralPath "core/control_panel.py" -Pattern '^APP_VERSION = "1\.0\.6"$'
+          if (-not $match) {
+            throw "core/control_panel.py does not declare APP_VERSION 1.0.6"
+          }
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -100,12 +103,13 @@ jobs:
           replacesArtifacts: true
           generateReleaseNotes: true
 
-      - name: Remove one-time workflow
+      - name: Remove one-time workflow and diagnostics
         shell: bash
         run: |
           git pull --ff-only origin now
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm .github/workflows/package-once-windows-x64-v1.0.6.yml
+          git rm -f --ignore-unmatch package-v1.0.6-status.json
           git commit -m "chore: remove completed v1.0.6 packaging workflow"
           git push origin HEAD:now
