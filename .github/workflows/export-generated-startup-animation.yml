@@ -1,0 +1,44 @@
+name: Export generated startup animation source
+
+on:
+  push:
+    branches: [now]
+    paths:
+      - .github/workflows/export-generated-startup-animation.yml
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: now
+          fetch-depth: 0
+      - name: Apply prepared patch
+        run: |
+          git fetch origin fix/backend-startup-animation
+          git show origin/fix/backend-startup-animation:.github/workflows/apply-backend-startup-animation.yml > /tmp/backend-startup-patch.yml
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          workflow = Path('/tmp/backend-startup-patch.yml').read_text(encoding='utf-8')
+          match = re.search(r"(?ms)^          python - <<'PY'\n(.*?)^          PY$", workflow)
+          if match is None:
+              raise RuntimeError('unable to extract backend startup patch script')
+          script = "\n".join(
+              line[10:] if line.startswith("          ") else line
+              for line in match.group(1).splitlines()
+          )
+          exec(compile(script, 'apply_backend_startup_animation.py', 'exec'), {'__name__': '__main__'})
+          PY
+      - name: Push generated source to inspection branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B generated/backend-startup-animation
+          git add core/control_panel.py tests/test_backend_startup_animation.py
+          git commit -m "chore: generated startup animation source"
+          git push --force origin HEAD:generated/backend-startup-animation
