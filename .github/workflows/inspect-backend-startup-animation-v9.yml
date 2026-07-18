@@ -1,4 +1,4 @@
-name: Inspect backend startup animation v10
+name: Capture backend startup animation v10 commit error
 
 on:
   push:
@@ -18,42 +18,17 @@ jobs:
         with:
           ref: now
           fetch-depth: 0
-      - name: Record v10 status on diagnostic branch
+      - name: Save v10 job log tail on diagnostic branch
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          sleep 5
-          gh api "repos/${{ github.repository }}/actions/workflows/apply-backend-startup-animation-v10.yml/runs?per_page=1" > /tmp/runs.json
-          RUN_ID=$(python -c "import json; d=json.load(open('/tmp/runs.json')); print(d['workflow_runs'][0]['id'])")
-          gh api "repos/${{ github.repository }}/actions/runs/${RUN_ID}/jobs" > /tmp/jobs.json
-          python - <<'PY'
-          import json
-          runs = json.load(open('/tmp/runs.json', encoding='utf-8'))
-          jobs = json.load(open('/tmp/jobs.json', encoding='utf-8'))
-          run = runs['workflow_runs'][0]
-          out = {
-              'run': {key: run.get(key) for key in ('id', 'status', 'conclusion', 'html_url', 'head_sha')},
-              'jobs': [
-                  {
-                      'id': job.get('id'),
-                      'name': job.get('name'),
-                      'status': job.get('status'),
-                      'conclusion': job.get('conclusion'),
-                      'steps': [
-                          {key: step.get(key) for key in ('name', 'status', 'conclusion', 'number')}
-                          for step in job.get('steps', [])
-                      ],
-                  }
-                  for job in jobs.get('jobs', [])
-              ],
-          }
-          open('/tmp/backend-startup-animation-v10-status.json', 'w', encoding='utf-8').write(json.dumps(out, ensure_ascii=False, indent=2))
-          PY
+          gh api "repos/${{ github.repository }}/actions/jobs/88059142451/logs" > /tmp/v10-job.log
+          tail -n 100 /tmp/v10-job.log > /tmp/backend-startup-animation-v10-error.log
           git checkout --orphan diagnostic-workflow-status
           git rm -rf .
-          cp /tmp/backend-startup-animation-v10-status.json .
-          git add backend-startup-animation-v10-status.json
+          cp /tmp/backend-startup-animation-v10-error.log .
+          git add backend-startup-animation-v10-error.log
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore: record startup animation v10 status"
+          git commit -m "chore: record startup animation v10 commit error"
           git push --force origin HEAD:diagnostic/workflow-status
