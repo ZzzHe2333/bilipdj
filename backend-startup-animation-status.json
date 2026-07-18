@@ -1,16 +1,16 @@
 {
   "run": {
-    "id": 29635673621,
+    "id": 29635742499,
     "status": "completed",
     "conclusion": "failure",
-    "html_url": "https://github.com/ZzzHe2333/bilipdj/actions/runs/29635673621",
-    "head_sha": "d3598c65bd7378263bb565fafa2bcfee396eeb49",
-    "created_at": "2026-07-18T07:24:13Z",
-    "updated_at": "2026-07-18T07:24:25Z"
+    "html_url": "https://github.com/ZzzHe2333/bilipdj/actions/runs/29635742499",
+    "head_sha": "ed771b43d0318477d38890fd49e8d2d54cb63a63",
+    "created_at": "2026-07-18T07:26:38Z",
+    "updated_at": "2026-07-18T07:26:51Z"
   },
   "jobs": [
     {
-      "id": 88057463648,
+      "id": 88057639146,
       "name": "apply",
       "status": "completed",
       "conclusion": "failure",
@@ -46,40 +46,34 @@
           "number": 5
         },
         {
-          "name": "Run validation with diagnostics",
+          "name": "Validate feature",
           "status": "completed",
-          "conclusion": "success",
+          "conclusion": "failure",
           "number": 6
         },
         {
-          "name": "Preserve validation failure",
+          "name": "Commit feature and remove diagnostics",
           "status": "completed",
           "conclusion": "skipped",
           "number": 7
         },
         {
-          "name": "Commit feature and clean temporary files",
-          "status": "completed",
-          "conclusion": "failure",
-          "number": 8
-        },
-        {
           "name": "Post Run actions/setup-python@v5",
           "status": "completed",
           "conclusion": "skipped",
-          "number": 15
+          "number": 13
         },
         {
           "name": "Post Run actions/checkout@v4",
           "status": "completed",
           "conclusion": "success",
-          "number": 16
+          "number": 14
         },
         {
           "name": "Complete job",
           "status": "completed",
           "conclusion": "success",
-          "number": 17
+          "number": 15
         }
       ]
     }
