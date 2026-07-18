@@ -1,186 +1,318 @@
-# 弹幕排队姬（Bilipdj）
-[更新日志](./UPDATE.md) |
-[Ai请看](./ai.md) | 
-[readme](./README.md) | 
-[教程](./GUIDE.md) |
-[贡献者](./CONTRIBUTORS.md) |
+<div align="center">
 
-[![更新日志](https://img.shields.io/badge/更新日志-UPDATE.md-blue)](UPDATE.md) 
-[![使用教程](https://img.shields.io/badge/使用教程-GUIDE.md-green)](GUIDE.md) 
-[![AI上下文](https://img.shields.io/badge/AI上下文-ai.md-purple)](ai.md)
+# Bilipdj · 弹幕排队姬
 
-弹幕排队姬是一个面向 **Bilibili / 抖音**直播间的弹幕排队管理工具。
-排队逻辑由 Python 后端统一处理，前端页面只负责展示，避免前后端计算不一致。
+**面向直播间的本地化弹幕排队、权限控制、队列存档与 OBS 展示工具。**
 
-## 核心功能
+<p>
+  <a href="https://github.com/ZzzHe2333/bilipdj/releases"><img src="https://img.shields.io/github/v/release/ZzzHe2333/bilipdj?display_name=tag&sort=semver" alt="Release"></a>
+  <a href="https://github.com/ZzzHe2333/bilipdj/actions/workflows/package-windows-x64.yml"><img src="https://img.shields.io/github/actions/workflow/status/ZzzHe2333/bilipdj/package-windows-x64.yml?branch=now&label=Windows%20build" alt="Windows build"></a>
+  <a href="https://github.com/ZzzHe2333/bilipdj/actions/workflows/package-macos.yml"><img src="https://img.shields.io/github/actions/workflow/status/ZzzHe2333/bilipdj/package-macos.yml?branch=now&label=macOS%20build" alt="macOS build"></a>
+  <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white" alt="Python 3.10+">
+  <a href="./LICENSE"><img src="https://img.shields.io/github/license/ZzzHe2333/bilipdj" alt="License"></a>
+</p>
 
-- 弹幕入队、取消、修改、管理员删除等指令统一由后端处理
-- **权限体系**：`super_admin` / `admin` / `jianzhang` / `member` / `blacklist`
-- **黑名单机制**：黑名单用户无法触发任何指令，拦截行为写入日志
-- **功能开关**：总开关与分项开关（官服 / B 服 / 超级 / 米服 / 舰长插队等，共 9 项）
-- **排队存档**：10 个槽位，支持切换、恢复、清空；每条记录保留最后操作时间
-- **多平台支持**：Bilibili（WebSocket 二进制协议）、抖音（HTTPS 轮询 + Protobuf）
-- **GUI 控制台**：10 个标签页，涵盖日志、队列、黑名单、设置、权限、开关、性能、样式等；暗夜/明亮双主题
-- **透明弹窗**：支持 OBS 窗口捕获、拖拽移动、置顶控制
+<p>
+  <a href="https://github.com/ZzzHe2333/bilipdj/stargazers"><img src="https://img.shields.io/github/stars/ZzzHe2333/bilipdj?style=social" alt="Stars"></a>
+  <a href="https://github.com/ZzzHe2333/bilipdj/releases"><img src="https://img.shields.io/github/downloads/ZzzHe2333/bilipdj/total?style=social" alt="Downloads"></a>
+</p>
 
-## 目录结构（主要）
+[下载发行版](https://github.com/ZzzHe2333/bilipdj/releases) · [使用教程](./GUIDE.md) · [更新日志](./UPDATE.md) · [问题反馈](https://github.com/ZzzHe2333/bilipdj/issues) · [贡献者](./CONTRIBUTORS.md)
 
-```
-bilipdj/
-├── core/
-│   ├── control_panel.py        # 桌面 GUI（主入口）
-│   ├── server.py               # 后端 HTTP/WS 服务器
-│   ├── bilibili_protocol.py    # Bilibili 弹幕协议
-│   ├── douyin_protocol.py      # 抖音直播协议
-│   ├── overlay_host.py         # OBS 透明弹窗
-│   ├── config.yaml             # 主配置（运行时生成）
-│   ├── quanxian.yaml           # 权限配置（运行时生成）
-│   ├── kaiguan.yaml            # 功能开关（运行时生成）
-│   ├── style.json              # 样式配置（运行时生成）
-│   ├── ui/                     # Web 前端（index/config/cookie_login）
-│   └── cd/                     # 排队存档 CSV + 状态 JSON
-├── bilipdj_onedir.spec         # PyInstaller 主程序配置
-├── paiduijitm.spec             # PyInstaller 透明弹窗配置（onefile）
-├── package-windows-local.ps1   # Windows 本地打包脚本
-├── README.md
-├── UPDATE.md
-└── GUIDE.md                    # 用户教学文档
-```
+</div>
 
-## 快速启动（源码运行）
+---
 
-1. 进入 `bilipdj/` 子目录（本 README 所在位置）。
-2. 安装依赖：
+Bilipdj 将 **弹幕接入、排队规则、权限判断、队列存档和展示输出** 集中在本地 Python 后端中处理。桌面控制台负责配置与管理，网页看板和透明弹窗负责展示，从而避免多个前端各自计算队列导致状态不一致。
+
+> [!IMPORTANT]
+> 当前正式接入的平台是 **Bilibili** 与 **抖音**。虎牙、快手、斗鱼、微信视频号目前仅保留配置位，尚未接入实时弹幕。
+
+## 功能概览
+
+| 能力 | 说明 |
+|---|---|
+| 多平台弹幕 | Bilibili 二进制 WebSocket 协议；抖音直播页参数解析、轮询与 Protobuf 消息解析 |
+| 统一排队引擎 | 入队、取消、修改、删除、插队、暂停与恢复等规则均由后端处理 |
+| 桌面控制台 | 现代化明暗主题界面，集中管理服务、日志、队列、平台参数、权限、开关和样式 |
+| 权限体系 | `super_admin`、`admin`、`jianzhang`、`member`、`blacklist` 五级角色 |
+| 功能开关 | 排队总开关、官服/B服/超级/米服排队、取消、修改、舰长插队和房管权限 |
+| 队列与配置存档 | 10 个队列存档槽位，并支持多套平台配置快速切换 |
+| B站送礼插队 | 按礼物、电池数、可用次数、插入名次等条件授予排队资格 |
+| 每日次数限制 | 可限制单个用户每日成功入队次数，并自定义统计日重置时间 |
+| OBS 透明弹窗 | 独立透明窗口、置顶控制、尺寸缩放、字体和描边样式预览 |
+| 本地数据管理 | 配置、权限、日志和队列数据保存在本机，不依赖远程数据库 |
+
+## 界面结构
+
+当前桌面控制台采用 **7 个一级页面**：
+
+| 页面 | 用途 |
+|---|---|
+| 日志 | 查看实时后端日志，支持日志等级过滤和搜索 |
+| 当前排队 | 查看队列、切换存档、删除、移动、插入和清空条目 |
+| 设置 | 基础设置、平台参数、黑名单、功能开关、样式设置，以及 Bilibili 平台下的送礼插队 |
+| 透明窗口 | 启动、关闭、置顶和调整 OBS 透明弹窗 |
+| 权限 | 编辑超级管理员、管理员、舰长、普通成员和黑名单名单 |
+| 性能 | 查看 CPU、内存、磁盘和可用的 GPU 占用信息 |
+| 关于 | 查看版本和项目信息 |
+
+## 快速开始
+
+### 方式一：使用发行版
+
+前往 [Releases](https://github.com/ZzzHe2333/bilipdj/releases) 下载对应平台的压缩包：
+
+- Windows x64：`bilibili-danmuji-windows-x64-<tag>.zip`
+- macOS Apple Silicon：`bilibili-danmuji-macos-arm64-<tag>.tar.gz`
+- macOS Intel：`bilibili-danmuji-macos-x86_64-<tag>.tar.gz`
+
+解压后运行：
+
+- Windows：`main.exe`
+- macOS：`main`
+
+透明弹窗程序会随主程序一同打包，无需单独下载。
+
+### 方式二：从源码运行
 
 ```bash
-pip install Pillow qrcode brotli psutil pyyaml protobuf
-```
-
-3. 启动 GUI：
-
-```bash
+git clone --depth 1 --branch now https://github.com/ZzzHe2333/bilipdj.git
+cd bilipdj
+python -m pip install "qrcode[pil]" brotli psutil PyYAML protobuf
 python core/control_panel.py
 ```
 
-启动后可通过 GUI 顶部按钮访问：
+源码运行建议使用 Python 3.10 或更高版本。项目 CI 使用 Python 3.11 构建发行包。
 
-- **配置页**（扫码登录）：`http://127.0.0.1:9816/config`
-- **展示页**（队列看板）：`http://127.0.0.1:9816/index`
+## 首次使用
 
-**透明弹窗（OBS 捕获）**：在 OBS 中添加「窗口捕获」，按标题 **排队透明弹窗** 选择窗口，勾选「允许透明」即可。
+1. 打开桌面控制台的 **设置 → 平台参数**。
+2. 选择直播平台：
+   - **Bilibili**：填写直播间号，或点击顶部 **登录配置**，在浏览器中扫码获取 UID 和 Cookie。
+   - **抖音**：粘贴直播间链接，点击 **获取参数** 自动解析 `live_id`、`room_id` 等信息。
+3. 点击 **保存配置**。
+4. 点击顶部 **启动服务**，等待连接状态变为已连接。
+5. 按需打开队列看板或 OBS 透明弹窗。
 
-## 弹幕指令
+默认本地地址：
+
+| 地址 | 用途 |
+|---|---|
+| `http://127.0.0.1:9816/config` | 登录与 Cookie 配置 |
+| `http://127.0.0.1:9816/index` | 网页队列看板 |
+| `ws://127.0.0.1:9816/danmu/sub` | 本地弹幕与状态 WebSocket |
+
+更完整的接入步骤见 [GUIDE.md](./GUIDE.md)。
+
+## 运行架构
+
+```mermaid
+flowchart LR
+    B[Bilibili WebSocket] --> P[平台协议适配层]
+    D[抖音直播页 / 轮询 / Protobuf] --> P
+    P --> S[core/server.py]
+    S --> Q[队列、权限、开关与存档]
+    Q --> A[本地 REST / WebSocket]
+    A --> G[Tk 桌面控制台]
+    A --> W[网页队列看板]
+    A --> O[OBS 透明弹窗]
+```
+
+核心原则：**状态只在后端计算一次，所有界面读取同一份队列状态。**
+
+## 平台支持状态
+
+| 平台 | 状态 | 当前能力 |
+|---|---|---|
+| Bilibili | 可用 | 扫码登录、房间解析、弹幕接收、身份识别、礼物与上舰事件 |
+| 抖音 | 可用 | 直播链接解析、参数回填、弹幕轮询与消息解析 |
+| 虎牙 | 预留 | 可保存配置，暂不接入弹幕 |
+| 快手 | 预留 | 可保存配置，暂不接入弹幕 |
+| 斗鱼 | 预留 | 可保存配置，暂不接入弹幕 |
+| 微信视频号 | 预留 | 可保存配置，暂不接入弹幕 |
+
+## 常用弹幕指令
 
 ### 普通用户
 
 | 弹幕内容 | 效果 |
 |---|---|
-| `排队` | 加入排队 |
-| `官服排` / `官服排队` | 以 `官\|昵称` 加入排队 |
-| `B服排` / `排B服` | 以 `B\|昵称` 加入排队 |
-| `超级排` / `超级排队` | 以 `<昵称>` 加入排队 |
-| `小米排` / `排米服` | 以 `米\|昵称` 加入排队 |
-| `排队 [内容]` | 以自定义内容加入排队 |
-| `取消排队` | 离开排队 |
-| `替换 [内容]` / `修改 [内容]` | 修改已有排队内容 |
+| `排队` | 使用昵称加入队列 |
+| `排队 [内容]` | 携带自定义内容加入队列 |
+| `官服排` / `官服排队` | 以官服标识加入队列 |
+| `B服排` / `排B服` | 以 B 服标识加入队列 |
+| `超级排` / `超级排队` | 以特殊样式加入队列 |
+| `小米排` / `排米服` | 以米服标识加入队列 |
+| `取消排队` | 离开当前队列 |
+| `替换 [内容]` / `修改 [内容]` | 修改自己的排队内容 |
 
 ### 管理员 / 主播
 
 | 弹幕内容 | 效果 |
 |---|---|
-| `完成` / `del [ID]` | 删除队列中指定用户 |
-| `add [ID] [内容]` | 在队首插入指定内容 |
-| `无影插 [ID]` | 静默插队（不广播通知） |
+| `完成` | 删除队列第一人 |
+| `del [ID]` | 删除指定用户或队列项 |
+| `add [ID] [内容]` | 在队首插入内容 |
+| `无影插 [ID]` | 静默插队，不广播通知 |
 | `暂停排队功能` | 关闭排队总开关 |
 | `恢复排队功能` | 开启排队总开关 |
-| `设置排队上限 [N]` | 设置最大排队人数 |
+| `设置排队上限 [N]` | 修改最大排队人数 |
 
-### super_admin 专属
+### `super_admin` 专属
 
 | 弹幕内容 | 效果 |
 |---|---|
-| `添加管理员 [昵称]` | 提升为 admin |
-| `取消管理员 [昵称]` | 降级为 member |
+| `添加管理员 [昵称]` | 将用户提升为管理员 |
+| `取消管理员 [昵称]` | 取消管理员权限 |
 | `拉黑 [昵称]` | 加入黑名单 |
 | `取消拉黑 [昵称]` | 移出黑名单 |
 
-## 配置说明（简要）
+完整指令和操作示例见 [使用教程](./GUIDE.md)。
 
-- `core/config.yaml`：直播间信息、日志、存档槽位、UI 参数
-- `core/quanxian.yaml`：权限名单（每行一个用户名）
-- `core/kaiguan.yaml`：9 项功能开关（布尔值）
-- `core/style.json`：队列展示颜色、字体、描边等
+## 配置与运行数据
 
-关闭 `kaiguan.paidui` 后，除管理员命令外所有排队指令不处理；
-`恢复排队功能` 弹幕或在 GUI 开关页勾选可重新开启。
+首次运行会自动创建缺失的配置和数据文件。
 
-## 打包说明（Windows）
+| 文件或目录 | 用途 |
+|---|---|
+| `config.yaml` | 服务端口、平台参数、日志、队列槽位、每日限制等主配置 |
+| `quanxian.yaml` | 权限名单 |
+| `kaiguan.yaml` | 排队功能开关 |
+| `style.json` | 网页看板和透明弹窗样式 |
+| `log/` | 按日期保存的运行日志 |
+| `core/cd/` | 队列槽位 CSV、状态 JSON、黑名单及相关运行数据 |
+| `core/ui/` | 登录页、队列看板和静态资源 |
 
-| spec | 说明 | 产物 |
-|---|---|---|
-| `bilipdj_onedir.spec` | 主程序（onedir） | `dist\bilipdj\main.exe` |
-| `paiduijitm.spec` | 透明弹窗独立进程（onefile） | `dist\paiduijitm.exe` |
+配置文件位置取决于运行方式：
 
-本地打包推荐执行脚本：
+- **源码运行**：`config.yaml`、`quanxian.yaml`、`kaiguan.yaml`、`style.json` 位于 `core/`。
+- **打包运行**：上述文件位于主程序可执行文件同级目录。
+- 日志位于程序目录下的 `log/`，队列存档位于程序目录下的 `core/cd/`。
+
+> [!WARNING]
+> 配置文件可能包含 Cookie 或其他登录凭据。不要上传、截图公开或提交到仓库。
+
+## 本地 API
+
+以下接口用于桌面控制台、网页看板和调试工具之间的本地通信：
+
+| 接口 | 用途 |
+|---|---|
+| `GET /health` | 服务健康检查 |
+| `GET /api/runtime-status` | 服务、WebSocket 与弹幕流状态 |
+| `GET /api/queue/state` | 当前队列状态 |
+| `GET /api/blacklist/state` | 当前黑名单状态 |
+| `GET /api/danmu/identity/latest` | 最近一次标准化弹幕身份解析结果 |
+| `GET /api/gifts/state` | 最近礼物事件、内置礼物和运行时识别礼物 |
+| `POST /api/style` | 更新展示样式 |
+| `/ws`、`/danmu/sub` | WebSocket 广播与弹幕中继 |
+
+接口不会主动返回 Cookie、弹幕鉴权 Token 等登录凭据。
+
+## 项目结构
+
+```text
+bilipdj/
+├── core/
+│   ├── control_panel.py          # 桌面控制台与主入口
+│   ├── server.py                 # 本地 HTTP / WebSocket 后端
+│   ├── bilibili_protocol.py      # Bilibili 协议与身份解析
+│   ├── bilibili_gifts.py         # Bilibili 礼物与电池映射
+│   ├── douyin_protocol.py        # 抖音直播参数与消息解析
+│   ├── douyin_live_pb2.py        # 抖音 Protobuf 模型
+│   ├── overlay_host.py           # 独立透明弹窗进程
+│   ├── mirrorchyan.py            # MirrorChyan 客户端预接入
+│   ├── ui/                       # 登录页、网页看板与样式资源
+│   └── cd/                       # 运行时队列存档目录
+├── scripts/
+│   ├── check_api_health.py       # 平台 API 分层健康检查
+│   ├── scan_secrets.py           # 发布前敏感信息扫描
+│   └── package-*                 # 按架构打包入口
+├── bilipdj_onedir.spec           # Windows 主程序 PyInstaller 配置
+├── paiduijitm.spec               # Windows 透明弹窗 PyInstaller 配置
+├── bilipdj_onedir_mac.spec       # macOS 主程序 PyInstaller 配置
+├── paiduijitm_mac.spec           # macOS 透明弹窗 PyInstaller 配置
+├── package-windows-local.ps1     # Windows 本地打包脚本
+├── package-macos-local.sh        # macOS 本地打包脚本
+├── GUIDE.md                      # 用户教程
+├── UPDATE.md                     # 更新日志
+├── CONTRIBUTORS.md               # 贡献者
+└── ai.md                         # 面向 AI 工具的项目上下文
+```
+
+## 构建与发布
+
+### Windows
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\package-windows-local.ps1 -InstallDependencies
 ```
 
-脚本会构建 `dist\bilipdj\main.exe` 并自动将 `dist\paiduijitm.exe` 复制至主程序目录。
-CI（`package-windows-x64.yml`）同样调用此脚本，将 onedir 打包成 zip 发布。
+主要产物：
 
-### 按架构打包
+```text
+dist\bilipdj\main.exe
+dist\bilipdj\paiduijitm.exe
+```
 
-构建必须在与目标架构一致的原生 runner 上执行，避免生成“文件名正确但无法运行”的伪跨架构产物：
+### macOS
 
-- `scripts/package-arm64.sh`：macOS Apple Silicon / Linux arm64 runner
-- `scripts/package-amd64.sh`：macOS Intel / Linux amd64 runner
-- `scripts/package-amd64.ps1`：Windows amd64 runner
+```bash
+chmod +x package-macos-local.sh
+./package-macos-local.sh --install-deps
+```
 
-GitHub Actions 的 macOS 工作流可选择 `arm64` 或 `x86_64`，两条路径会分别调用对应的架构校验脚本。发布前会运行 `scripts/scan_secrets.py`，拒绝把 Cookie、Token 或私钥打入产物。
+主要产物：
 
-### API 健康检查
+```text
+dist/bilipdj/main
+dist/bilipdj/paiduijitm
+```
+
+### 架构要求
+
+PyInstaller 不是通用交叉编译器。请在与目标架构一致的原生环境中构建：
+
+- Windows amd64：`scripts/package-amd64.ps1`
+- macOS / Linux arm64：`scripts/package-arm64.sh`
+- macOS / Linux amd64：`scripts/package-amd64.sh`
+
+Windows 与 macOS 的 GitHub Actions 会在发布前运行 `scripts/scan_secrets.py`，防止 Cookie、Token 或私钥被打入发行包。
+
+### 平台 API 健康检查
 
 ```bash
 python scripts/check_api_health.py
 ```
 
-此检查不读取本地 Cookie：它会分层验证 Bilibili 房间解析/弹幕服务器接口，以及抖音直播页解析。抖音完整弹幕轮询需要真实开播房间和有效登录态，因此默认不会把“需要 Cookie 或当前未开播”误报成 API 过期。
+该脚本会分层检查 Bilibili 房间解析与弹幕服务器接口，以及抖音直播页解析。抖音完整弹幕测试通常需要真实开播房间和有效登录态。
 
-### 标准化弹幕身份接口
+## 安全与隐私
 
-Bilibili `DANMU_MSG` 会被转换为 WebSocket 内部事件 `DANMU_EVENT`，其中 `identity` 包含主播、房管、舰长/提督/总督以及粉丝牌名称和等级。最近一次解析结果也可以从本机接口读取：
+- 后端默认端口为 `9816`，默认监听地址为 `0.0.0.0`。仅本机使用时，建议在设置中改为 `127.0.0.1`，不要直接暴露到公网。
+- Cookie、`SESSDATA`、`bili_jct` 和鉴权 Token 均属于敏感凭据，只能用于自己的账号。
+- GUI 日志会对常见敏感字段进行脱敏，发布流程还会扫描仓库中的密钥特征。
+- 建议忽略运行时生成的 `core/cd/`、日志及本地配置文件，避免提交个人直播数据。
+- Bilibili 扫码登录仅用于用户本人授权自己的账号，不应用于批量登录、绕过验证或钓鱼场景。
 
-```text
-GET http://127.0.0.1:9816/api/danmu/identity/latest
-```
+## 当前边界
 
-接口不返回 Cookie、弹幕鉴权 token 等登录凭据。
+- Bilibili 送礼插队设置只在选择 Bilibili 平台时显示。
+- 抖音页面结构和上游接口可能变化，连接异常时可先运行 API 健康检查并查看日志。
+- `core/mirrorchyan.py` 已包含客户端预接入，但默认关闭，当前启动流程不会自动发送 CDK 或下载更新。
+- 虎牙、快手、斗鱼和微信视频号尚未实现实时弹幕接入。
 
-### 送礼与上舰事件
+## 文档与反馈
 
-后端会把 `SEND_GIFT`、`COMBO_SEND`、`GUARD_BUY` 标准化为 `LIVE_GIFT_EVENT`，并通过 `GET /api/gifts/state` 提供最近事件、内置 77 种礼物及运行期间识别到的礼物类型。GUI 的“送礼插队”标签默认关闭，可按一个或多个指定礼物、最低电池数（10 电池 = 1 元）授予排队资格，并设置每次可排人数、插入名次及是否允许重复获得资格。“仅允许礼物排队”会临时把插入名次设为 0，关闭后恢复原名次。
+- [GUIDE.md](./GUIDE.md)：安装、平台接入、界面说明、OBS 设置与常见问题
+- [UPDATE.md](./UPDATE.md)：版本变更记录
+- [CONTRIBUTORS.md](./CONTRIBUTORS.md)：贡献者名单
+- [ai.md](./ai.md)：供 Codex、Claude Code 等 AI 工具读取的项目上下文
+- [Issues](https://github.com/ZzzHe2333/bilipdj/issues)：Bug、功能建议与使用问题
 
-用户发送 `插队 名字1 名字2` 时会按名字的输入顺序处理；不带名字时使用送礼者昵称。未开启重复插队时，每个 UID 只能使用一次资格。
-
-### 每日排队次数限制
-
-“设置 → 基础设置”可限制每个用户在一个统计日内成功加入队列的次数，范围为 1–999，默认不限制。统计日默认每天 `04:00` 重置，也可以自定义重置时刻；计数按 UID（无 UID 时按用户名）保存，重启程序不会清空。
-
-### MirrorChyan 预接入
-
-`core/mirrorchyan.py` 已实现官方 `latest` API 客户端并进入打包隐藏依赖，但 `MirrorChyanSettings.enabled` 默认是 `False`，当前启动流程不会调用它，也不会发送 CDK 或自动下载更新。
-
-预载入
-
-## 运行数据与日志
-
-- 日志目录：`log/`（按日期命名，保留天数可配置）
-- 存档目录：`core/cd/`（10 个槽位 CSV + 状态 JSON）
-
-建议将 `core/cd/` 和 `core/*.yaml` 加入 `.gitignore`，避免误提交个人直播数据。
+提交 Issue 时，建议提供：操作系统、运行方式、复现步骤、预期结果和脱敏后的日志。欢迎提交 Pull Request。
 
 ## 许可证
 
-本项目使用仓库内 `LICENSE` 文件所示许可协议。
+本项目基于 [GNU General Public License v3.0](./LICENSE) 发布。
