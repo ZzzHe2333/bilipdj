@@ -59,7 +59,7 @@ jobs:
           python scripts\scan_secrets.py
           .\scripts\package-amd64.ps1 -InstallDependencies
 
-      - name: Create release zip
+      - name: Create release zip and checksum
         shell: pwsh
         run: |
           if (Test-Path package) {
@@ -71,13 +71,18 @@ jobs:
           if (Test-Path RELEASE_NOTES.md)    { Copy-Item RELEASE_NOTES.md    package\ }
           if (Test-Path core\quanxian.yaml)  { Copy-Item core\quanxian.yaml  package\ }
           if (Test-Path core\kaiguan.yaml)   { Copy-Item core\kaiguan.yaml   package\ }
-          Compress-Archive -Path package\* -DestinationPath "${{ steps.resolve_tag.outputs.zip_name }}" -Force
+          $zipName = "${{ steps.resolve_tag.outputs.zip_name }}"
+          Compress-Archive -Path package\* -DestinationPath $zipName -Force
+          $sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $zipName).Hash.ToLowerInvariant()
+          "$sha256  $zipName" | Set-Content -LiteralPath "$zipName.sha256" -Encoding ascii
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: bilibili-danmuji-windows-x64-${{ steps.resolve_tag.outputs.tag_name }}
-          path: ${{ steps.resolve_tag.outputs.zip_name }}
+          path: |
+            ${{ steps.resolve_tag.outputs.zip_name }}
+            ${{ steps.resolve_tag.outputs.zip_name }}.sha256
 
       - name: Create GitHub Release
         uses: ncipollo/release-action@v1
@@ -85,7 +90,7 @@ jobs:
           tag: ${{ steps.resolve_tag.outputs.tag_name }}
           commit: ${{ github.sha }}
           name: 弹幕排队姬 ${{ steps.resolve_tag.outputs.tag_name }}
-          artifacts: ${{ steps.resolve_tag.outputs.zip_name }}
+          artifacts: ${{ steps.resolve_tag.outputs.zip_name }},${{ steps.resolve_tag.outputs.zip_name }}.sha256
           artifactErrorsFailBuild: true
           allowUpdates: true
           replacesArtifacts: true
