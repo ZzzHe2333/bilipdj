@@ -1,0 +1,70 @@
+name: Inspect v1.0.7 package once
+
+on:
+  push:
+    branches: [now]
+    paths:
+      - .github/workflows/inspect-v1.0.7-package-once.yml
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: now
+          fetch-depth: 0
+      - name: Record package status
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sleep 20
+          gh api "repos/${{ github.repository }}/actions/workflows/package-windows-x64.yml/runs?event=push&per_page=10" > /tmp/runs.json
+          RUN_ID=$(python - <<'PY'
+          import json
+          runs=json.load(open('/tmp/runs.json'))['workflow_runs']
+          matches=[r for r in runs if r.get('head_branch')=='v1.0.7' or r.get('head_sha')=='8a424c02da775713b517773a7b03a4fc14987827']
+          if not matches:
+              raise SystemExit('v1.0.7 package run not found')
+          print(matches[0]['id'])
+          PY
+          )
+          gh api "repos/${{ github.repository }}/actions/runs/${RUN_ID}/jobs" > /tmp/jobs.json
+          gh api "repos/${{ github.repository }}/actions/runs/${RUN_ID}/artifacts" > /tmp/artifacts.json
+          gh api "repos/${{ github.repository }}/releases/tags/v1.0.7" > /tmp/release.json 2>/tmp/release-error.txt || true
+          python - <<'PY'
+          import json, pathlib
+          runs=json.load(open('/tmp/runs.json'))['workflow_runs']
+          run=[r for r in runs if r.get('head_branch')=='v1.0.7' or r.get('head_sha')=='8a424c02da775713b517773a7b03a4fc14987827'][0]
+          jobs=json.load(open('/tmp/jobs.json'))
+          artifacts=json.load(open('/tmp/artifacts.json'))
+          release_path=pathlib.Path('/tmp/release.json')
+          release=json.load(open(release_path)) if release_path.exists() and release_path.stat().st_size else None
+          out={
+            'run':{k:run.get(k) for k in ('id','status','conclusion','html_url','head_sha','head_branch','created_at','updated_at')},
+            'jobs':[{'id':j.get('id'),'name':j.get('name'),'status':j.get('status'),'conclusion':j.get('conclusion'),'steps':[{k:s.get(k) for k in ('name','status','conclusion','number')} for s in j.get('steps',[])]} for j in jobs.get('jobs',[])],
+            'artifacts':[{k:a.get(k) for k in ('id','name','size_in_bytes','expired','created_at')} for a in artifacts.get('artifacts',[])],
+            'release':None if release is None else {k:release.get(k) for k in ('id','tag_name','name','html_url','draft','prerelease','published_at','body')},
+            'assets':[] if release is None else [{k:a.get(k) for k in ('id','name','size','browser_download_url','content_type','state')} for a in release.get('assets',[])]
+          }
+          pathlib.Path('/tmp/v1.0.7-package-status.json').write_text(json.dumps(out,ensure_ascii=False,indent=2),encoding='utf-8')
+          PY
+          git checkout --orphan diagnostic-package-v1.0.7
+          git rm -rf .
+          cp /tmp/v1.0.7-package-status.json .
+          git add v1.0.7-package-status.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'chore: record v1.0.7 package status'
+          git push --force origin HEAD:diagnostic/package-v1.0.7-status
+      - name: Remove temporary inspector
+        run: |
+          git checkout now
+          git pull --ff-only origin now
+          git rm .github/workflows/inspect-v1.0.7-package-once.yml
+          git commit -m 'chore: remove v1.0.7 package inspector'
+          git push origin HEAD:now
