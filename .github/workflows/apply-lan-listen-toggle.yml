@@ -1,0 +1,256 @@
+name: Apply LAN listen toggle
+
+on:
+  pull_request:
+    branches: [now]
+    paths:
+      - .github/workflows/apply-lan-listen-toggle.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Apply LAN listening feature
+        shell: bash
+        run: |
+          set -o pipefail
+          python - <<'PY' 2>&1 | tee lan-toggle-apply.log
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f"{label}: expected 1 match, found {count}")
+              return text.replace(old, new, 1)
+
+          server_path = Path("core/server.py")
+          server = server_path.read_text(encoding="utf-8")
+
+          merge_tail = "    return merged\n\n\nMYJS_LIST_KEYS"
+          normalizer = """    return merged
+
+
+          LAN_LISTEN_HOSTS = {"0.0.0.0", "::", "[::]"}
+
+
+          def normalize_server_config(raw: Any) -> dict[str, Any]:
+              source = raw if isinstance(raw, dict) else {}
+              configured_host = str(source.get("host", DEFAULT_HOST) or DEFAULT_HOST).strip()
+              if "lan_listen" in source:
+                  lan_listen = bool(source.get("lan_listen", False))
+              else:
+                  # Backward compatibility: wildcard hosts in old configs enabled LAN listening.
+                  lan_listen = configured_host in LAN_LISTEN_HOSTS
+              try:
+                  port = int(source.get("port", DEFAULT_PORT))
+              except (TypeError, ValueError):
+                  port = DEFAULT_PORT
+              return {
+                  "host": "0.0.0.0" if lan_listen else DEFAULT_HOST,
+                  "port": port,
+                  "lan_listen": lan_listen,
+              }
+
+
+          MYJS_LIST_KEYS"""
+          server = replace_once(server, merge_tail, normalizer, "insert server normalizer")
+          server = replace_once(
+              server,
+              '    "server": {"host": DEFAULT_HOST, "port": DEFAULT_PORT},',
+              '    "server": {"host": DEFAULT_HOST, "port": DEFAULT_PORT, "lan_listen": False},',
+              "server defaults",
+          )
+          server = replace_once(
+              server,
+              '    merged = _normalize_runtime_platform_config(_merge_config(DEFAULT_CONFIG, raw_config))\n    platform_archive_cfg =',
+              '    merged = _normalize_runtime_platform_config(_merge_config(DEFAULT_CONFIG, raw_config))\n    raw_server = raw_config.get("server", {}) if isinstance(raw_config, dict) else {}\n    merged["server"] = normalize_server_config(raw_server)\n    platform_archive_cfg =',
+              "normalize loaded server config",
+          )
+          server = replace_once(
+              server,
+              '    server = config.get("server", {})\n    platform_name =',
+              '    server = normalize_server_config(config.get("server", {}))\n    config["server"] = server\n    platform_name =',
+              "normalize saved server config",
+          )
+          port_line = "  port: {_to_int(server.get('port', DEFAULT_PORT), DEFAULT_PORT)}"
+          server = replace_once(
+              server,
+              port_line,
+              port_line + "\n  lan_listen: {'true' if bool(server.get('lan_listen', False)) else 'false'}",
+              "render LAN setting",
+          )
+          server = replace_once(
+              server,
+              '        payload = {\n            "roomid": int(bilibili_cfg.get("roomid", 0)),',
+              '        payload = {\n            "server": normalize_server_config(cfg.get("server", {})),\n            "roomid": int(bilibili_cfg.get("roomid", 0)),',
+              "expose server settings",
+          )
+          server = replace_once(
+              server,
+              '            current_cfg = self.server.runtime_config if isinstance(self.server.runtime_config, dict) else {}\n            incoming_platform = _normalize_platform_name(',
+              '            current_cfg = self.server.runtime_config if isinstance(self.server.runtime_config, dict) else {}\n            current_server = current_cfg.get("server", {}) if isinstance(current_cfg.get("server", {}), dict) else {}\n            incoming_server = payload.get("server", {})\n            server_payload = normalize_server_config(\n                {**current_server, **incoming_server}\n                if isinstance(incoming_server, dict)\n                else current_server\n            )\n            incoming_platform = _normalize_platform_name(',
+              "accept server settings API payload",
+          )
+          update_context = (
+              '            updated = _merge_config(\n'
+              '                self.server.runtime_config,\n'
+              '                {\n'
+              '                    "platform": incoming_platform,\n'
+              '                    "bilibili": {"roomid": roomid, "uid": uid, "cookie": cookie},'
+          )
+          updated_context = (
+              '            updated = _merge_config(\n'
+              '                self.server.runtime_config,\n'
+              '                {\n'
+              '                    "server": server_payload,\n'
+              '                    "platform": incoming_platform,\n'
+              '                    "bilibili": {"roomid": roomid, "uid": uid, "cookie": cookie},'
+          )
+          server = replace_once(server, update_context, updated_context, "persist server settings API payload")
+          server = replace_once(
+              server,
+              '    config = load_config()\n    host = os.getenv("DANMUJI_BACKEND_HOST", str(config.get("server", {}).get("host", DEFAULT_HOST)))\n    port = int(os.getenv("DANMUJI_BACKEND_PORT", int(config.get("server", {}).get("port", DEFAULT_PORT))))',
+              '    config = load_config()\n    server_config = normalize_server_config(config.get("server", {}))\n    host = os.getenv("DANMUJI_BACKEND_HOST", str(server_config["host"]))\n    port = int(os.getenv("DANMUJI_BACKEND_PORT", int(server_config["port"])))',
+              "startup listen mode",
+          )
+          server_path.write_text(server, encoding="utf-8")
+
+          panel_path = Path("core/control_panel.py")
+          panel = panel_path.read_text(encoding="utf-8")
+          panel = replace_once(
+              panel,
+              '        self.host_var = tk.StringVar(value="0.0.0.0")\n        self.port_var =',
+              '        self.host_var = tk.StringVar(value="127.0.0.1")\n        self.lan_listen_var = tk.BooleanVar(value=False)\n        self.port_var =',
+              "GUI LAN variable",
+          )
+          panel = replace_once(
+              panel,
+              '    server = config.get("server", {})\n    bilibili =',
+              '    server = config.get("server", {})\n    raw_host = str(server.get("host", "127.0.0.1") or "127.0.0.1").strip()\n    lan_listen = bool(server.get("lan_listen", raw_host in {"0.0.0.0", "::", "[::]"}))\n    listen_host = "0.0.0.0" if lan_listen else "127.0.0.1"\n    bilibili =',
+              "fallback LAN normalization",
+          )
+          panel = replace_once(
+              panel,
+              "  host: {server.get('host', '0.0.0.0')}",
+              "  host: {listen_host}",
+              "fallback host rendering",
+          )
+          panel_port_line = "  port: {int(server.get('port', 9816))}"
+          panel = replace_once(
+              panel,
+              panel_port_line,
+              panel_port_line + "\n  lan_listen: {'true' if lan_listen else 'false'}",
+              "fallback LAN rendering",
+          )
+          panel = replace_once(
+              panel,
+              '            ("监听地址", self.host_var),',
+              '            ("监听地址（自动）", self.host_var),',
+              "automatic address label",
+          )
+          panel = replace_once(
+              panel,
+              '        for row_idx, (label, var) in enumerate(fields):\n            ttk.Label(basic_frame, text=label).grid(row=row_idx, column=0, sticky="w", pady=4)\n            ttk.Entry(basic_frame, textvariable=var, width=26).grid(row=row_idx, column=1, sticky="ew", pady=4)',
+              '        for row_idx, (label, var) in enumerate(fields):\n            ttk.Label(basic_frame, text=label).grid(row=row_idx, column=0, sticky="w", pady=4)\n            entry = ttk.Entry(basic_frame, textvariable=var, width=26)\n            entry.grid(row=row_idx, column=1, sticky="ew", pady=4)\n            if var is self.host_var:\n                entry.configure(state="readonly")',
+              "readonly automatic address",
+          )
+          hint_block = (
+              '        self._settings_hint_label = ttk.Label(\n'
+              '            basic_frame,\n'
+              '            text="切换平台配置槽位后，会立即载入该槽位保存的平台和参数。",\n'
+              '        )\n'
+              '        self._settings_hint_label.grid(row=7, column=0, columnspan=4, sticky="w", pady=(6, 0))'
+          )
+          replacement_hint = (
+              '        ttk.Checkbutton(\n'
+              '            basic_frame,\n'
+              '            text="允许局域网访问（监听 0.0.0.0，重启后生效）",\n'
+              '            variable=self.lan_listen_var,\n'
+              '            command=self._sync_lan_listen_host,\n'
+              '        ).grid(row=7, column=0, columnspan=4, sticky="w", pady=(6, 0))\n\n'
+              '        self._settings_hint_label = ttk.Label(\n'
+              '            basic_frame,\n'
+              '            text="局域网监听仅开放展示页、队列状态和 WebSocket；Cookie 与管理接口仍仅限本机。",\n'
+              '        )\n'
+              '        self._settings_hint_label.grid(row=8, column=0, columnspan=4, sticky="w", pady=(6, 0))'
+          )
+          panel = replace_once(panel, hint_block, replacement_hint, "LAN checkbox")
+          panel = replace_once(
+              panel,
+              '    def load_from_file(self) -> None:\n        try:',
+              '    def _sync_lan_listen_host(self) -> None:\n        self.host_var.set("0.0.0.0" if self.lan_listen_var.get() else "127.0.0.1")\n\n    def load_from_file(self) -> None:\n        try:',
+              "LAN host sync helper",
+          )
+          panel = replace_once(
+              panel,
+              '        self.host_var.set(str(server.get("host", "0.0.0.0")))\n        self.port_var.set',
+              '        configured_host = str(server.get("host", "127.0.0.1") or "127.0.0.1").strip()\n        lan_listen = bool(server.get("lan_listen", configured_host in {"0.0.0.0", "::", "[::]"}))\n        self.lan_listen_var.set(lan_listen)\n        self._sync_lan_listen_host()\n        self.port_var.set',
+              "load LAN mode",
+          )
+          panel = replace_once(
+              panel,
+              '            "server": {\n                "host": self.host_var.get().strip() or "0.0.0.0",\n                "port": _coerce_int_field(self.port_var.get(), 9816, "监听端口"),\n            },',
+              '            "server": {\n                "host": "0.0.0.0" if self.lan_listen_var.get() else "127.0.0.1",\n                "port": _coerce_int_field(self.port_var.get(), 9816, "监听端口"),\n                "lan_listen": bool(self.lan_listen_var.get()),\n            },',
+              "gather LAN mode",
+          )
+          panel_path.write_text(panel, encoding="utf-8")
+          PY
+
+      - name: Validate LAN listening feature
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            python -m compileall -q core
+            python - <<'PY'
+          from core import server
+          assert server.normalize_server_config({}) == {"host": "127.0.0.1", "port": 9816, "lan_listen": False}
+          assert server.normalize_server_config({"lan_listen": True}) == {"host": "0.0.0.0", "port": 9816, "lan_listen": True}
+          assert server.normalize_server_config({"host": "0.0.0.0"})["lan_listen"] is True
+          assert server.normalize_server_config({"host": "::"})["host"] == "0.0.0.0"
+          assert server.normalize_server_config({"host": "0.0.0.0", "lan_listen": False})["host"] == "127.0.0.1"
+          panel = open("core/control_panel.py", encoding="utf-8").read()
+          assert "允许局域网访问" in panel
+          assert '"lan_listen": bool(self.lan_listen_var.get())' in panel
+          assert 'entry.configure(state="readonly")' in panel
+          PY
+            git diff --check
+          } 2>&1 | tee lan-toggle-validation.log
+
+      - name: Commit feature
+        env:
+          HEAD_BRANCH: ${{ github.head_ref }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-lan-listen-toggle.yml
+          rm -f lan-toggle-apply.log lan-toggle-validation.log
+          git add core/server.py core/control_panel.py
+          git commit -m "feat: add optional LAN listening"
+          git push origin "HEAD:${HEAD_BRANCH}"
+
+      - name: Preserve failure diagnostics
+        if: failure()
+        env:
+          HEAD_BRANCH: ${{ github.head_ref }}
+        run: |
+          test -f lan-toggle-apply.log || echo "apply step did not create a log" > lan-toggle-apply.log
+          test -f lan-toggle-validation.log || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f lan-toggle-apply.log lan-toggle-validation.log 2>/dev/null || true
+          git commit -m "chore: preserve LAN toggle failure diagnostics" || true
+          git push origin "HEAD:${HEAD_BRANCH}" || true
