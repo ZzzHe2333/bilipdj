@@ -38,3 +38,5 @@ jobs:
           git add -u scripts/prepare_v1_0_8.txt
           git commit -m "release: prepare v1.0.8"
           git push origin HEAD:release/v1.0.8
+
+# Trigger after workflow registration.
