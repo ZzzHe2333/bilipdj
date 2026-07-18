@@ -1,0 +1,40 @@
+name: Diagnose unit test failure
+
+on:
+  pull_request:
+    branches: [now]
+    paths:
+      - .github/workflows/diagnose-unit-tests.yml
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run full unit tests
+        shell: bash
+        run: |
+          set +e
+          python -m unittest discover -s tests -v > unit-test-failure.log 2>&1
+          status=$?
+          echo "exit_code=${status}" >> unit-test-failure.log
+          exit 0
+      - name: Commit diagnostic log
+        env:
+          HEAD_BRANCH: ${{ github.head_ref }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f unit-test-failure.log
+          git commit -m "chore: capture unit test failure"
+          git push origin "HEAD:${HEAD_BRANCH}"
