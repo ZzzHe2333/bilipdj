@@ -26,7 +26,8 @@ jobs:
       - name: Apply repair script
         shell: bash
         run: |
-          python - <<'PY'
+          set -o pipefail
+          python - <<'PY' 2>&1 | tee repair.log
           from pathlib import Path
           import re
           import textwrap
@@ -59,4 +60,17 @@ jobs:
           git rm .github/workflows/repair-confirmed-bugs-pr.yml
           git add core/server.py core/control_panel.py requirements.txt package-windows-local.ps1 package-macos-local.sh bilipdj_onedir.spec bilipdj_onedir_mac.spec README.md tests/test_regressions.py
           git commit -m "fix: harden local API and repair queue regressions"
+          git push origin "HEAD:${HEAD_BRANCH}"
+
+      - name: Preserve failure log
+        if: failure()
+        shell: bash
+        env:
+          HEAD_BRANCH: ${{ github.head_ref }}
+        run: |
+          test -f repair.log || echo "repair step failed before producing a log" > repair.log
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add repair.log
+          git commit -m "chore: preserve repair failure log" || exit 0
           git push origin "HEAD:${HEAD_BRANCH}"
