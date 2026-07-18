@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "<stdin>", line 10, in <module>
+  File "repair_confirmed_bugs.py", line 349, in <module>
+  File "repair_confirmed_bugs.py", line 10, in replace_once
+RuntimeError: gift-only enforcement: expected one match, found 0
