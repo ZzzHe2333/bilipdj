@@ -25,7 +25,7 @@ if [[ "$INSTALL_DEPS" -eq 1 ]]; then
         python3 -m pip install -r requirements.txt
     fi
     python3 -m pip uninstall -y http 2>/dev/null || true
-    python3 -m pip install pyinstaller 'qrcode[pil]' brotli psutil
+    python3 -m pip install pyinstaller
 fi
 
 # 清理旧产物
