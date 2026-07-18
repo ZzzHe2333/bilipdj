@@ -1,3 +1,4 @@
+.github/workflows/release-v1.0.7-trigger-2.yml:25:          git grep -n -E 'APP_VERSION|1\.0\.6|PyInstaller|gh release|package-windows' > repo-inspection.txt || true
 .github/workflows/release-v1.0.7-trigger.yml:25:          git grep -n -E 'APP_VERSION|1\.0\.6|PyInstaller|gh release|package-windows' > repo-inspection.txt || true
 .github/workflows/release-v1.0.7.yml:25:          git grep -n "APP_VERSION\|1.0.6\|PyInstaller\|gh release\|package-windows" | Out-File repo-inspection.txt
 .gitignore:44:# PyInstaller
@@ -31,28 +32,29 @@ package-macos-local.sh:37:# 清理 PyInstaller 有时会生成的 cd 目录
 package-windows-local.ps1:35:    & $PythonExe -m PyInstaller --noconfirm --clean bilipdj_onedir.spec
 package-windows-local.ps1:36:    & $PythonExe -m PyInstaller --noconfirm --clean paiduijitm.spec
 repo-files.txt:3:./.github/workflows/package-windows-x64.yml
-repo-files.txt:38:./package-windows-local.ps1
-repo-inspection.txt:1:.github/workflows/release-v1.0.7-trigger.yml:25:          git grep -n -E 'APP_VERSION|1\.0\.6|PyInstaller|gh release|package-windows' > repo-inspection.txt || true
-repo-inspection.txt:2:.github/workflows/release-v1.0.7.yml:25:          git grep -n "APP_VERSION\|1.0.6\|PyInstaller\|gh release\|package-windows" | Out-File repo-inspection.txt
-repo-inspection.txt:3:.gitignore:44:# PyInstaller
-repo-inspection.txt:4:.gitignore:46:#  before PyInstaller builds the exe, so as to inject date/other infos into it.
-repo-inspection.txt:5:README.md:9:  <a href="https://github.com/ZzzHe2333/bilipdj/actions/workflows/package-windows-x64.yml"><img src="https://img.shields.io/github/actions/workflow/status/ZzzHe2333/bilipdj/package-windows-x64.yml?branch=now&label=Windows%20build" alt="Windows build"></a>
-repo-inspection.txt:6:README.md:232:├── bilipdj_onedir.spec           # Windows 主程序 PyInstaller 配置
-repo-inspection.txt:7:README.md:233:├── paiduijitm.spec               # Windows 透明弹窗 PyInstaller 配置
-repo-inspection.txt:8:README.md:234:├── bilipdj_onedir_mac.spec       # macOS 主程序 PyInstaller 配置
-repo-inspection.txt:9:README.md:235:├── paiduijitm_mac.spec           # macOS 透明弹窗 PyInstaller 配置
-repo-inspection.txt:10:README.md:236:├── package-windows-local.ps1     # Windows 本地打包脚本
-repo-inspection.txt:11:README.md:249:powershell -ExecutionPolicy Bypass -File .\package-windows-local.ps1 -InstallDependencies
-repo-inspection.txt:12:README.md:275:PyInstaller 不是通用交叉编译器。请在与目标架构一致的原生环境中构建：
-repo-inspection.txt:13:UPDATE.md:62:**package-windows-local.ps1**
-repo-inspection.txt:14:UPDATE.md:63:- 新增本地 Windows 打包脚本，统一处理依赖安装、PyInstaller 构建、透明窗口程序集成与 `core/cd` 清理
-repo-inspection.txt:15:UPDATE.md:65:**.github/workflows/package-windows-x64.yml**
-repo-inspection.txt:16:UPDATE.md:97:**.github/workflows/package-windows-x64.yml**
-repo-inspection.txt:17:UPDATE.md:132:**.github/workflows/package-windows-x64.yml**
-repo-inspection.txt:18:ai.md:42:├── bilipdj_onedir.spec          # PyInstaller 主程序配置
-repo-inspection.txt:19:ai.md:43:├── paiduijitm.spec              # PyInstaller 透明弹窗配置（onefile）
-repo-inspection.txt:20:ai.md:44:├── package-windows-local.ps1    # Windows 本地打包脚本
-repo-inspection.txt:21:ai.md:324:- **打包**：PyInstaller（Windows x64）；CI/CD via GitHub Actions
-repo-inspection.txt:22:ai.md:357:powershell -ExecutionPolicy Bypass -File .\package-windows-local.ps1 -InstallDependencies
-repo-inspection.txt:23:ai.md:360:CI（`package-windows-x64.yml`）同样调用此脚本，onedir 打包成 zip 发布。
+repo-files.txt:39:./package-windows-local.ps1
+repo-inspection.txt:1:.github/workflows/release-v1.0.7-trigger-2.yml:25:          git grep -n -E 'APP_VERSION|1\.0\.6|PyInstaller|gh release|package-windows' > repo-inspection.txt || true
+repo-inspection.txt:2:.github/workflows/release-v1.0.7-trigger.yml:25:          git grep -n -E 'APP_VERSION|1\.0\.6|PyInstaller|gh release|package-windows' > repo-inspection.txt || true
+repo-inspection.txt:3:.github/workflows/release-v1.0.7.yml:25:          git grep -n "APP_VERSION\|1.0.6\|PyInstaller\|gh release\|package-windows" | Out-File repo-inspection.txt
+repo-inspection.txt:4:.gitignore:44:# PyInstaller
+repo-inspection.txt:5:.gitignore:46:#  before PyInstaller builds the exe, so as to inject date/other infos into it.
+repo-inspection.txt:6:README.md:9:  <a href="https://github.com/ZzzHe2333/bilipdj/actions/workflows/package-windows-x64.yml"><img src="https://img.shields.io/github/actions/workflow/status/ZzzHe2333/bilipdj/package-windows-x64.yml?branch=now&label=Windows%20build" alt="Windows build"></a>
+repo-inspection.txt:7:README.md:232:├── bilipdj_onedir.spec           # Windows 主程序 PyInstaller 配置
+repo-inspection.txt:8:README.md:233:├── paiduijitm.spec               # Windows 透明弹窗 PyInstaller 配置
+repo-inspection.txt:9:README.md:234:├── bilipdj_onedir_mac.spec       # macOS 主程序 PyInstaller 配置
+repo-inspection.txt:10:README.md:235:├── paiduijitm_mac.spec           # macOS 透明弹窗 PyInstaller 配置
+repo-inspection.txt:11:README.md:236:├── package-windows-local.ps1     # Windows 本地打包脚本
+repo-inspection.txt:12:README.md:249:powershell -ExecutionPolicy Bypass -File .\package-windows-local.ps1 -InstallDependencies
+repo-inspection.txt:13:README.md:275:PyInstaller 不是通用交叉编译器。请在与目标架构一致的原生环境中构建：
+repo-inspection.txt:14:UPDATE.md:62:**package-windows-local.ps1**
+repo-inspection.txt:15:UPDATE.md:63:- 新增本地 Windows 打包脚本，统一处理依赖安装、PyInstaller 构建、透明窗口程序集成与 `core/cd` 清理
+repo-inspection.txt:16:UPDATE.md:65:**.github/workflows/package-windows-x64.yml**
+repo-inspection.txt:17:UPDATE.md:97:**.github/workflows/package-windows-x64.yml**
+repo-inspection.txt:18:UPDATE.md:132:**.github/workflows/package-windows-x64.yml**
+repo-inspection.txt:19:ai.md:42:├── bilipdj_onedir.spec          # PyInstaller 主程序配置
+repo-inspection.txt:20:ai.md:43:├── paiduijitm.spec              # PyInstaller 透明弹窗配置（onefile）
+repo-inspection.txt:21:ai.md:44:├── package-windows-local.ps1    # Windows 本地打包脚本
+repo-inspection.txt:22:ai.md:324:- **打包**：PyInstaller（Windows x64）；CI/CD via GitHub Actions
+repo-inspection.txt:23:ai.md:357:powershell -ExecutionPolicy Bypass -File .\package-windows-local.ps1 -InstallDependencies
+repo-inspection.txt:24:ai.md:360:CI（`package-windows-x64.yml`）同样调用此脚本，onedir 打包成 zip 发布。
 scripts/package-amd64.ps1:5:& "$PSScriptRoot\..\package-windows-local.ps1" -InstallDependencies:$InstallDependencies -PythonExe $PythonExe

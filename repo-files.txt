@@ -2,6 +2,7 @@
 ./.github/workflows/package-macos.yml
 ./.github/workflows/package-windows-x64.yml
 ./.github/workflows/quality.yml
+./.github/workflows/release-v1.0.7-trigger-2.yml
 ./.github/workflows/release-v1.0.7-trigger.yml
 ./.github/workflows/release-v1.0.7.yml
 ./.gitignore
