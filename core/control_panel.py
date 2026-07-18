@@ -38,6 +38,7 @@ if str(REPO_DIR) not in sys.path:
 
 # 打包提示：显式导入 core.server，确保 PyInstaller 能追踪到其依赖（如 http.server）。
 import core.server as _backend_server_hint  # noqa: F401
+from core import update_ui
 
 BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", REPO_DIR))
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else REPO_DIR
@@ -559,6 +560,7 @@ class ControlPanelApp:
         if self.auto_start_var.get():
             self.root.after(200, self.start_server)
         self.root.after(1000, self.refresh_runtime_status)
+        self.root.after(1600, lambda: update_ui.auto_check(self))
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     # ------------------------------------------------------------------
@@ -3903,23 +3905,7 @@ class ControlPanelApp:
         )
 
     def _build_about_tab(self, frame: ttk.Frame) -> None:
-        ttk.Label(frame, text=f"{APP_NAME} 控制台", font=("Microsoft YaHei UI", 15, "bold") if sys.platform == "win32" else ("", 15, "bold")).pack(pady=(20, 6))
-        ttk.Label(frame, text=f"版本：v{APP_VERSION}").pack()
-        ttk.Separator(frame, orient="horizontal").pack(fill="x", pady=12)
-        ttk.Label(frame, text="Bilibili 直播弹幕排队管理工具").pack()
-        ttk.Label(frame, text="排队逻辑由 Python 后端统一处理，前端仅负责显示。").pack(pady=(4, 0))
-        ttk.Separator(frame, orient="horizontal").pack(fill="x", pady=12)
-        for line in [
-            "本软件完全免费，源码公开。",
-            "若有人向你收费获取此软件（亲手上门帮安装调试除外），请立刻退款并举报！",
-            "",
-            "【侵权/倒卖责任】",
-            "• 民事责任：侵权方须停止侵权、赔偿损失（含维权合理费用）。",
-            "• 刑事责任：以营利为目的的侵权行为，违法所得数额较大或",
-            "  情节严重的，依《著作权法》第53条及相关司法解释，",
-            "  可被追究刑事责任，最高判处3年有期徒刑并处罚金。",
-        ]:
-            ttk.Label(frame, text=line, foreground="#c00" if line.startswith("若") or line.startswith("【") or line.startswith("•") or line.startswith(" ") else "").pack(anchor="w", padx=20)
+        update_ui.build_about_tab(self, frame, APP_NAME, APP_VERSION, APP_DIR)
 
     def _build_quanxian_tab(self, frame: ttk.Frame) -> None:
         frame.columnconfigure(0, weight=1)
