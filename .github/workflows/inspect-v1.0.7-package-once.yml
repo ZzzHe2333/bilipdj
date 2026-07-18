@@ -44,13 +44,7 @@ jobs:
           artifacts=json.load(open('/tmp/artifacts.json'))
           release_path=pathlib.Path('/tmp/release.json')
           release=json.load(open(release_path)) if release_path.exists() and release_path.stat().st_size else None
-          out={
-            'run':{k:run.get(k) for k in ('id','status','conclusion','html_url','head_sha','head_branch','created_at','updated_at')},
-            'jobs':[{'id':j.get('id'),'name':j.get('name'),'status':j.get('status'),'conclusion':j.get('conclusion'),'steps':[{k:s.get(k) for k in ('name','status','conclusion','number')} for s in j.get('steps',[])]} for j in jobs.get('jobs',[])],
-            'artifacts':[{k:a.get(k) for k in ('id','name','size_in_bytes','expired','created_at')} for a in artifacts.get('artifacts',[])],
-            'release':None if release is None else {k:release.get(k) for k in ('id','tag_name','name','html_url','draft','prerelease','published_at','body')},
-            'assets':[] if release is None else [{k:a.get(k) for k in ('id','name','size','browser_download_url','content_type','state')} for a in release.get('assets',[])]
-          }
+          out={'run':{k:run.get(k) for k in ('id','status','conclusion','html_url','head_sha','head_branch','created_at','updated_at')},'jobs':[{'id':j.get('id'),'name':j.get('name'),'status':j.get('status'),'conclusion':j.get('conclusion'),'steps':[{k:s.get(k) for k in ('name','status','conclusion','number')} for s in j.get('steps',[])]} for j in jobs.get('jobs',[])],'artifacts':[{k:a.get(k) for k in ('id','name','size_in_bytes','expired','created_at')} for a in artifacts.get('artifacts',[])],'release':None if release is None else {k:release.get(k) for k in ('id','tag_name','name','html_url','draft','prerelease','published_at','body')},'assets':[] if release is None else [{k:a.get(k) for k in ('id','name','size','browser_download_url','content_type','state')} for a in release.get('assets',[])]}
           pathlib.Path('/tmp/v1.0.7-package-status.json').write_text(json.dumps(out,ensure_ascii=False,indent=2),encoding='utf-8')
           PY
           git checkout --orphan diagnostic-package-v1.0.7
@@ -68,3 +62,5 @@ jobs:
           git rm .github/workflows/inspect-v1.0.7-package-once.yml
           git commit -m 'chore: remove v1.0.7 package inspector'
           git push origin HEAD:now
+
+# Trigger after workflow registration.
