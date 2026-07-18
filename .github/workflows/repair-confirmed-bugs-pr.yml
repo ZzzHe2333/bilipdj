@@ -1,0 +1,62 @@
+name: Validate confirmed bug repair
+
+on:
+  pull_request:
+    branches: [now]
+    paths:
+      - .github/workflows/repair-confirmed-bugs-pr.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Apply repair script
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          import textwrap
+
+          workflow = Path('.github/workflows/repair-confirmed-bugs.yml').read_text(encoding='utf-8')
+          match = re.search(r"(?ms)^          python - <<'PY'\n(.*?)^          PY$", workflow)
+          if match is None:
+              raise RuntimeError('Unable to extract repair script')
+          script = textwrap.dedent(match.group(1))
+          exec(compile(script, 'repair_confirmed_bugs.py', 'exec'), {'__name__': '__main__'})
+          PY
+
+      - name: Install runtime dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate syntax and regression tests
+        run: |
+          python -m compileall -q core tests
+          python -m unittest discover -s tests -v
+          git diff --check
+
+      - name: Commit repaired code
+        shell: bash
+        env:
+          HEAD_BRANCH: ${{ github.head_ref }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/repair-confirmed-bugs.yml
+          git rm .github/workflows/repair-confirmed-bugs-pr.yml
+          git add core/server.py core/control_panel.py requirements.txt package-windows-local.ps1 package-macos-local.sh bilipdj_onedir.spec bilipdj_onedir_mac.spec README.md tests/test_regressions.py
+          git commit -m "fix: harden local API and repair queue regressions"
+          git push origin "HEAD:${HEAD_BRANCH}"
