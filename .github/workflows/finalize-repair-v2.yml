@@ -1,0 +1,386 @@
+name: Finalize repair v2
+
+on:
+  pull_request:
+    branches: [now]
+    paths:
+      - .github/workflows/finalize-repair-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Apply structural patches
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          import textwrap
+
+          def sub_once(text: str, pattern: str, replacement: str, label: str, flags: int = 0) -> str:
+              updated, count = re.subn(pattern, replacement, text, count=1, flags=flags)
+              if count != 1:
+                  raise RuntimeError(f'{label}: expected 1 match, found {count}')
+              return updated
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f'{label}: expected 1 match, found {count}')
+              return text.replace(old, new, 1)
+
+          server_path = Path('core/server.py')
+          server = server_path.read_text(encoding='utf-8')
+
+          server = replace_once(
+              server,
+              'import threading\nfrom functools import wraps\n',
+              'import threading\nfrom contextlib import contextmanager\nfrom functools import wraps\n',
+              'contextmanager import',
+          )
+
+          lock_code = textwrap.dedent('''\
+          MAX_WS_FRAME_BYTES = 1024 * 1024
+          _CONFIG_IO_LOCK = threading.RLock()
+          _CONFIG_LOCK_PATH = _YAML_DIR / ".config.lock"
+          _CONFIG_LOCK_STATE = threading.local()
+
+
+          def _acquire_interprocess_config_lock() -> None:
+              depth = int(getattr(_CONFIG_LOCK_STATE, "depth", 0) or 0)
+              if depth > 0:
+                  _CONFIG_LOCK_STATE.depth = depth + 1
+                  return
+
+              _CONFIG_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+              lock_file = _CONFIG_LOCK_PATH.open("a+b")
+              try:
+                  if os.name == "nt":
+                      import msvcrt  # noqa: PLC0415
+
+                      lock_file.seek(0, os.SEEK_END)
+                      if lock_file.tell() == 0:
+                          lock_file.write(b"\\0")
+                          lock_file.flush()
+                      lock_file.seek(0)
+                      msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+                  else:
+                      import fcntl  # noqa: PLC0415
+
+                      fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+              except Exception:
+                  lock_file.close()
+                  raise
+
+              _CONFIG_LOCK_STATE.depth = 1
+              _CONFIG_LOCK_STATE.handle = lock_file
+
+
+          def _release_interprocess_config_lock() -> None:
+              depth = int(getattr(_CONFIG_LOCK_STATE, "depth", 0) or 0)
+              if depth <= 0:
+                  return
+              if depth > 1:
+                  _CONFIG_LOCK_STATE.depth = depth - 1
+                  return
+
+              lock_file = getattr(_CONFIG_LOCK_STATE, "handle", None)
+              try:
+                  if lock_file is not None:
+                      if os.name == "nt":
+                          import msvcrt  # noqa: PLC0415
+
+                          lock_file.seek(0)
+                          msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+                      else:
+                          import fcntl  # noqa: PLC0415
+
+                          fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+              finally:
+                  if lock_file is not None:
+                      lock_file.close()
+                  _CONFIG_LOCK_STATE.depth = 0
+                  _CONFIG_LOCK_STATE.handle = None
+
+
+          @contextmanager
+          def config_io_transaction():
+              with _CONFIG_IO_LOCK:
+                  _acquire_interprocess_config_lock()
+                  try:
+                      yield
+                  finally:
+                      _release_interprocess_config_lock()
+
+
+          def _serialized_config_io(func):
+              @wraps(func)
+              def wrapped(*args, **kwargs):
+                  with config_io_transaction():
+                      return func(*args, **kwargs)
+              return wrapped
+          ''').rstrip()
+          server = sub_once(
+              server,
+              r'MAX_WS_FRAME_BYTES = 1024 \* 1024\n_CONFIG_IO_LOCK = threading\.RLock\(\)\n\n\ndef _serialized_config_io\(func\):.*?\n    return wrapped',
+              lock_code,
+              'interprocess config lock',
+              re.DOTALL,
+          )
+
+          send_methods = textwrap.indent(textwrap.dedent('''\
+          def send_frame(self, conn: socket.socket, payload: bytes, opcode: int) -> None:
+              with self._lock:
+                  write_lock = self._client_locks.get(conn)
+              if write_lock is None:
+                  write_lock = threading.Lock()
+              with write_lock:
+                  _ws_send_frame(conn, payload, opcode=opcode)
+
+          def send_text(self, conn: socket.socket, text: str, opcode: int = 0x1) -> None:
+              self.send_frame(conn, text.encode("utf-8"), opcode)
+          '''), '    ').rstrip()
+          server = sub_once(
+              server,
+              r'    def send_text\(self, conn: socket\.socket, text: str, opcode: int = 0x1\) -> None:.*?(?=\n\n    def broadcast_text)',
+              send_methods,
+              'websocket frame writer',
+              re.DOTALL,
+          )
+
+          frame_helpers = textwrap.dedent('''\
+          def _ws_send_frame(conn: socket.socket, payload: bytes, opcode: int = 0x1) -> None:
+              header = bytearray([0x80 | (opcode & 0x0F)])
+              length = len(payload)
+
+              if length <= 125:
+                  header.append(length)
+              elif length <= 65535:
+                  header.append(126)
+                  header.extend(struct.pack("!H", length))
+              else:
+                  header.append(127)
+                  header.extend(struct.pack("!Q", length))
+
+              conn.sendall(bytes(header) + payload)
+
+
+          def _ws_send_text(conn: socket.socket, text: str, opcode: int = 0x1) -> None:
+              _ws_send_frame(conn, text.encode("utf-8"), opcode=opcode)
+          ''').rstrip()
+          server = sub_once(
+              server,
+              r'def _ws_send_text\(conn: socket\.socket, text: str, opcode: int = 0x1\) -> None:.*?(?=\n\n\ndef _parse_scalar)',
+              frame_helpers,
+              'websocket binary frame helper',
+              re.DOTALL,
+          )
+
+          server = sub_once(
+              server,
+              r'(def send_current_to\(self, conn: socket\.socket\) -> None:.*?\n\s*)_ws_send_text\(',
+              r'\1self._ws_hub.send_text(',
+              'initial queue uses hub writer',
+              re.DOTALL,
+          )
+
+          ping_code = textwrap.indent(textwrap.dedent('''\
+          if opcode == 0x9:  # ping
+              mask_key = _ws_recv_exact(conn, 4)
+              if mask_key is None:
+                  return None
+              payload = _ws_recv_exact(conn, payload_len)
+              if payload is None:
+                  return None
+              payload = bytes(b ^ mask_key[i % 4] for i, b in enumerate(payload))
+              self.server.ws_hub.send_frame(conn, payload, opcode=0xA)
+              return ""
+          '''), '            ').rstrip()
+          server = sub_once(
+              server,
+              r'            if opcode == 0x9:  # ping\n.*?            if opcode != 0x1:',
+              ping_code + '\n            if opcode != 0x1:',
+              'consume ping payload',
+              re.DOTALL,
+          )
+
+          server = replace_once(
+              server,
+              '        "/api/blacklist/state",\n        "/api/bili/qr/start",',
+              '        "/api/blacklist/state",\n        "/api/danmu/identity/latest",\n        "/api/gifts/state",\n        "/api/queue/archive",\n        "/api/bili/qr/start",',
+              'protect private state GETs',
+          )
+
+          for func_name in ('save_quanxian', 'save_kaiguan', 'save_style'):
+              server = sub_once(
+                  server,
+                  rf'(?m)^def {func_name}\(',
+                  f'@_serialized_config_io\ndef {func_name}(',
+                  f'decorate {func_name}',
+              )
+
+          server = replace_once(
+              server,
+              '    QUANXIAN_PATH.write_text("".join(lines), encoding="utf-8")',
+              '    _atomic_write_text(QUANXIAN_PATH, "".join(lines), encoding="utf-8")',
+              'atomic quanxian write',
+          )
+          server = replace_once(
+              server,
+              '    KAIGUAN_PATH.write_text("".join(lines), encoding="utf-8")',
+              '    _atomic_write_text(KAIGUAN_PATH, "".join(lines), encoding="utf-8")',
+              'atomic kaiguan write',
+          )
+          server = replace_once(
+              server,
+              '    STYLE_PATH.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")',
+              '    _atomic_write_text(STYLE_PATH, json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")',
+              'atomic style json write',
+          )
+          server = replace_once(
+              server,
+              '    LIVE_STYLE_CSS_PATH.write_text(css_text, encoding="utf-8")\n    css_archive_path(_current_style_slot(current)).write_text(css_text, encoding="utf-8")',
+              '    _atomic_write_text(LIVE_STYLE_CSS_PATH, css_text, encoding="utf-8")\n    _atomic_write_text(css_archive_path(_current_style_slot(current)), css_text, encoding="utf-8")',
+              'atomic style css writes',
+          )
+          server_path.write_text(server, encoding='utf-8')
+
+          panel_path = Path('core/control_panel.py')
+          panel = panel_path.read_text(encoding='utf-8')
+          transaction_body = textwrap.indent(textwrap.dedent('''\
+          with backend_server.config_io_transaction():
+              platform_slot = self._get_selected_platform_slot()
+              platform_payload = self._gather_platform_config_payload()
+              backend_server.save_platform_config_slot(platform_slot, platform_payload)
+              config = backend_server._merge_config(  # type: ignore[attr-defined]
+                  backend_server.load_config(),
+                  self.gather_config(),
+              )
+              backend_server.save_config(config)
+              self._save_kaiguan()
+              if not self._save_style():
+                  raise OSError("样式设置保存失败")
+          '''), '            ').rstrip()
+          panel = sub_once(
+              panel,
+              r'            platform_slot = self\._get_selected_platform_slot\(\)\n.*?                raise OSError\("样式设置保存失败"\)',
+              transaction_body,
+              'GUI config transaction',
+              re.DOTALL,
+          )
+          panel_path.write_text(panel, encoding='utf-8')
+
+          tests = textwrap.dedent(r'''\
+          from __future__ import annotations
+
+          import json
+          import logging
+          import socket
+          import unittest
+
+          from core import server
+
+
+          def masked_frame(opcode: int, payload: bytes) -> bytes:
+              mask = b"abcd"
+              encoded = bytes(value ^ mask[index % 4] for index, value in enumerate(payload))
+              return bytes([0x80 | opcode, 0x80 | len(payload)]) + mask + encoded
+
+
+          class Hub:
+              def __init__(self):
+                  self.sent = []
+
+              def send_text(self, conn, text, opcode=0x1):
+                  self.sent.append((conn, text.encode("utf-8"), opcode))
+
+              def send_frame(self, conn, payload, opcode):
+                  self.sent.append((conn, payload, opcode))
+
+              def broadcast_json(self, *_args, **_kwargs):
+                  return None
+
+
+          class Archive:
+              def write_snapshot(self, *_args, **_kwargs):
+                  return None
+
+
+          class FinalizeTests(unittest.TestCase):
+              def test_ping_payload_is_consumed_before_next_text_frame(self):
+                  left, right = socket.socketpair()
+                  try:
+                      right.sendall(masked_frame(0x9, b"ping") + masked_frame(0x1, b"hello"))
+                      handler = object.__new__(server.ApiHandler)
+                      handler.server = type("Backend", (), {"ws_hub": Hub()})()
+                      self.assertEqual(handler._ws_recv_text(left), "")
+                      self.assertEqual(handler._ws_recv_text(left), "hello")
+                      self.assertEqual(handler.server.ws_hub.sent[0][1:], (b"ping", 0xA))
+                  finally:
+                      left.close()
+                      right.close()
+
+              def test_initial_queue_uses_hub_writer(self):
+                  hub = Hub()
+                  manager = server.QueueManager(hub, Archive(), logging.getLogger("test"))
+                  marker = object()
+                  manager.send_current_to(marker)
+                  self.assertEqual(hub.sent[0][0], marker)
+                  self.assertEqual(json.loads(hub.sent[0][1].decode("utf-8"))["type"], "QUEUE_UPDATE")
+
+              def test_sensitive_get_paths_are_local_only(self):
+                  for path in (
+                      "/api/config",
+                      "/api/danmu/identity/latest",
+                      "/api/gifts/state",
+                      "/api/queue/archive",
+                  ):
+                      self.assertIn(path, server.ApiHandler._LOCAL_ONLY_GET_PATHS)
+
+              def test_nested_config_transaction(self):
+                  with server.config_io_transaction():
+                      with server.config_io_transaction():
+                          self.assertGreaterEqual(server._CONFIG_LOCK_STATE.depth, 2)
+                  self.assertEqual(server._CONFIG_LOCK_STATE.depth, 0)
+          ''')
+          Path('test_finalize_repair.py').write_text(tests, encoding='utf-8')
+          PY
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate structural patches
+        run: |
+          python -m compileall -q core test_finalize_repair.py
+          python -m unittest -v test_finalize_repair.py
+          git diff --check
+
+      - name: Commit structural fixes
+        shell: bash
+        env:
+          HEAD_BRANCH: ${{ github.head_ref }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f test_finalize_repair.py
+          git rm -f .github/workflows/finalize-confirmed-repair.yml
+          git rm -f .github/workflows/finalize-diagnostic.yml
+          git rm -f .github/workflows/finalize-repair-v2.yml
+          git rm -f finalize.log || true
+          git add core/server.py core/control_panel.py
+          git commit -m "fix: finalize websocket framing and config transactions"
+          git push origin "HEAD:${HEAD_BRANCH}"
