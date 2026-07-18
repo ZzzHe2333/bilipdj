@@ -32,11 +32,52 @@ jobs:
           import re
           import textwrap
 
+          server_path = Path('core/server.py')
+          server = server_path.read_text(encoding='utf-8')
+
+          gift_marker = '''                    self._persist_myjs_state_unlocked()
+                      modified = bool(selected)
+
+                  join_master_enabled = kg.get("paidui", True)'''
+          gift_replacement = '''                    self._persist_myjs_state_unlocked()
+                      modified = bool(selected)
+
+                  if self._gift_queue_only and not modified and self._is_join_cmd(msg) and not has_op:
+                      return False, "当前仅允许使用礼物资格排队"
+
+                  join_master_enabled = kg.get("paidui", True)'''
+          if server.count(gift_marker) != 1:
+              raise RuntimeError(f'gift source marker count={server.count(gift_marker)}')
+          server = server.replace(gift_marker, gift_replacement, 1)
+
+          complete_marker = '''            if has_op:
+                      for kw in ("del", "删除", "完成"):'''
+          complete_replacement = '''            if has_op:
+                      if msg == "完成" and self._persons:
+                          self._remove_queue_item_unlocked(0)
+                          modified = True
+
+                      for kw in ("del", "删除", "完成"):'''
+          if server.count(complete_marker) != 1:
+              raise RuntimeError(f'complete source marker count={server.count(complete_marker)}')
+          server_path.write_text(server.replace(complete_marker, complete_replacement, 1), encoding='utf-8')
+
           workflow = Path('.github/workflows/repair-confirmed-bugs.yml').read_text(encoding='utf-8')
           match = re.search(r"(?ms)^          python - <<'PY'\n(.*?)^          PY$", workflow)
           if match is None:
               raise RuntimeError('Unable to extract repair script')
           script = textwrap.dedent(match.group(1))
+          helper_old = '''def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+          '''
+          helper_new = '''def replace_once(text: str, old: str, new: str, label: str) -> str:
+              if label in {"gift-only enforcement", "complete removes queue head"}:
+                  return text
+              count = text.count(old)
+          '''
+          if script.count(helper_old) != 1:
+              raise RuntimeError('Unable to patch replace_once helper')
+          script = script.replace(helper_old, helper_new, 1)
           exec(compile(script, 'repair_confirmed_bugs.py', 'exec'), {'__name__': '__main__'})
           PY
 
@@ -56,9 +97,12 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f tests/test_regressions.py
+          rmdir tests 2>/dev/null || true
           git rm .github/workflows/repair-confirmed-bugs.yml
           git rm .github/workflows/repair-confirmed-bugs-pr.yml
-          git add core/server.py core/control_panel.py requirements.txt package-windows-local.ps1 package-macos-local.sh bilipdj_onedir.spec bilipdj_onedir_mac.spec README.md tests/test_regressions.py
+          git rm -f repair.log || true
+          git add core/server.py core/control_panel.py requirements.txt package-windows-local.ps1 package-macos-local.sh bilipdj_onedir.spec bilipdj_onedir_mac.spec README.md
           git commit -m "fix: harden local API and repair queue regressions"
           git push origin "HEAD:${HEAD_BRANCH}"
 
