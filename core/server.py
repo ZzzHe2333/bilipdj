@@ -5,6 +5,7 @@ import copy
 import csv
 import datetime as dt
 import hashlib
+import io
 import json
 import logging
 import os
@@ -14,6 +15,7 @@ import socket
 import struct
 import sys
 import threading
+from functools import wraps
 import time
 import urllib.error
 import urllib.request
@@ -31,7 +33,7 @@ else:
     import douyin_protocol
     from bilibili_gifts import GIFT_BATTERIES, batteries_for_gift
 
-DEFAULT_HOST = "0.0.0.0"
+DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 9816
 MAX_QUEUE_ARCHIVE_SLOTS = 10
 DEFAULT_PLATFORM = "bilibili"
@@ -77,6 +79,16 @@ STYLE_PATH = _YAML_DIR / "style.json"
 LIVE_STYLE_CSS_PATH = UI_DIR / "moren.css"
 
 WS_MAGIC_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+MAX_WS_FRAME_BYTES = 1024 * 1024
+_CONFIG_IO_LOCK = threading.RLock()
+
+
+def _serialized_config_io(func):
+    @wraps(func)
+    def wrapped(*args, **kwargs):
+        with _CONFIG_IO_LOCK:
+            return func(*args, **kwargs)
+    return wrapped
 
 
 STYLE_CSS_VAR_MAP: dict[str, str] = {
@@ -108,6 +120,7 @@ class WebSocketHub:
     def __init__(self, logger: logging.Logger) -> None:
         self.logger = logger
         self._clients: set[socket.socket] = set()
+        self._client_locks: dict[socket.socket, threading.Lock] = {}
         self._lock = threading.Lock()
         self.last_message_at: str = ""
 
@@ -119,18 +132,28 @@ class WebSocketHub:
     def register(self, conn: socket.socket) -> None:
         with self._lock:
             self._clients.add(conn)
+            self._client_locks.setdefault(conn, threading.Lock())
             count = len(self._clients)
         self.logger.info("WebSocket 客户端已连接，当前 %s 个", count)
 
     def unregister(self, conn: socket.socket) -> None:
         with self._lock:
             self._clients.discard(conn)
+            self._client_locks.pop(conn, None)
             count = len(self._clients)
         self.logger.info("WebSocket 客户端已断开，当前 %s 个", count)
 
     def broadcast_json(self, sender: socket.socket | None, payload: dict[str, Any]) -> None:
         text = json.dumps(payload, ensure_ascii=False)
         self.broadcast_text(sender, text)
+
+    def send_text(self, conn: socket.socket, text: str, opcode: int = 0x1) -> None:
+        with self._lock:
+            write_lock = self._client_locks.get(conn)
+        if write_lock is None:
+            write_lock = threading.Lock()
+        with write_lock:
+            _ws_send_text(conn, text, opcode=opcode)
 
     def broadcast_text(self, sender: socket.socket | None, text: str) -> None:
         dead: list[socket.socket] = []
@@ -141,7 +164,7 @@ class WebSocketHub:
             if sender is not None and conn is sender:
                 continue
             try:
-                _ws_send_text(conn, text)
+                self.send_text(conn, text)
             except OSError:
                 dead.append(conn)
 
@@ -149,9 +172,20 @@ class WebSocketHub:
             with self._lock:
                 for conn in dead:
                     self._clients.discard(conn)
+                    self._client_locks.pop(conn, None)
 
     def mark_message(self) -> None:
         self.last_message_at = dt.datetime.now(dt.timezone.utc).isoformat()
+
+
+def _ws_recv_exact(conn: socket.socket, size: int) -> bytes | None:
+    chunks = bytearray()
+    while len(chunks) < size:
+        chunk = conn.recv(size - len(chunks))
+        if not chunk:
+            return None
+        chunks.extend(chunk)
+    return bytes(chunks)
 
 
 def _ws_send_text(conn: socket.socket, text: str, opcode: int = 0x1) -> None:
@@ -357,6 +391,20 @@ def _yaml_quote_string(value: Any) -> str:
     return f'"{text}"'
 
 
+def _atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(
+        f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+    )
+    with _CONFIG_IO_LOCK:
+        try:
+            temp_path.write_text(content, encoding=encoding)
+            os.replace(temp_path, path)
+        finally:
+            temp_path.unlink(missing_ok=True)
+
+
+@_serialized_config_io
 def _read_raw_config() -> dict[str, Any]:
     if not CONFIG_PATH.exists():
         return {}
@@ -559,19 +607,26 @@ def read_queue_archive_entries(path: Path) -> list[dict[str, str]]:
 
 def write_queue_archive_entries(path: Path, entries: list[dict[str, Any]], meta: dict[str, Any] | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow([ARCHIVE_HEADER_SEQ, ARCHIVE_HEADER_ID, ARCHIVE_HEADER_CONTENT, ARCHIVE_HEADER_LAST_OPERATION_AT])
-        for idx, entry in enumerate(entries, start=1):
-            normalized = queue_item_to_entry(entry)
-            writer.writerow(
-                [
-                    idx,
-                    normalized.get("id", ""),
-                    normalized.get("content", ""),
-                    normalized.get("last_operation_at", ""),
-                ]
-            )
+    metadata = meta if isinstance(meta, dict) else {}
+    timestamp = _format_archive_timestamp(metadata.get("timestamp"))
+    buffer = io.StringIO(newline="")
+    writer = csv.writer(buffer)
+    writer.writerow([ARCHIVE_META_TIMESTAMP, timestamp])
+    writer.writerow([ARCHIVE_META_ACTOR, str(metadata.get("actor", "") or "")])
+    writer.writerow([ARCHIVE_META_MESSAGE, str(metadata.get("message", "") or "")])
+    writer.writerow([])
+    writer.writerow([ARCHIVE_HEADER_SEQ, ARCHIVE_HEADER_ID, ARCHIVE_HEADER_CONTENT, ARCHIVE_HEADER_LAST_OPERATION_AT])
+    for idx, entry in enumerate(entries, start=1):
+        normalized = queue_item_to_entry(entry)
+        writer.writerow(
+            [
+                idx,
+                normalized.get("id", ""),
+                normalized.get("content", ""),
+                normalized.get("last_operation_at", ""),
+            ]
+        )
+    _atomic_write_text(path, buffer.getvalue(), encoding="utf-8-sig")
 
 
 def blacklist_names_to_entries(names: list[Any]) -> list[dict[str, str]]:
@@ -1236,11 +1291,12 @@ def load_platform_config_slot(slot: int) -> dict[str, Any]:
     return _default_platform_slot_payload(raw)
 
 
+@_serialized_config_io
 def save_platform_config_slot(slot: int, data: dict[str, Any]) -> dict[str, Any]:
     normalized = _default_platform_slot_payload(data)
     PD_DIR.mkdir(parents=True, exist_ok=True)
     path = platform_config_path(slot)
-    path.write_text(_render_platform_slot_yaml(normalized), encoding="utf-8")
+    _atomic_write_text(path, _render_platform_slot_yaml(normalized), encoding="utf-8")
     return normalized
 
 
@@ -1270,7 +1326,7 @@ def ensure_runtime_layout() -> None:
     has_any_archive = any(path.exists() for path in archive_paths)
     if not has_any_archive:
         for slot, slot_file in enumerate(archive_paths, start=1):
-            write_queue_archive_entries(slot_file, _build_seed_archive_entries(slot))
+            write_queue_archive_entries(slot_file, [])
     else:
         for slot_file in archive_paths:
             if not slot_file.exists():
@@ -1301,6 +1357,7 @@ def load_config() -> dict[str, Any]:
     return merged
 
 
+@_serialized_config_io
 def save_config(config: dict[str, Any], *, preserve_legacy_api_schema: bool | None = None) -> None:
     config = _normalize_runtime_platform_config(config)
     if preserve_legacy_api_schema is None:
@@ -1518,7 +1575,7 @@ kaiguan:
 style:
 {style_block}
 """
-    CONFIG_PATH.write_text(content, encoding="utf-8")
+    _atomic_write_text(CONFIG_PATH, content, encoding="utf-8")
 
 
 def _cleanup_old_logs(retention_days: int) -> None:
@@ -1560,7 +1617,7 @@ class QueueArchiveManager:
     def __init__(self, slots: int = 3, enabled: bool = True) -> None:
         self.slots = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(slots)))
         self.enabled = enabled
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         PD_DIR.mkdir(parents=True, exist_ok=True)
 
     def _read_state(self) -> dict[str, int]:
@@ -1572,8 +1629,10 @@ class QueueArchiveManager:
             return {"next_slot": 1}
 
     def _write_state(self, state: dict[str, int]) -> None:
-        QUEUE_STATE_PATH.write_text(
-            json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
+        _atomic_write_text(
+            QUEUE_STATE_PATH,
+            json.dumps(state, ensure_ascii=False, indent=2),
+            encoding="utf-8",
         )
 
     def get_active_slot(self) -> int:
@@ -1607,41 +1666,48 @@ class QueueArchiveManager:
         if not self.enabled:
             return None
 
-        slot = self.get_active_slot()
-        out = self._slot_file(slot)
-        default_timestamp = _format_archive_timestamp()
-        entries = [
-            build_queue_entry(
-                entry.get("id", ""),
-                entry.get("content", ""),
-                entry.get("last_operation_at", "") or default_timestamp,
+        with self._lock:
+            state = self._read_state()
+            slot = max(1, min(self.slots, int(state.get("active_slot", 1))))
+            out = self._slot_file(slot)
+            default_timestamp = _format_archive_timestamp()
+            entries = [
+                build_queue_entry(
+                    entry.get("id", ""),
+                    entry.get("content", ""),
+                    entry.get("last_operation_at", "") or default_timestamp,
+                )
+                for entry in queue_items_to_entries(queue_items)
+            ]
+            write_queue_archive_entries(
+                out,
+                entries,
+                meta={
+                    "timestamp": default_timestamp,
+                    "actor": actor,
+                    "message": message,
+                },
             )
-            for entry in queue_items_to_entries(queue_items)
-        ]
-        write_queue_archive_entries(
-            out,
-            entries,
-            meta={
-                "actor": actor,
-                "message": message,
-            },
-        )
-        return out
+            return out
 
     def write_blank_snapshot(self, actor: str, message: str) -> Path | None:
         if not self.enabled:
             return None
-        slot = self.get_active_slot()
-        out = self._slot_file(slot)
-        write_queue_archive_entries(
-            out,
-            [],
-            meta={
-                "actor": actor,
-                "message": message,
-            },
-        )
-        return out
+        with self._lock:
+            state = self._read_state()
+            slot = max(1, min(self.slots, int(state.get("active_slot", 1))))
+            out = self._slot_file(slot)
+            timestamp = _format_archive_timestamp()
+            write_queue_archive_entries(
+                out,
+                [],
+                meta={
+                    "timestamp": timestamp,
+                    "actor": actor,
+                    "message": message,
+                },
+            )
+            return out
 
     def _read_snapshot(self, slot: int) -> dict[str, Any] | None:
         path = self._slot_file(slot)
@@ -1827,6 +1893,7 @@ class QueueManager:
         except Exception as exc:  # noqa: BLE001
             self._logger.warning("刷新运行时配置失败: %s", exc)
 
+    @_serialized_config_io
     def _persist_myjs_state_unlocked(self) -> None:
         current = load_config()
         myjs_cfg = _normalize_myjs_config(current.get("myjs", {}))
@@ -1864,6 +1931,7 @@ class QueueManager:
         self._daily_queue_counts.clear()
         return True
 
+    @_serialized_config_io
     def _persist_quanxian_state_unlocked(self) -> None:
         current_quanxian = load_quanxian()
         payload = {
@@ -1881,6 +1949,7 @@ class QueueManager:
         self._blacklist = list(persisted.get("blacklist", []))
         self._reload_runtime_config()
 
+    @_serialized_config_io
     def _persist_kaiguan_state_unlocked(self) -> None:
         payload = dict(self._kaiguan)
         payload["paidui"] = not self._all_disabled
@@ -2176,8 +2245,12 @@ class QueueManager:
         return (uname in self._admins) or (is_admin and self._fangguan_can_doing)
 
     def _find_index(self, uname: str) -> int:
+        target = str(uname or "").strip()
+        if not target:
+            return -1
         for i, item in enumerate(self._persons):
-            if uname in item:
+            item_id, _content = queue_item_to_parts(item)
+            if item_id == target:
                 return i
         return -1
 
@@ -2382,6 +2455,9 @@ class QueueManager:
                     self._persist_myjs_state_unlocked()
                     modified = bool(selected)
 
+                if self._gift_queue_only and not modified and self._is_join_cmd(msg) and not has_op:
+                    return False, "当前仅允许使用礼物资格排队"
+
                 join_master_enabled = kg.get("paidui", True)
                 if msg == "排队" and join_master_enabled:
                     new_item = uname
@@ -2463,6 +2539,10 @@ class QueueManager:
 
             note: str | None = None
             if has_op:
+                if msg == "完成" and self._persons:
+                    self._remove_queue_item_unlocked(0)
+                    modified = True
+
                 for kw in ("del", "删除", "完成"):
                     if kw in msg:
                         nums = re.sub(r"[^0-9]", "", msg)
@@ -3051,6 +3131,30 @@ def _guess_content_type(path: Path) -> str:
 
 class ApiHandler(BaseHTTPRequestHandler):
     server_version = "DanmujiBackend/0.3"
+    _LOCAL_ONLY_GET_PATHS = {
+        "/model",
+        "/api/config/basic",
+        "/api/config/login",
+        "/api/config",
+        "/api/quanxian",
+        "/api/kaiguan",
+        "/api/style",
+        "/api/blacklist/state",
+        "/api/bili/qr/start",
+    }
+
+    def _is_loopback_client(self) -> bool:
+        host = str(self.client_address[0] if self.client_address else "").strip().lower()
+        return host in {"127.0.0.1", "::1", "localhost"} or host.startswith("::ffff:127.")
+
+    def _require_loopback(self) -> bool:
+        if self._is_loopback_client():
+            return True
+        self._write_json(
+            {"status": "error", "message": "Management API is local-only"},
+            status=HTTPStatus.FORBIDDEN,
+        )
+        return False
 
     def log_message(self, format: str, *args: Any) -> None:
         message = "%s - %s" % (self.address_string(), format % args)
@@ -3127,8 +3231,8 @@ class ApiHandler(BaseHTTPRequestHandler):
 
     def _ws_recv_text(self, conn: socket.socket) -> str | None:
         try:
-            head = conn.recv(2)
-            if not head or len(head) < 2:
+            head = _ws_recv_exact(conn, 2)
+            if head is None:
                 return None
 
             b1, b2 = head
@@ -3138,48 +3242,56 @@ class ApiHandler(BaseHTTPRequestHandler):
 
             if opcode == 0x8:
                 return None
+            if not masked:
+                return None
             if opcode == 0x9:  # ping
-                _ws_send_text(conn, "", opcode=0xA)
+                mask_key = _ws_recv_exact(conn, 4)
+                if mask_key is None:
+                    return None
+                self.server.ws_hub.send_text(conn, "", opcode=0xA)
                 return ""
             if opcode != 0x1:
                 return ""
 
             if payload_len == 126:
-                payload_len = struct.unpack("!H", conn.recv(2))[0]
-            elif payload_len == 127:
-                payload_len = struct.unpack("!Q", conn.recv(8))[0]
-
-            mask_key = conn.recv(4) if masked else b""
-            payload = b""
-            remaining = payload_len
-            while remaining > 0:
-                chunk = conn.recv(remaining)
-                if not chunk:
+                raw_length = _ws_recv_exact(conn, 2)
+                if raw_length is None:
                     return None
-                payload += chunk
-                remaining -= len(chunk)
+                payload_len = struct.unpack("!H", raw_length)[0]
+            elif payload_len == 127:
+                raw_length = _ws_recv_exact(conn, 8)
+                if raw_length is None:
+                    return None
+                payload_len = struct.unpack("!Q", raw_length)[0]
 
-            if masked:
-                payload = bytes(
-                    b ^ mask_key[i % 4] for i, b in enumerate(payload)
-                )
-
-            decoded = payload.decode("utf-8", errors="replace")
-            return decoded
-        except (ConnectionError, OSError, TimeoutError):
+            if payload_len > MAX_WS_FRAME_BYTES:
+                return None
+            mask_key = _ws_recv_exact(conn, 4)
+            if mask_key is None:
+                return None
+            payload = _ws_recv_exact(conn, payload_len)
+            if payload is None:
+                return None
+            payload = bytes(b ^ mask_key[i % 4] for i, b in enumerate(payload))
+            return payload.decode("utf-8", errors="replace")
+        except (ConnectionError, OSError, TimeoutError, struct.error):
             return None
 
     def _ws_send_text(self, conn: socket.socket, text: str) -> None:
-        _ws_send_text(conn, text)
+        self.server.ws_hub.send_text(conn, text)
 
     def _ws_send_json(self, conn: socket.socket, payload: dict[str, Any]) -> None:
         self._ws_send_text(conn, json.dumps(payload, ensure_ascii=False))
 
-    def _build_basic_config_payload(self) -> dict[str, Any]:
+    def _build_basic_config_payload(self, *, include_secrets: bool = False) -> dict[str, Any]:
         cfg = self.server.runtime_config
         platform_payload = _build_platform_config_payload(cfg)
-        bilibili_cfg = platform_payload["bilibili"]
-        douyin_cfg = platform_payload["douyin"]
+        bilibili_cfg = dict(platform_payload["bilibili"])
+        douyin_cfg = copy.deepcopy(platform_payload["douyin"])
+        if not include_secrets:
+            bilibili_cfg.pop("cookie", None)
+            douyin_cfg.pop("cookie", None)
+            douyin_cfg.pop("signature", None)
         platform_archive = _get_platform_config_archive(cfg)
         payload = {
             "roomid": int(bilibili_cfg.get("roomid", 0)),
@@ -3193,11 +3305,17 @@ class ApiHandler(BaseHTTPRequestHandler):
             },
         }
         for platform_key in RESERVED_RUNTIME_PLATFORMS:
-            payload[platform_key] = copy.deepcopy(platform_payload.get(platform_key, RESERVED_PLATFORM_SECTION_DEFAULT))
+            reserved = copy.deepcopy(
+                platform_payload.get(platform_key, RESERVED_PLATFORM_SECTION_DEFAULT)
+            )
+            if not include_secrets:
+                reserved.pop("cookie", None)
+                reserved.pop("auth_token", None)
+            payload[platform_key] = reserved
         return payload
 
     def _build_login_config_payload(self) -> dict[str, Any]:
-        payload = self._build_basic_config_payload()
+        payload = self._build_basic_config_payload(include_secrets=True)
         payload["cookie"] = str(_get_bilibili_config(self.server.runtime_config).get("cookie", ""))
         payload["qr_login"] = self.server.runtime_config.get("qr_login", {})
         return payload
@@ -3270,6 +3388,8 @@ class ApiHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path in self._LOCAL_ONLY_GET_PATHS and not self._require_loopback():
+            return
         if parsed.path in {"/ws", "/danmu/sub"}:
             self._handle_websocket_upgrade()
             return
@@ -3325,7 +3445,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/config":
             cfg = self.server.runtime_config
-            platform_payload = self._build_basic_config_payload()
+            platform_payload = self._build_basic_config_payload(include_secrets=True)
             bilibili_cfg = platform_payload["bilibili"]
             self._write_json(
                 {
@@ -3481,8 +3601,11 @@ class ApiHandler(BaseHTTPRequestHandler):
             status=HTTPStatus.NOT_FOUND,
         )
 
+    @_serialized_config_io
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if not self._require_loopback():
+            return
         if parsed.path == "/api/config/login":
             length = int(self.headers.get("Content-Length", "0"))
             if length <= 0:

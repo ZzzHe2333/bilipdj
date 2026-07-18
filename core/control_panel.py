@@ -4374,7 +4374,7 @@ class ControlPanelApp:
             )
             self.stderr_thread.start()
 
-    def save_to_file(self) -> None:
+    def save_to_file(self) -> bool:
         try:
             self._ensure_douyin_live_info_before_save()
             backend_server = load_backend_server_module()
@@ -4394,17 +4394,19 @@ class ControlPanelApp:
             self._append_log("[GUI] 配置保存成功")
         except ValueError as exc:
             messagebox.showerror("输入错误", str(exc))
+            return False
         except OSError as exc:
             messagebox.showerror("保存失败", str(exc))
-            return
+            return False
         except Exception as exc:  # noqa: BLE001
             messagebox.showerror("保存失败", str(exc))
-            return
+            return False
         if self._overlay_window_alive():
             self._apply_overlay_settings_to_window()
         if self._overlay_process_running():
             self._restart_overlay_process()
         self._switch_queue_slot()
+        return True
 
     def _read_slot_csv(self, slot: int) -> list[dict[str, str]]:
         """读取指定槽位 CSV 的结构化队列条目。"""
@@ -4469,7 +4471,8 @@ class ControlPanelApp:
             return
 
         try:
-            self.save_to_file()
+            if not self.save_to_file():
+                return
             if getattr(sys, "frozen", False):
                 command = [sys.executable, "--backend"]
             else:

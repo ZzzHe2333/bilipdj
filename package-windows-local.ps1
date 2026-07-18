@@ -23,7 +23,7 @@ try {
         }
         & $PythonExe -m pip uninstall -y http 2>$null
         Write-Host "http uninstall done (or not installed)"
-        & $PythonExe -m pip install pyinstaller 'qrcode[pil]' brotli psutil
+        & $PythonExe -m pip install pyinstaller
     }
 
     foreach ($buildPath in @("build", "dist")) {

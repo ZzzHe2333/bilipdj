@@ -23,6 +23,8 @@ hiddenimports = [
     "PIL.PngImagePlugin",
     "brotli",
     "psutil",
+    "google.protobuf",
+    "google.protobuf.internal.builder",
 ]
 
 a = Analysis(

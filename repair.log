@@ -1,3 +1,0 @@
-Traceback (most recent call last):
-  File "<stdin>", line 20, in <module>
-RuntimeError: gift source marker count=0
