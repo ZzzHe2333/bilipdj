@@ -1,0 +1,73 @@
+name: Package Windows x64 v0.4.0 once
+
+on:
+  push:
+    branches: [now]
+    paths:
+      - .github/workflows/package-once-windows-x64.yml
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-x64:
+    runs-on: windows-2022
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: now
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build Windows executable
+        shell: pwsh
+        run: |
+          python scripts\scan_secrets.py
+          .\scripts\package-amd64.ps1 -InstallDependencies
+
+      - name: Create release zip
+        shell: pwsh
+        run: |
+          if (Test-Path package) {
+            Remove-Item -LiteralPath package -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path package -Force | Out-Null
+          Copy-Item -Recurse "dist\bilipdj\*" package\
+          if (Test-Path README.md)           { Copy-Item README.md           package\ }
+          if (Test-Path core\quanxian.yaml)  { Copy-Item core\quanxian.yaml  package\ }
+          if (Test-Path core\kaiguan.yaml)   { Copy-Item core\kaiguan.yaml   package\ }
+          Compress-Archive -Path package\* -DestinationPath "bilibili-danmuji-windows-x64-v0.4.0.zip" -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bilibili-danmuji-windows-x64-v0.4.0
+          path: bilibili-danmuji-windows-x64-v0.4.0.zip
+
+      - name: Create or update GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: v0.4.0
+          commit: ${{ github.sha }}
+          name: v0.4.0
+          artifacts: bilibili-danmuji-windows-x64-v0.4.0.zip
+          artifactErrorsFailBuild: true
+          allowUpdates: true
+          replacesArtifacts: true
+          generateReleaseNotes: true
+
+      - name: Remove one-time workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/package-once-windows-x64.yml
+          git commit -m "chore: remove completed one-time packaging workflow"
+          git push origin HEAD:now
