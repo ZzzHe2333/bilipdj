@@ -35,6 +35,7 @@ jobs:
           gh run watch "$RUN_ID" --exit-status
           WATCH_STATUS=$?
           set -e
+          export WATCH_STATUS
           gh api "repos/${{ github.repository }}/actions/runs/${RUN_ID}" > /tmp/run.json
           gh api "repos/${{ github.repository }}/actions/runs/${RUN_ID}/jobs" > /tmp/jobs.json
           gh api "repos/${{ github.repository }}/actions/runs/${RUN_ID}/artifacts" > /tmp/artifacts.json
@@ -71,3 +72,5 @@ jobs:
           git rm -f --ignore-unmatch .github/workflows/dispatch-v1.0.7-package-once.yml .github/workflows/inspect-v1.0.7-package-once.yml
           git commit -m 'chore: remove v1.0.7 package helpers'
           git push origin HEAD:now
+
+# Trigger after workflow registration.
