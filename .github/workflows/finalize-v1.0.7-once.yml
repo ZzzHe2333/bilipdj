@@ -43,3 +43,5 @@ jobs:
           git rm .github/workflows/finalize-v1.0.7-once.yml
           git commit -m 'chore: remove v1.0.7 finalizer'
           git push origin HEAD:now
+
+# Trigger after workflow registration.
