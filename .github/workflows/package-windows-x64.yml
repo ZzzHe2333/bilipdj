@@ -68,6 +68,7 @@ jobs:
           New-Item -ItemType Directory -Path package -Force | Out-Null
           Copy-Item -Recurse "dist\bilipdj\*" package\
           if (Test-Path README.md)           { Copy-Item README.md           package\ }
+          if (Test-Path RELEASE_NOTES.md)    { Copy-Item RELEASE_NOTES.md    package\ }
           if (Test-Path core\quanxian.yaml)  { Copy-Item core\quanxian.yaml  package\ }
           if (Test-Path core\kaiguan.yaml)   { Copy-Item core\kaiguan.yaml   package\ }
           Compress-Archive -Path package\* -DestinationPath "${{ steps.resolve_tag.outputs.zip_name }}" -Force
@@ -83,9 +84,10 @@ jobs:
         with:
           tag: ${{ steps.resolve_tag.outputs.tag_name }}
           commit: ${{ github.sha }}
-          name: ${{ steps.resolve_tag.outputs.tag_name }}
+          name: 弹幕排队姬 ${{ steps.resolve_tag.outputs.tag_name }}
           artifacts: ${{ steps.resolve_tag.outputs.zip_name }}
           artifactErrorsFailBuild: true
           allowUpdates: true
           replacesArtifacts: true
-          generateReleaseNotes: true
+          bodyFile: RELEASE_NOTES.md
+          generateReleaseNotes: false
