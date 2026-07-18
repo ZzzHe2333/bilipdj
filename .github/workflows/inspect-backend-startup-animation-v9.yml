@@ -1,4 +1,4 @@
-name: Inspect backend startup animation v9
+name: Inspect backend startup animation v10
 
 on:
   push:
@@ -18,12 +18,12 @@ jobs:
         with:
           ref: now
           fetch-depth: 0
-      - name: Record v9 status on diagnostic branch
+      - name: Record v10 status on diagnostic branch
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           sleep 5
-          gh api "repos/${{ github.repository }}/actions/workflows/apply-backend-startup-animation-v9.yml/runs?per_page=1" > /tmp/runs.json
+          gh api "repos/${{ github.repository }}/actions/workflows/apply-backend-startup-animation-v10.yml/runs?per_page=1" > /tmp/runs.json
           RUN_ID=$(python -c "import json; d=json.load(open('/tmp/runs.json')); print(d['workflow_runs'][0]['id'])")
           gh api "repos/${{ github.repository }}/actions/runs/${RUN_ID}/jobs" > /tmp/jobs.json
           python - <<'PY'
@@ -47,13 +47,13 @@ jobs:
                   for job in jobs.get('jobs', [])
               ],
           }
-          open('/tmp/backend-startup-animation-v9-status.json', 'w', encoding='utf-8').write(json.dumps(out, ensure_ascii=False, indent=2))
+          open('/tmp/backend-startup-animation-v10-status.json', 'w', encoding='utf-8').write(json.dumps(out, ensure_ascii=False, indent=2))
           PY
           git checkout --orphan diagnostic-workflow-status
           git rm -rf .
-          cp /tmp/backend-startup-animation-v9-status.json .
-          git add backend-startup-animation-v9-status.json
+          cp /tmp/backend-startup-animation-v10-status.json .
+          git add backend-startup-animation-v10-status.json
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore: record startup animation v9 status"
+          git commit -m "chore: record startup animation v10 status"
           git push --force origin HEAD:diagnostic/workflow-status
