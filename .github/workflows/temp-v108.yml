@@ -1,1 +1,33 @@
-name: Temporary v108 task
+name: Dispatch v1.0.8 package
+
+on:
+  push:
+    branches: [now]
+    paths:
+      - .github/workflows/temp-v108.yml
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: now
+          fetch-depth: 0
+      - name: Create tag and dispatch package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git tag -f v1.0.8 c41011ae2f95ee5a4b7e70e919e38f2b467933a3
+          git push --force origin refs/tags/v1.0.8
+          gh workflow run package-windows-x64.yml --ref v1.0.8 -f tag_name=v1.0.8
+      - name: Remove helper
+        run: |
+          git pull --ff-only origin now
+          git rm .github/workflows/temp-v108.yml
+          git commit -m "chore: remove v1.0.8 dispatch helper"
+          git push origin HEAD:now
