@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "<stdin>", line 12, in <module>
+  File "apply_lan_toggle.py", line 88, in <module>
+  File "apply_lan_toggle.py", line 6, in replace_once
+RuntimeError: render LAN setting: expected 1 match, found 0
+Traceback (most recent call last):
+  File "<stdin>", line 12, in <module>
+  File "apply_lan_toggle.py", line 88, in <module>
+  File "apply_lan_toggle.py", line 6, in replace_once
+RuntimeError: render LAN setting: expected 1 match, found 0
