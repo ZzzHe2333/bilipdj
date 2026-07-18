@@ -408,6 +408,28 @@ def _merge_config(defaults: dict[str, Any], custom: dict[str, Any]) -> dict[str,
     return merged
 
 
+LAN_LISTEN_HOSTS = {"0.0.0.0", "::", "[::]"}
+
+
+def normalize_server_config(raw: Any) -> dict[str, Any]:
+    source = raw if isinstance(raw, dict) else {}
+    configured_host = str(source.get("host", DEFAULT_HOST) or DEFAULT_HOST).strip()
+    if "lan_listen" in source:
+        lan_listen = bool(source.get("lan_listen", False))
+    else:
+        # Backward compatibility: wildcard hosts in old configs enabled LAN listening.
+        lan_listen = configured_host in LAN_LISTEN_HOSTS
+    try:
+        port = int(source.get("port", DEFAULT_PORT))
+    except (TypeError, ValueError):
+        port = DEFAULT_PORT
+    return {
+        "host": "0.0.0.0" if lan_listen else DEFAULT_HOST,
+        "port": port,
+        "lan_listen": lan_listen,
+    }
+
+
 MYJS_LIST_KEYS = {"admins", "ban_admins", "jianzhang", "daily_queue_counts"}
 
 
@@ -783,7 +805,7 @@ def ensure_queue_archive_row_timestamps(path: Path) -> None:
 
 
 DEFAULT_CONFIG: dict[str, Any] = {
-    "server": {"host": DEFAULT_HOST, "port": DEFAULT_PORT},
+    "server": {"host": DEFAULT_HOST, "port": DEFAULT_PORT, "lan_listen": False},
     "platform": DEFAULT_PLATFORM,
     "bilibili": {"roomid": 3049445, "uid": 0, "cookie": ""},
     "douyin": {
@@ -1418,6 +1440,8 @@ def load_config() -> dict[str, Any]:
     ensure_runtime_layout()
     raw_config = _read_raw_config()
     merged = _normalize_runtime_platform_config(_merge_config(DEFAULT_CONFIG, raw_config))
+    raw_server = raw_config.get("server", {}) if isinstance(raw_config, dict) else {}
+    merged["server"] = normalize_server_config(raw_server)
     platform_archive_cfg = merged.get("platform_config_archive", {})
     active_platform_slot = max(1, min(MAX_QUEUE_ARCHIVE_SLOTS, _to_int(platform_archive_cfg.get("active_slot", 1), 1)))
     slot_payload = _build_platform_config_payload(load_platform_config_slot(active_platform_slot))
@@ -1437,7 +1461,8 @@ def save_config(config: dict[str, Any], *, preserve_legacy_api_schema: bool | No
     config = _normalize_runtime_platform_config(config)
     if preserve_legacy_api_schema is None:
         preserve_legacy_api_schema = _should_preserve_legacy_api_schema(_read_raw_config())
-    server = config.get("server", {})
+    server = normalize_server_config(config.get("server", {}))
+    config["server"] = server
     platform_name = _normalize_platform_name(config.get("platform", DEFAULT_PLATFORM))
     bilibili_cfg = config.get("bilibili", {})
     douyin_cfg = config.get("douyin", {})
@@ -1562,6 +1587,7 @@ def save_config(config: dict[str, Any], *, preserve_legacy_api_schema: bool | No
 server:
   host: {server.get('host', DEFAULT_HOST)}
   port: {_to_int(server.get('port', DEFAULT_PORT), DEFAULT_PORT)}
+  lan_listen: {'true' if bool(server.get('lan_listen', False)) else 'false'}
 
 platform: {platform_name}
 
@@ -3379,6 +3405,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             douyin_cfg.pop("signature", None)
         platform_archive = _get_platform_config_archive(cfg)
         payload = {
+            "server": normalize_server_config(cfg.get("server", {})),
             "roomid": int(bilibili_cfg.get("roomid", 0)),
             "uid": int(bilibili_cfg.get("uid", 0)),
             "bilibili": bilibili_cfg,
@@ -3735,6 +3762,13 @@ class ApiHandler(BaseHTTPRequestHandler):
                 return
 
             current_cfg = self.server.runtime_config if isinstance(self.server.runtime_config, dict) else {}
+            current_server = current_cfg.get("server", {}) if isinstance(current_cfg.get("server", {}), dict) else {}
+            incoming_server = payload.get("server", {})
+            server_payload = normalize_server_config(
+                {**current_server, **incoming_server}
+                if isinstance(incoming_server, dict)
+                else current_server
+            )
             incoming_platform = _normalize_platform_name(
                 payload.get("platform", current_cfg.get("platform", DEFAULT_PLATFORM))
             )
@@ -3829,6 +3863,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             updated = _merge_config(
                 self.server.runtime_config,
                 {
+                    "server": server_payload,
                     "platform": incoming_platform,
                     "bilibili": {"roomid": roomid, "uid": uid, "cookie": cookie},
                     "douyin": douyin_payload,
@@ -4323,6 +4358,7 @@ if __name__ == "__main__":
         _warn_use_gui_startup()
         raise SystemExit(0)
     config = load_config()
-    host = os.getenv("DANMUJI_BACKEND_HOST", str(config.get("server", {}).get("host", DEFAULT_HOST)))
-    port = int(os.getenv("DANMUJI_BACKEND_PORT", int(config.get("server", {}).get("port", DEFAULT_PORT))))
+    server_config = normalize_server_config(config.get("server", {}))
+    host = os.getenv("DANMUJI_BACKEND_HOST", str(server_config["host"]))
+    port = int(os.getenv("DANMUJI_BACKEND_PORT", int(server_config["port"])))
     run_server(host=host, port=port)
