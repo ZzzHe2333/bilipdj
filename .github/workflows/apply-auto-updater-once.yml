@@ -40,3 +40,5 @@ jobs:
           git add -u scripts/integrate_update_ui.txt
           git commit -m "feat: integrate automatic updater UI"
           git push origin HEAD:feature/auto-updater
+
+# Trigger after workflow registration.
