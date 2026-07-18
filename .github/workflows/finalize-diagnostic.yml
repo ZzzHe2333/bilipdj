@@ -1,0 +1,53 @@
+name: Finalize repair diagnostic
+
+on:
+  pull_request:
+    branches: [now]
+    paths:
+      - .github/workflows/finalize-diagnostic.yml
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run patch with captured output
+        shell: bash
+        run: |
+          set -o pipefail
+          python - <<'PY' 2>&1 | tee finalize.log
+          from pathlib import Path
+          import re
+          import textwrap
+
+          workflow = Path('.github/workflows/finalize-confirmed-repair.yml').read_text(encoding='utf-8')
+          match = re.search(r"(?ms)^          python - <<'PY'\n(.*?)^          PY$", workflow)
+          if match is None:
+              raise RuntimeError('Unable to extract finalize script')
+          script = textwrap.dedent(match.group(1))
+          exec(compile(script, 'finalize_repair.py', 'exec'), {'__name__': '__main__'})
+          PY
+
+      - name: Preserve diagnostic
+        if: failure()
+        shell: bash
+        env:
+          HEAD_BRANCH: ${{ github.head_ref }}
+        run: |
+          test -f finalize.log || echo "No diagnostic output" > finalize.log
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f finalize.log
+          git commit -m "chore: preserve finalize repair log" || exit 0
+          git push origin "HEAD:${HEAD_BRANCH}"
