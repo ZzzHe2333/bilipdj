@@ -1,0 +1,40 @@
+prepare=0
+compile=0
+test_backend_readiness_is_checked_in_worker_thread (test_backend_startup_animation.BackendStartupAnimationTests.test_backend_readiness_is_checked_in_worker_thread) ... ok
+test_progress_and_button_animation_exist (test_backend_startup_animation.BackendStartupAnimationTests.test_progress_and_button_animation_exist) ... ok
+test_source_is_valid_python (test_backend_startup_animation.BackendStartupAnimationTests.test_source_is_valid_python) ... ok
+test_start_is_deferred_until_ui_can_paint (test_backend_startup_animation.BackendStartupAnimationTests.test_start_is_deferred_until_ui_can_paint) ... ok
+test_startup_save_avoids_dead_backend_http_calls (test_backend_startup_animation.BackendStartupAnimationTests.test_startup_save_avoids_dead_backend_http_calls) ... ok
+test_server_config (unittest.loader._FailedTest.test_server_config) ... ERROR
+
+======================================================================
+ERROR: test_server_config (unittest.loader._FailedTest.test_server_config)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_server_config
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/unittest/loader.py", line 419, in _find_test_path
+    module = self._get_module_from_name(name)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/unittest/loader.py", line 362, in _get_module_from_name
+    __import__(name)
+  File "/home/runner/work/bilipdj/bilipdj/tests/test_server_config.py", line 5, in <module>
+    from core import server
+  File "/home/runner/work/bilipdj/bilipdj/core/server.py", line 30, in <module>
+    from . import bilibili_protocol, douyin_protocol
+  File "/home/runner/work/bilipdj/bilipdj/core/douyin_protocol.py", line 18, in <module>
+    from . import douyin_live_pb2
+  File "/home/runner/work/bilipdj/bilipdj/core/douyin_live_pb2.py", line 5, in <module>
+    from google.protobuf import descriptor as _descriptor
+ModuleNotFoundError: No module named 'google'
+
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.068s
+
+FAILED (errors=1)
+tests=1
+Secret scan passed (56 tracked files).
+secrets=0
+diff=0
+ M UPDATE.md
+ M core/control_panel.py
