@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 import urllib.error
 import urllib.request
@@ -419,8 +420,17 @@ class ControlPanelApp:
         self.log_pump_running = False
         self.stdout_thread: threading.Thread | None = None
         self.stderr_thread: threading.Thread | None = None
+        self._backend_starting = False
+        self._startup_animation_step = 0
+        self._startup_animation_job: str | None = None
+        self._startup_result_queue: queue.Queue[tuple[bool, str, list[str]]] = queue.Queue()
+        self._start_button: ttk.Button | None = None
+        self._stop_button: ttk.Button | None = None
+        self._startup_indicator: ttk.Frame | None = None
+        self._startup_progress: ttk.Progressbar | None = None
 
         self.status_var = tk.StringVar(value="服务未启动")
+        self.startup_status_var = tk.StringVar(value="")
         self.host_var = tk.StringVar(value="127.0.0.1")
         self.lan_listen_var = tk.BooleanVar(value=False)
         self.port_var = tk.StringVar(value="9816")
@@ -830,13 +840,23 @@ class ControlPanelApp:
 
         btn_bar = ttk.Frame(top)
         btn_bar.grid(row=0, column=2, sticky="e")
-        ttk.Button(btn_bar, text="启动服务", style="Primary.TButton", command=self.start_server).grid(row=0, column=0, padx=(0, 8))
-        ttk.Button(btn_bar, text="停止", style="Danger.TButton", command=self.stop_server).grid(row=0, column=1, padx=(0, 8))
+        self._start_button = ttk.Button(btn_bar, text="启动服务", style="Primary.TButton", command=self.start_server)
+        self._start_button.grid(row=0, column=0, padx=(0, 8))
+        self._stop_button = ttk.Button(btn_bar, text="停止", style="Danger.TButton", command=self.stop_server)
+        self._stop_button.grid(row=0, column=1, padx=(0, 8))
         ttk.Button(btn_bar, text="登录配置", command=self.open_config).grid(row=0, column=2, padx=(0, 8))
         ttk.Button(btn_bar, text="队列看板", command=self.open_web).grid(row=0, column=3, padx=(0, 8))
         ttk.Button(btn_bar, text="OBS 弹窗", command=self.open_overlay_window).grid(row=0, column=4, padx=(0, 8))
         self._theme_btn = ttk.Button(btn_bar, text="☀", width=3, style="Icon.TButton", command=self._toggle_theme)
         self._theme_btn.grid(row=0, column=5)
+
+        self._startup_indicator = ttk.Frame(btn_bar)
+        self._startup_indicator.grid(row=1, column=0, columnspan=6, sticky="ew", pady=(7, 0))
+        self._startup_indicator.columnconfigure(1, weight=1)
+        ttk.Label(self._startup_indicator, textvariable=self.startup_status_var, width=18).grid(row=0, column=0, sticky="w", padx=(0, 8))
+        self._startup_progress = ttk.Progressbar(self._startup_indicator, mode="indeterminate", length=170)
+        self._startup_progress.grid(row=0, column=1, sticky="ew")
+        self._startup_indicator.grid_remove()
 
         # --- 左侧导航 + 单层内容区 ---
         shell = ttk.Frame(main)
@@ -889,7 +909,10 @@ class ControlPanelApp:
     def _refresh_header_status(self) -> None:
         running = self._backend_is_running()
         room = self.roomid_var.get().strip() or "--"
-        connection = "已连接" if "已连接" in self.ws_text_var.get() and "未连接" not in self.ws_text_var.get() else ("服务运行中" if running else "服务未启动")
+        if self._backend_starting:
+            connection = "正在启动"
+        else:
+            connection = "已连接" if "已连接" in self.ws_text_var.get() and "未连接" not in self.ws_text_var.get() else ("服务运行中" if running else "服务未启动")
         self.header_status_var.set(f"{connection} · 房间 {room}")
         if self._header_dot_label is not None:
             theme = self._THEME_DARK if self._dark_mode else self._THEME_LIGHT
@@ -4023,8 +4046,12 @@ class ControlPanelApp:
                 val = raw.get(key, default)
                 var.set(bool(val) if isinstance(val, bool) else default)
 
-    def _save_kaiguan(self) -> bool:
+    def _save_kaiguan(self, *, prefer_backend: bool = True) -> bool:
         payload = {key: var.get() for key, var in self._kaiguan_vars.items()}
+        if not prefer_backend:
+            self._write_kaiguan_local(payload)
+            self._append_log("[GUI] 功能开关已保存到本地（启动后生效）")
+            return True
         port = self.port_var.get().strip() or "9816"
         body = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
@@ -4396,7 +4423,7 @@ class ControlPanelApp:
             )
             self.stderr_thread.start()
 
-    def save_to_file(self) -> bool:
+    def save_to_file(self, *, use_backend_api: bool = True, switch_queue_slot: bool = True) -> bool:
         try:
             self._ensure_douyin_live_info_before_save()
             backend_server = load_backend_server_module()
@@ -4409,7 +4436,7 @@ class ControlPanelApp:
                     self.gather_config(),
                 )
                 backend_server.save_config(config)
-                self._save_kaiguan()
+                self._save_kaiguan(prefer_backend=use_backend_api)
                 if not self._save_style():
                     raise OSError("样式设置保存失败")
             self._prev_platform_config_slot = platform_slot
@@ -4428,7 +4455,8 @@ class ControlPanelApp:
             self._apply_overlay_settings_to_window()
         if self._overlay_process_running():
             self._restart_overlay_process()
-        self._switch_queue_slot()
+        if switch_queue_slot:
+            self._switch_queue_slot()
         return True
 
     def _read_slot_csv(self, slot: int) -> list[dict[str, str]]:
@@ -4487,22 +4515,135 @@ class ControlPanelApp:
             self._prev_slot = new_slot
             self.root.after(0, self._refresh_style_state)
 
+    def _show_backend_startup_ui(self) -> None:
+        self._backend_starting = True
+        self._startup_animation_step = 0
+        self.status_var.set("正在启动后端…")
+        self.startup_status_var.set("正在保存配置…")
+        if self._start_button is not None:
+            self._start_button.configure(state="disabled", text="启动中")
+        if self._stop_button is not None:
+            self._stop_button.configure(state="disabled")
+        if self._startup_indicator is not None:
+            self._startup_indicator.grid()
+        if self._startup_progress is not None:
+            self._startup_progress.start(12)
+        try:
+            self.root.configure(cursor="watch")
+        except tk.TclError:
+            pass
+        self._animate_backend_startup_button()
+        self._refresh_header_status()
+
+    def _animate_backend_startup_button(self) -> None:
+        if not self._backend_starting:
+            return
+        dots = "." * (self._startup_animation_step % 4)
+        self._startup_animation_step += 1
+        if self._start_button is not None:
+            self._start_button.configure(text=f"启动中{dots}")
+        self._startup_animation_job = self.root.after(280, self._animate_backend_startup_button)
+
+    def _finish_backend_startup_ui(self) -> None:
+        self._backend_starting = False
+        if self._startup_animation_job is not None:
+            try:
+                self.root.after_cancel(self._startup_animation_job)
+            except tk.TclError:
+                pass
+            self._startup_animation_job = None
+        if self._startup_progress is not None:
+            self._startup_progress.stop()
+        if self._startup_indicator is not None:
+            self._startup_indicator.grid_remove()
+        if self._start_button is not None:
+            self._start_button.configure(state="normal", text="启动服务")
+        if self._stop_button is not None:
+            self._stop_button.configure(state="normal")
+        try:
+            self.root.configure(cursor="")
+        except tk.TclError:
+            pass
+        self.startup_status_var.set("")
+        self._refresh_header_status()
+
+    def _wait_for_backend_ready(self, port: int, command: list[str]) -> None:
+        process = self.server_proc
+        if process is None:
+            self._startup_result_queue.put((False, "后端进程未创建", command))
+            return
+        deadline = time.monotonic() + 15.0
+        last_error = ""
+        health_url = f"http://127.0.0.1:{port}/api/config/basic"
+        while time.monotonic() < deadline:
+            return_code = process.poll()
+            if return_code is not None:
+                self._startup_result_queue.put((False, f"后端进程提前退出，退出码 {return_code}", command))
+                return
+            try:
+                with urllib.request.urlopen(health_url, timeout=0.4) as response:
+                    if 200 <= int(getattr(response, "status", 200)) < 500:
+                        self._startup_result_queue.put((True, "", command))
+                        return
+            except Exception as exc:  # noqa: BLE001
+                last_error = str(exc)
+            time.sleep(0.18)
+        detail = f"：{last_error}" if last_error else ""
+        self._startup_result_queue.put((False, f"等待后端响应超时{detail}", command))
+
+    def _poll_backend_start_result(self) -> None:
+        if not self._backend_starting:
+            return
+        try:
+            ok, error, command = self._startup_result_queue.get_nowait()
+        except queue.Empty:
+            self.root.after(100, self._poll_backend_start_result)
+            return
+        if ok:
+            self._finish_backend_startup_ui()
+            self.status_var.set("后端已启动")
+            self._append_log(f"[GUI] 后端已启动：{' '.join(command)}")
+            self._switch_queue_slot()
+        else:
+            self._fail_backend_start(error)
+
+    def _fail_backend_start(self, error: str) -> None:
+        process = self.server_proc
+        if process is not None and process.poll() is None:
+            try:
+                process.terminate()
+            except OSError:
+                pass
+        self.server_proc = None
+        self._finish_backend_startup_ui()
+        self.status_var.set("后端启动失败")
+        self._append_log(f"[GUI] 后端启动失败：{error}")
+        messagebox.showerror("启动失败", error)
+
     def start_server(self) -> None:
+        if self._backend_starting:
+            return
         if self.server_proc and self.server_proc.poll() is None:
             self.status_var.set("后端已经在运行")
             self._append_log("[GUI] 后端已经在运行")
             return
+        self._show_backend_startup_ui()
+        self.root.after(80, self._start_server_after_paint)
 
+    def _start_server_after_paint(self) -> None:
         try:
-            if not self.save_to_file():
+            if not self.save_to_file(use_backend_api=False, switch_queue_slot=False):
+                self._finish_backend_startup_ui()
+                self.status_var.set("启动已取消")
                 return
+            self.startup_status_var.set("正在创建后端进程…")
             if getattr(sys, "frozen", False):
                 command = [sys.executable, "--backend"]
             else:
                 command = [sys.executable, str(SERVER_PATH)]
             backend_env = os.environ.copy()
             backend_env["DANMUJI_LAUNCHED_BY_GUI"] = "1"
-            _cflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
             self.server_proc = subprocess.Popen(
                 command,
                 cwd=str(APP_DIR),
@@ -4512,16 +4653,20 @@ class ControlPanelApp:
                 encoding="utf-8",
                 errors="replace",
                 bufsize=1,
-                creationflags=_cflags,
+                creationflags=creation_flags,
                 env=backend_env,
             )
-            self.status_var.set("后端已启动")
-            self._append_log(f"[GUI] 后端已启动：{' '.join(command)}")
             self._bind_process_logs()
             self._schedule_log_pump()
+            self.startup_status_var.set("正在等待后端响应…")
+            try:
+                port = int(self.port_var.get().strip() or "9816")
+            except ValueError:
+                port = 9816
+            threading.Thread(target=self._wait_for_backend_ready, args=(port, command), daemon=True).start()
+            self.root.after(100, self._poll_backend_start_result)
         except Exception as exc:  # noqa: BLE001
-            messagebox.showerror("启动失败", str(exc))
-
+            self._fail_backend_start(str(exc))
     def stop_server(self) -> None:
         if not self.server_proc or self.server_proc.poll() is not None:
             self.status_var.set("后端未运行")
