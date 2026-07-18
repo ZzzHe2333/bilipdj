@@ -1,0 +1,65 @@
+name: Structural validation diagnostic
+
+on:
+  pull_request:
+    branches: [now]
+    paths:
+      - .github/workflows/v2-diagnostic.yml
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Apply structural script
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          import textwrap
+
+          workflow = Path('.github/workflows/finalize-repair-v2.yml').read_text(encoding='utf-8')
+          match = re.search(r"(?ms)^          python - <<'PY'\n(.*?)^          PY$", workflow)
+          if match is None:
+              raise RuntimeError('Unable to extract v2 script')
+          script = textwrap.dedent(match.group(1))
+          exec(compile(script, 'finalize_v2.py', 'exec'), {'__name__': '__main__'})
+          PY
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Capture validation
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            python -m compileall -q core test_finalize_repair.py
+            python -m unittest -v test_finalize_repair.py
+            git diff --check
+          } 2>&1 | tee v2-validation.log
+
+      - name: Preserve validation log
+        if: failure()
+        shell: bash
+        env:
+          HEAD_BRANCH: ${{ github.head_ref }}
+        run: |
+          test -f v2-validation.log || echo "Validation failed before log creation" > v2-validation.log
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f v2-validation.log
+          git commit -m "chore: preserve structural validation log" || exit 0
+          git push origin "HEAD:${HEAD_BRANCH}"
