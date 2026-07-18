@@ -42,3 +42,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "chore: record auto-updater Windows validation"
           git push --force origin HEAD:diagnostic/auto-updater-windows
+
+# Trigger after workflow registration.
