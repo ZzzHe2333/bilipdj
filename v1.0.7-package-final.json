@@ -1,0 +1,125 @@
+{
+  "watch_status": 0,
+  "run": {
+    "id": 29637589905,
+    "status": "completed",
+    "conclusion": "success",
+    "html_url": "https://github.com/ZzzHe2333/bilipdj/actions/runs/29637589905",
+    "head_sha": "8a424c02da775713b517773a7b03a4fc14987827",
+    "head_branch": "v1.0.7",
+    "event": "workflow_dispatch",
+    "created_at": "2026-07-18T08:31:03Z",
+    "updated_at": "2026-07-18T08:32:19Z"
+  },
+  "jobs": [
+    {
+      "id": 88062502248,
+      "name": "build-windows-x64",
+      "status": "completed",
+      "conclusion": "success",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1
+        },
+        {
+          "name": "Checkout",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2
+        },
+        {
+          "name": "Resolve release tag",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3
+        },
+        {
+          "name": "Set up Python",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4
+        },
+        {
+          "name": "Debug Python env",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5
+        },
+        {
+          "name": "Build Windows executable (x64)",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6
+        },
+        {
+          "name": "Create release zip",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7
+        },
+        {
+          "name": "Upload artifact",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 8
+        },
+        {
+          "name": "Create GitHub Release",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 9
+        },
+        {
+          "name": "Post Set up Python",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 17
+        },
+        {
+          "name": "Post Checkout",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 18
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 19
+        }
+      ]
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 8427586961,
+      "name": "bilibili-danmuji-windows-x64-v1.0.7",
+      "size_in_bytes": 32985378,
+      "expired": false,
+      "created_at": "2026-07-18T08:32:11Z"
+    }
+  ],
+  "release": {
+    "id": 356056724,
+    "tag_name": "v1.0.7",
+    "name": "弹幕排队姬 v1.0.7",
+    "html_url": "https://github.com/ZzzHe2333/bilipdj/releases/tag/v1.0.7",
+    "draft": false,
+    "prerelease": false,
+    "published_at": "2026-07-18T08:31:29Z",
+    "body": "# 弹幕排队姬 v1.0.7\r\n\r\nv1.0.7 是一次以 **后端启动体验、界面响应性和启动状态可信度** 为核心的稳定性更新。\r\n\r\n此前点击“启动服务”后，控制台会先同步保存配置并尝试访问尚未启动的后端接口。在这段时间里，按钮没有状态变化，窗口也可能短暂无响应，用户很难判断程序是在正常处理、启动失败，还是已经卡死。\r\n\r\n本版本重新整理了整个启动阶段：从点击按钮、保存配置、创建进程、等待后端接口响应，到最终确认成功或报告失败，均有明确的界面反馈和状态控制。\r\n\r\n## 主要更新\r\n\r\n### 1. 新增完整的启动动画与进度反馈\r\n\r\n点击“启动服务”后，控制台不再保持静止，而会立即进入可见的启动状态：\r\n\r\n- 启动按钮会依次显示 `启动中`、`启动中.`、`启动中..`、`启动中...`；\r\n- 顶部显示不确定进度条，明确表示程序仍在工作；\r\n- 状态区域会依次显示：\r\n  - `正在保存配置…`\r\n  - `正在创建后端进程…`\r\n  - `正在等待后端响应…`\r\n- 启动期间暂时禁用“启动”和“停止”按钮，防止重复点击产生多个后端进程；\r\n- 鼠标指针切换为等待状态，启动结束后自动恢复。\r\n\r\n这部分不仅是视觉动画，也与真实启动阶段绑定。界面显示的文字会随着程序实际执行进度变化，而不是固定播放一段假进度。\r\n\r\n### 2. 修复点击启动后窗口短暂无响应的问题\r\n\r\n旧流程在按钮回调中立即执行配置保存和进程创建，Tkinter 主线程没有机会先刷新按钮和窗口，因此系统可能把窗口判断为“未响应”。\r\n\r\nv1.0.7 将实际启动动作延迟到界面完成首次重绘之后执行。点击按钮后，动画和进度条会先显示出来，用户仍可看到窗口正常刷新，不再出现“点了但完全没有反应”的观感。\r\n\r\n### 3. 启动时不再访问尚未运行的后端接口\r\n\r\n旧版本保存启动配置时，会尝试调用后端的功能开关和队列存档接口。但此时后端进程尚未创建，这些请求只能等待连接失败或超时，既延长启动时间，也会让界面显得卡顿。\r\n\r\n新版本在启动前采用本地配置写入模式：\r\n\r\n- 功能开关直接写入本地配置；\r\n- 队列存档切换延后到后端确认启动之后；\r\n- 不再进行两次无意义的后端 HTTP 等待；\r\n- 正常运行期间手动保存配置时，仍保留原有的后端即时生效逻辑。\r\n\r\n因此，这项修改不会削弱配置功能，只是让“后端尚未启动”的特殊阶段使用更合理的保存路径。\r\n\r\n### 4. 后端就绪检测移至后台线程\r\n\r\n创建后端进程并不等于后端已经可以使用。旧版本在 `subprocess.Popen` 成功后就直接显示“后端已启动”，即使服务仍在加载模块、绑定端口或初始化配置。\r\n\r\nv1.0.7 会在后台线程中轮询本地后端接口：\r\n\r\n- 后端接口真正开始响应后，才显示“后端已启动”；\r\n- 检测过程不会阻塞 Tkinter 主线程；\r\n- 主界面每 100 毫秒读取一次检测结果；\r\n- 检测请求使用较短超时，避免单次请求拖延整个启动流程；\r\n- 最长等待约 15 秒，防止无限停留在启动状态。\r\n\r\n这使“后端已启动”成为一个经过实际验证的状态，而不再只是“进程创建成功”。\r\n\r\n### 5. 启动失败时提供明确原因并自动恢复\r\n\r\n新版本补充了完整的失败收尾逻辑：\r\n\r\n- 后端进程提前退出时显示退出码；\r\n- 接口长时间无响应时显示等待超时及最后一次连接错误；\r\n- 启动失败会尝试终止残留进程；\r\n- 按钮、进度条、鼠标指针和状态文字都会恢复；\r\n- 日志区记录详细失败原因；\r\n- 同时弹出明确的“启动失败”提示，而不是让界面一直停留在模糊状态。\r\n\r\n### 6. 启动完成后再执行队列存档切换\r\n\r\n队列存档切换原本夹在启动前配置保存流程中，后端未运行时只能走失败回退。\r\n\r\n现在该操作会在后端健康检查通过后执行。这样既避免启动前的无效请求，也保证存档切换发生在后端已经能够处理请求的时间点。\r\n\r\n## 稳定性与测试\r\n\r\n本版本新增了专门的启动流程回归测试，覆盖：\r\n\r\n- 启动按钮和进度条动画是否存在；\r\n- 是否先让界面重绘，再执行耗时启动动作；\r\n- 后端就绪检测是否在工作线程中运行；\r\n- 启动前保存是否避开尚未运行的后端接口；\r\n- 修改后的控制台源码是否仍可被 Python 正确解析。\r\n\r\n发布前执行结果：\r\n\r\n- 新增启动流程测试：5 项通过；\r\n- 原有服务器监听配置测试：5 项通过；\r\n- 合计：10 项测试全部通过；\r\n- Python 编译检查通过；\r\n- Git diff 格式检查通过；\r\n- 敏感信息扫描通过。\r\n\r\n## 升级说明\r\n\r\n1. 下载 `bilibili-danmuji-windows-x64-v1.0.7.zip`；\r\n2. 完全退出旧版本，包括正在运行的后端和透明弹窗；\r\n3. 解压到一个新的文件夹，不建议直接覆盖正在运行的旧目录；\r\n4. 如需保留原配置，可在备份后复制旧版配置文件到新目录；\r\n5. 启动 `main.exe`，窗口标题和“关于”页面应显示 `v1.0.7`。\r\n\r\n## 兼容性说明\r\n\r\n- 本次更新没有修改现有排队指令格式；\r\n- 没有修改配置文件的核心字段结构；\r\n- 没有改变默认端口和局域网监听规则；\r\n- 没有改变 B 站、抖音及其他已保留平台的配置字段；\r\n- 主要影响 Windows 控制台点击“启动服务”后的流程和反馈。\r\n\r\n## 适合升级的人群\r\n\r\n建议所有使用 v1.0.6 的用户升级，尤其是遇到以下情况的用户：\r\n\r\n- 点击“启动服务”后感觉程序卡住；\r\n- 启动期间窗口短暂无响应；\r\n- 不确定后台是否已经真正启动；\r\n- 后端启动失败时看不到清晰原因；\r\n- 经常重复点击启动按钮，担心启动多个进程。\r\n\r\n---\r\n\r\n版本号：`v1.0.7`  \r\n目标平台：Windows x64  \r\n主程序：`main.exe`\r\n"
+  },
+  "assets": [
+    {
+      "id": 481307670,
+      "name": "bilibili-danmuji-windows-x64-v1.0.7.zip",
+      "size": 33144499,
+      "browser_download_url": "https://github.com/ZzzHe2333/bilipdj/releases/download/v1.0.7/bilibili-danmuji-windows-x64-v1.0.7.zip",
+      "content_type": "raw",
+      "state": "uploaded"
+    }
+  ]
+}
