@@ -1,0 +1,40 @@
+name: Inspect v1.0.7 finalizer
+on:
+  push:
+    branches: [now]
+    paths: [.github/workflows/inspect-finalize-v1.0.7.yml]
+permissions:
+  actions: read
+  contents: write
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: now
+          fetch-depth: 0
+      - name: Record status
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sleep 5
+          gh api "repos/${{ github.repository }}/actions/workflows/finalize-v1.0.7-once.yml/runs?per_page=1" > /tmp/runs.json
+          RUN_ID=$(python -c "import json; print(json.load(open('/tmp/runs.json'))['workflow_runs'][0]['id'])")
+          gh api "repos/${{ github.repository }}/actions/runs/${RUN_ID}/jobs" > /tmp/jobs.json
+          python - <<'PY'
+          import json
+          runs=json.load(open('/tmp/runs.json'))
+          jobs=json.load(open('/tmp/jobs.json'))
+          run=runs['workflow_runs'][0]
+          out={'run':{k:run.get(k) for k in ('id','status','conclusion','html_url','head_sha')},'jobs':[{'id':j.get('id'),'name':j.get('name'),'status':j.get('status'),'conclusion':j.get('conclusion'),'steps':[{k:s.get(k) for k in ('name','status','conclusion','number')} for s in j.get('steps',[])]} for j in jobs.get('jobs',[])]}
+          open('/tmp/finalize-v1.0.7-status.json','w').write(json.dumps(out,indent=2))
+          PY
+          git checkout --orphan diagnostic-release-status
+          git rm -rf .
+          cp /tmp/finalize-v1.0.7-status.json .
+          git add finalize-v1.0.7-status.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'chore: record v1.0.7 finalizer status'
+          git push --force origin HEAD:diagnostic/release-status
