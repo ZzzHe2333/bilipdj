@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "<stdin>", line 11, in <module>
+  File "apply_lan_toggle_final.py", line 80, in <module>
+  File "apply_lan_toggle_final.py", line 6, in replace_once
+RuntimeError: persist server settings API payload: expected 1 match, found 2
+Traceback (most recent call last):
+  File "<stdin>", line 11, in <module>
+  File "apply_lan_toggle_final.py", line 80, in <module>
+  File "apply_lan_toggle_final.py", line 6, in replace_once
+RuntimeError: persist server settings API payload: expected 1 match, found 2
