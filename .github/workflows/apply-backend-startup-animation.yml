@@ -1,0 +1,394 @@
+name: Apply backend startup animation
+
+on:
+  pull_request:
+    branches: [now]
+    paths:
+      - .github/workflows/apply-backend-startup-animation.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Apply startup UI patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path("core/control_panel.py")
+          source = path.read_text(encoding="utf-8")
+
+          def replace_once(old: str, new: str, label: str) -> None:
+              global source
+              count = source.count(old)
+              if count != 1:
+                  raise RuntimeError(f"{label}: expected one match, found {count}")
+              source = source.replace(old, new, 1)
+
+          replace_once(
+              "import threading\nimport tkinter as tk",
+              "import threading\nimport time\nimport tkinter as tk",
+              "time import",
+          )
+
+          replace_once(
+              """        self.stdout_thread: threading.Thread | None = None
+        self.stderr_thread: threading.Thread | None = None
+
+        self.status_var = tk.StringVar(value=\"服务未启动\")""",
+              """        self.stdout_thread: threading.Thread | None = None
+        self.stderr_thread: threading.Thread | None = None
+        self._backend_starting = False
+        self._startup_animation_step = 0
+        self._startup_animation_job: str | None = None
+        self._startup_result_queue: queue.Queue[tuple[bool, str, list[str]]] = queue.Queue()
+        self._start_button: ttk.Button | None = None
+        self._stop_button: ttk.Button | None = None
+        self._startup_indicator: ttk.Frame | None = None
+        self._startup_progress: ttk.Progressbar | None = None
+
+        self.status_var = tk.StringVar(value=\"服务未启动\")
+        self.startup_status_var = tk.StringVar(value=\"\")""",
+              "startup state",
+          )
+
+          replace_once(
+              """        ttk.Button(btn_bar, text=\"启动服务\", style=\"Primary.TButton\", command=self.start_server).grid(row=0, column=0, padx=(0, 8))
+        ttk.Button(btn_bar, text=\"停止\", style=\"Danger.TButton\", command=self.stop_server).grid(row=0, column=1, padx=(0, 8))
+        ttk.Button(btn_bar, text=\"登录配置\", command=self.open_config).grid(row=0, column=2, padx=(0, 8))
+        ttk.Button(btn_bar, text=\"队列看板\", command=self.open_web).grid(row=0, column=3, padx=(0, 8))
+        ttk.Button(btn_bar, text=\"OBS 弹窗\", command=self.open_overlay_window).grid(row=0, column=4, padx=(0, 8))
+        self._theme_btn = ttk.Button(btn_bar, text=\"☀\", width=3, style=\"Icon.TButton\", command=self._toggle_theme)
+        self._theme_btn.grid(row=0, column=5)""",
+              """        self._start_button = ttk.Button(
+            btn_bar,
+            text=\"启动服务\",
+            style=\"Primary.TButton\",
+            command=self.start_server,
+        )
+        self._start_button.grid(row=0, column=0, padx=(0, 8))
+        self._stop_button = ttk.Button(
+            btn_bar,
+            text=\"停止\",
+            style=\"Danger.TButton\",
+            command=self.stop_server,
+        )
+        self._stop_button.grid(row=0, column=1, padx=(0, 8))
+        ttk.Button(btn_bar, text=\"登录配置\", command=self.open_config).grid(row=0, column=2, padx=(0, 8))
+        ttk.Button(btn_bar, text=\"队列看板\", command=self.open_web).grid(row=0, column=3, padx=(0, 8))
+        ttk.Button(btn_bar, text=\"OBS 弹窗\", command=self.open_overlay_window).grid(row=0, column=4, padx=(0, 8))
+        self._theme_btn = ttk.Button(btn_bar, text=\"☀\", width=3, style=\"Icon.TButton\", command=self._toggle_theme)
+        self._theme_btn.grid(row=0, column=5)
+
+        self._startup_indicator = ttk.Frame(btn_bar)
+        self._startup_indicator.grid(row=1, column=0, columnspan=6, sticky=\"ew\", pady=(7, 0))
+        self._startup_indicator.columnconfigure(1, weight=1)
+        ttk.Label(
+            self._startup_indicator,
+            textvariable=self.startup_status_var,
+            width=18,
+        ).grid(row=0, column=0, sticky=\"w\", padx=(0, 8))
+        self._startup_progress = ttk.Progressbar(
+            self._startup_indicator,
+            mode=\"indeterminate\",
+            length=170,
+        )
+        self._startup_progress.grid(row=0, column=1, sticky=\"ew\")
+        self._startup_indicator.grid_remove()""",
+              "startup controls",
+          )
+
+          replace_once(
+              """        running = self._backend_is_running()
+        room = self.roomid_var.get().strip() or \"--\"
+        connection = \"已连接\" if \"已连接\" in self.ws_text_var.get() and \"未连接\" not in self.ws_text_var.get() else (\"服务运行中\" if running else \"服务未启动\")""",
+              """        running = self._backend_is_running()
+        room = self.roomid_var.get().strip() or \"--\"
+        if self._backend_starting:
+            connection = \"正在启动\"
+        else:
+            connection = \"已连接\" if \"已连接\" in self.ws_text_var.get() and \"未连接\" not in self.ws_text_var.get() else (\"服务运行中\" if running else \"服务未启动\")""",
+              "header startup state",
+          )
+
+          replace_once(
+              "    def save_to_file(self) -> bool:",
+              "    def save_to_file(self, *, switch_queue_slot: bool = True) -> bool:",
+              "save signature",
+          )
+          replace_once(
+              """        self._switch_queue_slot()
+        return True
+
+    def _read_slot_csv""",
+              """        if switch_queue_slot:
+            self._switch_queue_slot()
+        return True
+
+    def _read_slot_csv""",
+              "conditional queue switch",
+          )
+
+          startup_methods = '''    def _show_backend_startup_ui(self) -> None:
+        self._backend_starting = True
+        self._startup_animation_step = 0
+        self.status_var.set("正在启动后端…")
+        self.startup_status_var.set("正在保存配置…")
+        if self._start_button is not None:
+            self._start_button.configure(state="disabled", text="启动中")
+        if self._stop_button is not None:
+            self._stop_button.configure(state="disabled")
+        if self._startup_indicator is not None:
+            self._startup_indicator.grid()
+        if self._startup_progress is not None:
+            self._startup_progress.start(12)
+        try:
+            self.root.configure(cursor="watch")
+        except tk.TclError:
+            pass
+        self._animate_backend_startup_button()
+        self._refresh_header_status()
+
+    def _animate_backend_startup_button(self) -> None:
+        if not self._backend_starting:
+            return
+        dots = "." * (self._startup_animation_step % 4)
+        self._startup_animation_step += 1
+        if self._start_button is not None:
+            self._start_button.configure(text=f"启动中{dots}")
+        self._startup_animation_job = self.root.after(280, self._animate_backend_startup_button)
+
+    def _finish_backend_startup_ui(self) -> None:
+        self._backend_starting = False
+        if self._startup_animation_job is not None:
+            try:
+                self.root.after_cancel(self._startup_animation_job)
+            except tk.TclError:
+                pass
+            self._startup_animation_job = None
+        if self._startup_progress is not None:
+            self._startup_progress.stop()
+        if self._startup_indicator is not None:
+            self._startup_indicator.grid_remove()
+        if self._start_button is not None:
+            self._start_button.configure(state="normal", text="启动服务")
+        if self._stop_button is not None:
+            self._stop_button.configure(state="normal")
+        try:
+            self.root.configure(cursor="")
+        except tk.TclError:
+            pass
+        self.startup_status_var.set("")
+        self._refresh_header_status()
+
+    def _wait_for_backend_ready(self, port: int, command: list[str]) -> None:
+        process = self.server_proc
+        if process is None:
+            self._startup_result_queue.put((False, "后端进程未创建", command))
+            return
+
+        deadline = time.monotonic() + 15.0
+        last_error = ""
+        health_url = f"http://127.0.0.1:{port}/api/config/basic"
+        while time.monotonic() < deadline:
+            return_code = process.poll()
+            if return_code is not None:
+                self._startup_result_queue.put(
+                    (False, f"后端进程提前退出，退出码 {return_code}", command)
+                )
+                return
+            try:
+                with urllib.request.urlopen(health_url, timeout=0.4) as response:
+                    if 200 <= int(getattr(response, "status", 200)) < 500:
+                        self._startup_result_queue.put((True, "", command))
+                        return
+            except Exception as exc:  # noqa: BLE001
+                last_error = str(exc)
+            time.sleep(0.18)
+
+        detail = f"：{last_error}" if last_error else ""
+        self._startup_result_queue.put((False, f"等待后端响应超时{detail}", command))
+
+    def _poll_backend_start_result(self) -> None:
+        if not self._backend_starting:
+            return
+        try:
+            ok, error, command = self._startup_result_queue.get_nowait()
+        except queue.Empty:
+            self.root.after(100, self._poll_backend_start_result)
+            return
+
+        if ok:
+            self._complete_backend_start(command)
+        else:
+            self._fail_backend_start(error)
+
+    def _complete_backend_start(self, command: list[str]) -> None:
+        self._finish_backend_startup_ui()
+        self.status_var.set("后端已启动")
+        self._append_log(f"[GUI] 后端已启动：{' '.join(command)}")
+        self._switch_queue_slot()
+        self._refresh_header_status()
+
+    def _fail_backend_start(self, error: str) -> None:
+        process = self.server_proc
+        if process is not None and process.poll() is None:
+            try:
+                process.terminate()
+            except OSError:
+                pass
+        self.server_proc = None
+        self._finish_backend_startup_ui()
+        self.status_var.set("后端启动失败")
+        self._append_log(f"[GUI] 后端启动失败：{error}")
+        messagebox.showerror("启动失败", error)
+
+    def start_server(self) -> None:
+        if self._backend_starting:
+            return
+        if self.server_proc and self.server_proc.poll() is None:
+            self.status_var.set("后端已经在运行")
+            self._append_log("[GUI] 后端已经在运行")
+            return
+
+        self._show_backend_startup_ui()
+        # 先让 Tk 完成按钮、进度条和状态文字的绘制，再进行启动前保存。
+        self.root.after(80, self._start_server_after_paint)
+
+    def _start_server_after_paint(self) -> None:
+        try:
+            # 启动前不要访问尚未运行的 /api/queue/switch，避免固定超时造成假死。
+            if not self.save_to_file(switch_queue_slot=False):
+                self._finish_backend_startup_ui()
+                self.status_var.set("启动已取消")
+                return
+
+            self.startup_status_var.set("正在创建后端进程…")
+            if getattr(sys, "frozen", False):
+                command = [sys.executable, "--backend"]
+            else:
+                command = [sys.executable, str(SERVER_PATH)]
+            backend_env = os.environ.copy()
+            backend_env["DANMUJI_LAUNCHED_BY_GUI"] = "1"
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            self.server_proc = subprocess.Popen(
+                command,
+                cwd=str(APP_DIR),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+                creationflags=creation_flags,
+                env=backend_env,
+            )
+            self._bind_process_logs()
+            self._schedule_log_pump()
+            self.startup_status_var.set("正在等待后端响应…")
+            try:
+                port = int(self.port_var.get().strip() or "9816")
+            except ValueError:
+                port = 9816
+            threading.Thread(
+                target=self._wait_for_backend_ready,
+                args=(port, command),
+                daemon=True,
+            ).start()
+            self.root.after(100, self._poll_backend_start_result)
+        except Exception as exc:  # noqa: BLE001
+            self._fail_backend_start(str(exc))
+
+'''
+
+          pattern = re.compile(
+              r"    def start_server\(self\) -> None:\n.*?(?=    def stop_server\(self\) -> None:)",
+              re.DOTALL,
+          )
+          source, count = pattern.subn(startup_methods, source, count=1)
+          if count != 1:
+              raise RuntimeError(f"start_server block: expected one match, found {count}")
+
+          path.write_text(source, encoding="utf-8")
+
+          test_path = Path("tests/test_backend_startup_animation.py")
+          test_path.write_text(
+              '''from __future__ import annotations
+
+import ast
+import unittest
+from pathlib import Path
+
+
+SOURCE_PATH = Path(__file__).resolve().parents[1] / "core" / "control_panel.py"
+
+
+class BackendStartupAnimationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.source = SOURCE_PATH.read_text(encoding="utf-8")
+        cls.tree = ast.parse(cls.source)
+
+    def test_startup_uses_visible_indeterminate_progress(self) -> None:
+        self.assertIn('mode="indeterminate"', self.source)
+        self.assertIn('self._startup_progress.start(12)', self.source)
+        self.assertIn('self._animate_backend_startup_button()', self.source)
+
+    def test_start_is_deferred_until_ui_can_paint(self) -> None:
+        self.assertIn('self.root.after(80, self._start_server_after_paint)', self.source)
+        self.assertIn('self.save_to_file(switch_queue_slot=False)', self.source)
+
+    def test_backend_readiness_runs_outside_tk_thread(self) -> None:
+        self.assertIn('target=self._wait_for_backend_ready', self.source)
+        self.assertIn('self._startup_result_queue.put', self.source)
+        self.assertIn('self.root.after(100, self._poll_backend_start_result)', self.source)
+
+    def test_save_keeps_normal_slot_switch_behavior(self) -> None:
+        self.assertIn('def save_to_file(self, *, switch_queue_slot: bool = True)', self.source)
+        self.assertIn('if switch_queue_slot:\n            self._switch_queue_slot()', self.source)
+
+    def test_source_remains_valid_python(self) -> None:
+        self.assertIsInstance(self.tree, ast.Module)
+
+
+if __name__ == "__main__":
+    unittest.main()
+''',
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate patch
+        run: |
+          python -m compileall -q core tests
+          python -m unittest discover -s tests -v
+          python scripts/scan_secrets.py
+          git diff --check
+
+      - name: Commit feature and remove temporary workflow
+        env:
+          HEAD_BRANCH: ${{ github.head_ref }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-backend-startup-animation.yml
+          git add core/control_panel.py tests/test_backend_startup_animation.py
+          git commit -m "fix: keep backend startup UI responsive"
+          git push origin "HEAD:${HEAD_BRANCH}"
