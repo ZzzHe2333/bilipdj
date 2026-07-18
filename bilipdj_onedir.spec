@@ -11,6 +11,8 @@ hiddenimports = [
     "core.server",
     "core.mirrorchyan",
     "core.bilibili_gifts",
+    "core.update_client",
+    "core.update_ui",
     "qrcode",
     "qrcode.main",
     "qrcode.constants",
