@@ -1,0 +1,82 @@
+name: Apply LAN listen toggle v2
+
+on:
+  pull_request:
+    branches: [now]
+    paths:
+      - .github/workflows/apply-lan-listen-toggle-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply corrected patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          import textwrap
+
+          workflow = Path('.github/workflows/apply-lan-listen-toggle.yml').read_text(encoding='utf-8')
+          match = re.search(r"(?ms)^          python - <<'PY'\n(.*?)^          PY$", workflow)
+          if match is None:
+              raise RuntimeError('unable to extract patch script')
+          script = textwrap.dedent(match.group(1))
+          bad_old = """'''server:
+              host: {server.get('host', DEFAULT_HOST)}
+              port: {_to_int(server.get('port', DEFAULT_PORT), DEFAULT_PORT)}'''"""
+          good_old = """'''server:
+            host: {server.get('host', DEFAULT_HOST)}
+            port: {_to_int(server.get('port', DEFAULT_PORT), DEFAULT_PORT)}'''"""
+          bad_new = """'''server:
+              host: {server.get('host', DEFAULT_HOST)}
+              port: {_to_int(server.get('port', DEFAULT_PORT), DEFAULT_PORT)}
+              lan_listen: {'true' if bool(server.get('lan_listen', False)) else 'false'}'''"""
+          good_new = """'''server:
+            host: {server.get('host', DEFAULT_HOST)}
+            port: {_to_int(server.get('port', DEFAULT_PORT), DEFAULT_PORT)}
+            lan_listen: {'true' if bool(server.get('lan_listen', False)) else 'false'}'''"""
+          if script.count(bad_old) != 1 or script.count(bad_new) != 1:
+              raise RuntimeError(f'indent patch markers not found: old={script.count(bad_old)} new={script.count(bad_new)}')
+          script = script.replace(bad_old, good_old, 1).replace(bad_new, good_new, 1)
+          exec(compile(script, 'apply_lan_toggle.py', 'exec'), {'__name__': '__main__'})
+          PY
+      - name: Validate LAN toggle
+        run: |
+          python -m compileall -q core
+          python - <<'PY'
+          from core import server
+          assert server.normalize_server_config({}) == {"host": "127.0.0.1", "port": 9816, "lan_listen": False}
+          assert server.normalize_server_config({"lan_listen": True})["host"] == "0.0.0.0"
+          assert server.normalize_server_config({"host": "0.0.0.0"})["lan_listen"] is True
+          assert server.normalize_server_config({"host": "0.0.0.0", "lan_listen": False})["host"] == "127.0.0.1"
+          panel = open('core/control_panel.py', encoding='utf-8').read()
+          assert '允许局域网访问' in panel
+          assert 'lan_listen_var' in panel
+          PY
+          git diff --check
+      - name: Commit feature
+        env:
+          HEAD_BRANCH: ${{ github.head_ref }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-lan-listen-toggle.yml
+          git rm .github/workflows/apply-lan-listen-toggle-v2.yml
+          git rm .github/workflows/lan-toggle-diagnostic.yml
+          rm -f lan-toggle-error.log
+          git add -A core/server.py core/control_panel.py lan-toggle-error.log
+          git commit -m "feat: add optional LAN listening"
+          git push origin "HEAD:${HEAD_BRANCH}"
