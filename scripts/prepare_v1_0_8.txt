@@ -1,1 +1,50 @@
-PREPARE_V1_0_8
+from pathlib import Path
+
+control = Path("core/control_panel.py")
+text = control.read_text(encoding="utf-8")
+old = 'APP_VERSION = "1.0.7"'
+new = 'APP_VERSION = "1.0.8"'
+if text.count(old) != 1:
+    raise RuntimeError("expected one v1.0.7 APP_VERSION")
+control.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+update = Path("UPDATE.md")
+text = update.read_text(encoding="utf-8")
+marker = "# 更新日志\n\n---\n\n"
+section = '''## v1.0.8（2026-07-18）
+
+### 程序内自动更新
+- “关于”页新增最新版本检查、完整更新说明、下载进度和“下载并安装”按钮。
+- Windows 打包版启动后在后台自动检查一次 GitHub Latest Release，不阻塞主界面。
+- 版本号按数字分段比较，正确处理 `1.0.10` 与 `1.0.9` 等版本。
+
+### 下载与安全校验
+- 精确下载当前版本对应的 Windows ZIP 和 `.sha256` 附件。
+- 下载先写入 `.part` 临时文件，并校验附件大小，避免使用不完整文件。
+- 安装前计算本地 SHA-256，与 Release 摘要完全一致后才允许继续。
+- 更新包解压前检查路径穿越，拒绝包含不安全路径的 ZIP。
+
+### 独立更新器与回滚
+- 新增 `updater.exe`，复制到临时目录运行，等待 `main.exe` 完全退出后替换程序目录。
+- 自动保留主配置、权限、功能开关、样式、`core/cd` 队列数据和日志。
+- 更新前创建完整备份；替换失败或新版启动后提前退出时，自动恢复旧版本并重启。
+- 更新过程写入程序目录旁的更新日志，成功后保留一份上一版本备份。
+
+### 打包与测试
+- Windows 发布包现在包含 `main.exe`、`paiduijitm.exe` 和 `updater.exe`。
+- GitHub Release 和 Actions Artifact 同时发布 ZIP 与 SHA-256 文件。
+- 新增 5 项自动更新测试；连同原有测试共 15 项全部通过。
+- Windows Server 2022 原生 PyInstaller 构建和三个 EXE 产物检查通过。
+
+### 首次升级说明
+- v1.0.7 及更早版本没有内置更新器，因此升级到 v1.0.8 仍需手动下载 ZIP。
+- 安装 v1.0.8 后，后续版本可直接在程序“关于”页中自动升级。
+
+---
+
+'''
+if marker not in text:
+    raise RuntimeError("UPDATE.md header marker not found")
+if "## v1.0.8（2026-07-18）" not in text:
+    text = text.replace(marker, marker + section, 1)
+update.write_text(text, encoding="utf-8")
