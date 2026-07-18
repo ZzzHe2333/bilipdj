@@ -10,7 +10,7 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Push-Location $scriptDir
 
 try {
-    foreach ($shadowPath in @("http.py", "http\\__init__.py")) {
+    foreach ($shadowPath in @("http.py", "http\__init__.py")) {
         if (Test-Path $shadowPath) {
             throw "Found shadowing file: $shadowPath"
         }
@@ -34,23 +34,28 @@ try {
 
     & $PythonExe -m PyInstaller --noconfirm --clean bilipdj_onedir.spec
     & $PythonExe -m PyInstaller --noconfirm --clean paiduijitm.spec
+    & $PythonExe -m PyInstaller --noconfirm --clean updater.spec
 
-    if (Test-Path "dist\\bilipdj\\core\\cd") {
-        Remove-Item -LiteralPath "dist\\bilipdj\\core\\cd" -Recurse -Force
+    if (Test-Path "dist\bilipdj\core\cd") {
+        Remove-Item -LiteralPath "dist\bilipdj\core\cd" -Recurse -Force
     }
 
-    if (-not (Test-Path "dist\\bilipdj\\main.exe")) {
-        throw "Build output missing: dist\\bilipdj\\main.exe"
+    if (-not (Test-Path "dist\bilipdj\main.exe")) {
+        throw "Build output missing: dist\bilipdj\main.exe"
+    }
+    if (-not (Test-Path "dist\paiduijitm.exe")) {
+        throw "Build output missing: dist\paiduijitm.exe"
+    }
+    if (-not (Test-Path "dist\updater.exe")) {
+        throw "Build output missing: dist\updater.exe"
     }
 
-    if (-not (Test-Path "dist\\paiduijitm.exe")) {
-        throw "Build output missing: dist\\paiduijitm.exe"
-    }
+    Copy-Item "dist\paiduijitm.exe" "dist\bilipdj\paiduijitm.exe" -Force
+    Copy-Item "dist\updater.exe" "dist\bilipdj\updater.exe" -Force
 
-    Copy-Item "dist\\paiduijitm.exe" "dist\\bilipdj\\paiduijitm.exe" -Force
-
-    Write-Host "Main panel executable: dist\\bilipdj\\main.exe"
-    Write-Host "Overlay executable: dist\\bilipdj\\paiduijitm.exe"
+    Write-Host "Main panel executable: dist\bilipdj\main.exe"
+    Write-Host "Overlay executable: dist\bilipdj\paiduijitm.exe"
+    Write-Host "Updater executable: dist\bilipdj\updater.exe"
 }
 finally {
     Pop-Location
