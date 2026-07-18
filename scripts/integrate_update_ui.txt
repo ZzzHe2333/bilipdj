@@ -1,1 +1,31 @@
-PATCH_CONTROL_PANEL_UPDATE_UI_V1
+from pathlib import Path
+
+path = Path("core/control_panel.py")
+text = path.read_text(encoding="utf-8")
+
+
+def replace_once(old: str, new: str) -> None:
+    global text
+    count = text.count(old)
+    if count != 1:
+        raise RuntimeError(f"expected one match, found {count}: {old[:80]!r}")
+    text = text.replace(old, new, 1)
+
+
+replace_once(
+    "import core.server as _backend_server_hint  # noqa: F401\n",
+    "import core.server as _backend_server_hint  # noqa: F401\nfrom core import update_ui\n",
+)
+replace_once(
+    '        self.root.after(1000, self.refresh_runtime_status)\n        self.root.protocol("WM_DELETE_WINDOW", self.on_close)\n',
+    '        self.root.after(1000, self.refresh_runtime_status)\n        self.root.after(1600, lambda: update_ui.auto_check(self))\n        self.root.protocol("WM_DELETE_WINDOW", self.on_close)\n',
+)
+
+start = text.index("    def _build_about_tab(self, frame: ttk.Frame) -> None:\n")
+end = text.index("    def _build_quanxian_tab(self, frame: ttk.Frame) -> None:\n", start)
+replacement = '''    def _build_about_tab(self, frame: ttk.Frame) -> None:
+        update_ui.build_about_tab(self, frame, APP_NAME, APP_VERSION, APP_DIR)
+
+'''
+text = text[:start] + replacement + text[end:]
+path.write_text(text, encoding="utf-8")
