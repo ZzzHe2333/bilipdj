@@ -15,6 +15,7 @@ import socket
 import struct
 import sys
 import threading
+from contextlib import contextmanager
 from functools import wraps
 import time
 import urllib.error
@@ -81,12 +82,81 @@ LIVE_STYLE_CSS_PATH = UI_DIR / "moren.css"
 WS_MAGIC_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 MAX_WS_FRAME_BYTES = 1024 * 1024
 _CONFIG_IO_LOCK = threading.RLock()
+_CONFIG_LOCK_PATH = _YAML_DIR / ".config.lock"
+_CONFIG_LOCK_STATE = threading.local()
+
+
+def _acquire_interprocess_config_lock() -> None:
+    depth = int(getattr(_CONFIG_LOCK_STATE, "depth", 0) or 0)
+    if depth > 0:
+        _CONFIG_LOCK_STATE.depth = depth + 1
+        return
+
+    _CONFIG_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    lock_file = _CONFIG_LOCK_PATH.open("a+b")
+    try:
+        if os.name == "nt":
+            import msvcrt  # noqa: PLC0415
+
+            lock_file.seek(0, os.SEEK_END)
+            if lock_file.tell() == 0:
+                lock_file.write(bytes([0]))
+                lock_file.flush()
+            lock_file.seek(0)
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl  # noqa: PLC0415
+
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+    except Exception:
+        lock_file.close()
+        raise
+
+    _CONFIG_LOCK_STATE.depth = 1
+    _CONFIG_LOCK_STATE.handle = lock_file
+
+
+def _release_interprocess_config_lock() -> None:
+    depth = int(getattr(_CONFIG_LOCK_STATE, "depth", 0) or 0)
+    if depth <= 0:
+        return
+    if depth > 1:
+        _CONFIG_LOCK_STATE.depth = depth - 1
+        return
+
+    lock_file = getattr(_CONFIG_LOCK_STATE, "handle", None)
+    try:
+        if lock_file is not None:
+            if os.name == "nt":
+                import msvcrt  # noqa: PLC0415
+
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl  # noqa: PLC0415
+
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    finally:
+        if lock_file is not None:
+            lock_file.close()
+        _CONFIG_LOCK_STATE.depth = 0
+        _CONFIG_LOCK_STATE.handle = None
+
+
+@contextmanager
+def config_io_transaction():
+    with _CONFIG_IO_LOCK:
+        _acquire_interprocess_config_lock()
+        try:
+            yield
+        finally:
+            _release_interprocess_config_lock()
 
 
 def _serialized_config_io(func):
     @wraps(func)
     def wrapped(*args, **kwargs):
-        with _CONFIG_IO_LOCK:
+        with config_io_transaction():
             return func(*args, **kwargs)
     return wrapped
 
@@ -147,13 +217,16 @@ class WebSocketHub:
         text = json.dumps(payload, ensure_ascii=False)
         self.broadcast_text(sender, text)
 
-    def send_text(self, conn: socket.socket, text: str, opcode: int = 0x1) -> None:
+    def send_frame(self, conn: socket.socket, payload: bytes, opcode: int) -> None:
         with self._lock:
             write_lock = self._client_locks.get(conn)
         if write_lock is None:
             write_lock = threading.Lock()
         with write_lock:
-            _ws_send_text(conn, text, opcode=opcode)
+            _ws_send_frame(conn, payload, opcode=opcode)
+
+    def send_text(self, conn: socket.socket, text: str, opcode: int = 0x1) -> None:
+        self.send_frame(conn, text.encode("utf-8"), opcode)
 
     def broadcast_text(self, sender: socket.socket | None, text: str) -> None:
         dead: list[socket.socket] = []
@@ -188,8 +261,7 @@ def _ws_recv_exact(conn: socket.socket, size: int) -> bytes | None:
     return bytes(chunks)
 
 
-def _ws_send_text(conn: socket.socket, text: str, opcode: int = 0x1) -> None:
-    payload = text.encode("utf-8")
+def _ws_send_frame(conn: socket.socket, payload: bytes, opcode: int = 0x1) -> None:
     header = bytearray([0x80 | (opcode & 0x0F)])
     length = len(payload)
 
@@ -204,6 +276,9 @@ def _ws_send_text(conn: socket.socket, text: str, opcode: int = 0x1) -> None:
 
     conn.sendall(bytes(header) + payload)
 
+
+def _ws_send_text(conn: socket.socket, text: str, opcode: int = 0x1) -> None:
+    _ws_send_frame(conn, text.encode("utf-8"), opcode=opcode)
 
 
 def _parse_scalar(value: str) -> Any:
@@ -2120,7 +2195,7 @@ class QueueManager:
     def send_current_to(self, conn: socket.socket) -> None:
         try:
             entries = self.get_queue_entries()
-            _ws_send_text(
+            self._ws_hub.send_text(
                 conn,
                 json.dumps(
                     {
@@ -2716,10 +2791,11 @@ def _write_quanxian_file(normalized: dict[str, Any]) -> None:
             escaped = str(item).replace('"', '\\"')
             lines.append(f'  - "{escaped}"\n')
         lines.append("\n")
-    QUANXIAN_PATH.write_text("".join(lines), encoding="utf-8")
+    _atomic_write_text(QUANXIAN_PATH, "".join(lines), encoding="utf-8")
     write_blacklist_entries(BLACKLIST_PATH, blacklist_names_to_entries(normalized.get("blacklist", [])))
 
 
+@_serialized_config_io
 def save_quanxian(config: dict[str, Any]) -> None:
     normalized = _normalize_quanxian_config(config)
     _write_quanxian_file(normalized)
@@ -2760,9 +2836,10 @@ def _write_kaiguan_file(normalized: dict[str, bool]) -> None:
         value_str = "true" if value else "false"
         comment = comments.get(key, key)
         lines.append(f"{key}: {value_str}              # {comment}\n")
-    KAIGUAN_PATH.write_text("".join(lines), encoding="utf-8")
+    _atomic_write_text(KAIGUAN_PATH, "".join(lines), encoding="utf-8")
 
 
+@_serialized_config_io
 def save_kaiguan(config: dict[str, bool]) -> None:
     normalized: dict[str, bool] = dict(DEFAULT_KAIGUAN)
     for key in DEFAULT_KAIGUAN:
@@ -3023,17 +3100,18 @@ def load_style() -> dict[str, Any]:
     return result
 
 
+@_serialized_config_io
 def save_style(data: dict[str, Any]) -> None:
     merged = dict(DEFAULT_STYLE)
     merged.update(data)
-    STYLE_PATH.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_text(STYLE_PATH, json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
     current = _merge_config(DEFAULT_CONFIG, _read_raw_config())
     current["style"] = merged
     save_config(current)
     css_text = build_index_css(merged)
     ensure_style_css_archives()
-    LIVE_STYLE_CSS_PATH.write_text(css_text, encoding="utf-8")
-    css_archive_path(_current_style_slot(current)).write_text(css_text, encoding="utf-8")
+    _atomic_write_text(LIVE_STYLE_CSS_PATH, css_text, encoding="utf-8")
+    _atomic_write_text(css_archive_path(_current_style_slot(current)), css_text, encoding="utf-8")
 
 
 def load_model() -> dict[str, Any]:
@@ -3140,6 +3218,9 @@ class ApiHandler(BaseHTTPRequestHandler):
         "/api/kaiguan",
         "/api/style",
         "/api/blacklist/state",
+        "/api/danmu/identity/latest",
+        "/api/gifts/state",
+        "/api/queue/archive",
         "/api/bili/qr/start",
     }
 
@@ -3248,7 +3329,11 @@ class ApiHandler(BaseHTTPRequestHandler):
                 mask_key = _ws_recv_exact(conn, 4)
                 if mask_key is None:
                     return None
-                self.server.ws_hub.send_text(conn, "", opcode=0xA)
+                payload = _ws_recv_exact(conn, payload_len)
+                if payload is None:
+                    return None
+                payload = bytes(b ^ mask_key[i % 4] for i, b in enumerate(payload))
+                self.server.ws_hub.send_frame(conn, payload, opcode=0xA)
                 return ""
             if opcode != 0x1:
                 return ""

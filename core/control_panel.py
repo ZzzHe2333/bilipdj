@@ -4378,17 +4378,18 @@ class ControlPanelApp:
         try:
             self._ensure_douyin_live_info_before_save()
             backend_server = load_backend_server_module()
-            platform_slot = self._get_selected_platform_slot()
-            platform_payload = self._gather_platform_config_payload()
-            backend_server.save_platform_config_slot(platform_slot, platform_payload)
-            config = backend_server._merge_config(  # type: ignore[attr-defined]
-                backend_server.load_config(),
-                self.gather_config(),
-            )
-            backend_server.save_config(config)
-            self._save_kaiguan()
-            if not self._save_style():
-                raise OSError("样式设置保存失败")
+            with backend_server.config_io_transaction():
+                platform_slot = self._get_selected_platform_slot()
+                platform_payload = self._gather_platform_config_payload()
+                backend_server.save_platform_config_slot(platform_slot, platform_payload)
+                config = backend_server._merge_config(  # type: ignore[attr-defined]
+                    backend_server.load_config(),
+                    self.gather_config(),
+                )
+                backend_server.save_config(config)
+                self._save_kaiguan()
+                if not self._save_style():
+                    raise OSError("样式设置保存失败")
             self._prev_platform_config_slot = platform_slot
             self.status_var.set("配置保存成功")
             self._append_log("[GUI] 配置保存成功")
