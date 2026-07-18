@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "<stdin>", line 12, in <module>
+  File "apply_backend_startup_animation.py", line 1
+    from pathlib import Path
+IndentationError: unexpected indent
+Traceback (most recent call last):
+  File "<stdin>", line 12, in <module>
+  File "apply_backend_startup_animation.py", line 1
+    from pathlib import Path
+IndentationError: unexpected indent
