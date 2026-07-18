@@ -322,6 +322,9 @@ def yaml_quote_string(value) -> str:
 
 def save_config(path: Path, config: dict) -> None:
     server = config.get("server", {})
+    raw_host = str(server.get("host", "127.0.0.1") or "127.0.0.1").strip()
+    lan_listen = bool(server.get("lan_listen", raw_host in {"0.0.0.0", "::", "[::]"}))
+    listen_host = "0.0.0.0" if lan_listen else "127.0.0.1"
     bilibili = config.get("bilibili", config.get("api", {}))
     ui_cfg = config.get("ui", {})
     overlay_cfg = ui_cfg.get("overlay_window", {}) if isinstance(ui_cfg, dict) else {}
@@ -345,8 +348,9 @@ def save_config(path: Path, config: dict) -> None:
 
     content = f"""# 弹幕排队姬 全局配置
 server:
-  host: {server.get('host', '0.0.0.0')}
+  host: {listen_host}
   port: {int(server.get('port', 9816))}
+  lan_listen: {'true' if lan_listen else 'false'}
 
 bilibili:
   roomid: {int(bilibili.get('roomid', 0))}
@@ -417,7 +421,8 @@ class ControlPanelApp:
         self.stderr_thread: threading.Thread | None = None
 
         self.status_var = tk.StringVar(value="服务未启动")
-        self.host_var = tk.StringVar(value="0.0.0.0")
+        self.host_var = tk.StringVar(value="127.0.0.1")
+        self.lan_listen_var = tk.BooleanVar(value=False)
         self.port_var = tk.StringVar(value="9816")
         self.roomid_var = tk.StringVar(value="3049445")
         self.uid_var = tk.StringVar(value="0")
@@ -3535,13 +3540,16 @@ class ControlPanelApp:
         basic_frame.columnconfigure(3, weight=1)
 
         fields = [
-            ("监听地址", self.host_var),
+            ("监听地址（自动）", self.host_var),
             ("监听端口", self.port_var),
             ("日志保留天数", self.retention_days_var),
         ]
         for row_idx, (label, var) in enumerate(fields):
             ttk.Label(basic_frame, text=label).grid(row=row_idx, column=0, sticky="w", pady=4)
-            ttk.Entry(basic_frame, textvariable=var, width=26).grid(row=row_idx, column=1, sticky="ew", pady=4)
+            entry = ttk.Entry(basic_frame, textvariable=var, width=26)
+            entry.grid(row=row_idx, column=1, sticky="ew", pady=4)
+            if var is self.host_var:
+                entry.configure(state="readonly")
 
         ttk.Label(basic_frame, text="日志等级").grid(row=0, column=2, sticky="w", padx=(16, 0), pady=4)
         self.log_level_combo = ttk.Combobox(
@@ -3600,11 +3608,18 @@ class ControlPanelApp:
             width=8,
         ).grid(row=4, column=3, sticky="w", pady=4)
 
+        ttk.Checkbutton(
+            basic_frame,
+            text="允许局域网访问（监听 0.0.0.0，重启后生效）",
+            variable=self.lan_listen_var,
+            command=self._sync_lan_listen_host,
+        ).grid(row=7, column=0, columnspan=4, sticky="w", pady=(6, 0))
+
         self._settings_hint_label = ttk.Label(
             basic_frame,
-            text="切换平台配置槽位后，会立即载入该槽位保存的平台和参数。",
+            text="局域网监听仅开放展示页、队列状态和 WebSocket；Cookie 与管理接口仍仅限本机。",
         )
-        self._settings_hint_label.grid(row=7, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        self._settings_hint_label.grid(row=8, column=0, columnspan=4, sticky="w", pady=(6, 0))
 
         ttk.Label(basic_frame, text="每日排队次数").grid(row=5, column=0, sticky="w", pady=4)
         ttk.Checkbutton(
@@ -4050,6 +4065,9 @@ class ControlPanelApp:
                 lines.append(f"{key}: {value_str}              # {comments.get(key, key)}\n")
             KAIGUAN_PATH.write_text("".join(lines), encoding="utf-8")
 
+    def _sync_lan_listen_host(self) -> None:
+        self.host_var.set("0.0.0.0" if self.lan_listen_var.get() else "127.0.0.1")
+
     def load_from_file(self) -> None:
         try:
             backend_server = load_backend_server_module()
@@ -4063,7 +4081,10 @@ class ControlPanelApp:
         queue_archive = config.get("queue_archive", {})
         platform_archive = config.get("platform_config_archive", {})
 
-        self.host_var.set(str(server.get("host", "0.0.0.0")))
+        configured_host = str(server.get("host", "127.0.0.1") or "127.0.0.1").strip()
+        lan_listen = bool(server.get("lan_listen", configured_host in {"0.0.0.0", "::", "[::]"}))
+        self.lan_listen_var.set(lan_listen)
+        self._sync_lan_listen_host()
         self.port_var.set(str(server.get("port", 9816)))
         self.log_level_var.set(str(logging_cfg.get("level", "INFO")))
         self.retention_days_var.set(str(logging_cfg.get("retention_days", 7)))
@@ -4168,8 +4189,9 @@ class ControlPanelApp:
         platform_payload = self._gather_platform_config_payload()
         return {
             "server": {
-                "host": self.host_var.get().strip() or "0.0.0.0",
+                "host": "0.0.0.0" if self.lan_listen_var.get() else "127.0.0.1",
                 "port": _coerce_int_field(self.port_var.get(), 9816, "监听端口"),
+                "lan_listen": bool(self.lan_listen_var.get()),
             },
             "platform": platform_payload["platform"],
             "bilibili": platform_payload["bilibili"],
