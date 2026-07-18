@@ -1,0 +1,53 @@
+name: Diagnose LAN toggle patch
+
+on:
+  pull_request:
+    branches: [now]
+    paths:
+      - .github/workflows/lan-toggle-diagnostic.yml
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run patch and capture traceback
+        shell: bash
+        run: |
+          set +e
+          python - <<'PY' > lan-toggle-error.log 2>&1
+          from pathlib import Path
+          import re
+          import textwrap
+          import traceback
+
+          workflow = Path('.github/workflows/apply-lan-listen-toggle.yml').read_text(encoding='utf-8')
+          match = re.search(r"(?ms)^          python - <<'PY'\n(.*?)^          PY$", workflow)
+          if match is None:
+              raise RuntimeError('unable to extract patch script')
+          script = textwrap.dedent(match.group(1))
+          try:
+              exec(compile(script, 'apply_lan_toggle.py', 'exec'), {'__name__': '__main__'})
+          except Exception:
+              traceback.print_exc()
+              raise
+          PY
+          status=$?
+          if [ "$status" -eq 0 ]; then
+            echo "Patch unexpectedly succeeded" >> lan-toggle-error.log
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f lan-toggle-error.log
+          git commit -m "chore: capture LAN toggle patch error" || true
+          git push origin "HEAD:${{ github.head_ref }}"
+          exit 0
