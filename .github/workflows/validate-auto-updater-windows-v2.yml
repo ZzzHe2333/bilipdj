@@ -56,3 +56,5 @@ jobs:
         if: steps.validate.outcome != 'success'
         shell: pwsh
         run: throw 'Windows validation failed'
+
+# Trigger after workflow registration.
