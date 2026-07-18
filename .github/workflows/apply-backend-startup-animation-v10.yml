@@ -1,0 +1,81 @@
+name: Finalize validated backend startup animation
+
+on:
+  push:
+    branches: [now]
+    paths:
+      - .github/workflows/apply-backend-startup-animation-v10.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: now
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Reapply validated v9 source patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          workflow = Path('.github/workflows/apply-backend-startup-animation-v9.yml').read_text(encoding='utf-8')
+          match = re.search(r"(?ms)^          python - <<'PY'\n(.*?)^          PY$", workflow)
+          if match is None:
+              raise RuntimeError('unable to extract validated v9 patch script')
+          script = "\n".join(
+              line[10:] if line.startswith("          ") else line
+              for line in match.group(1).splitlines()
+          )
+          exec(compile(script, 'apply_backend_startup_animation_v9.py', 'exec'), {'__name__': '__main__'})
+          PY
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Revalidate feature
+        run: |
+          python -m compileall -q core tests
+          python -m unittest discover -s tests -v
+          python scripts/scan_secrets.py
+          git diff --check
+
+      - name: Commit feature and remove all temporary files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -f --ignore-unmatch \
+            .github/workflows/apply-backend-startup-animation-once.yml \
+            .github/workflows/apply-backend-startup-animation-v2.yml \
+            .github/workflows/apply-backend-startup-animation-v3.yml \
+            .github/workflows/apply-backend-startup-animation-v4.yml \
+            .github/workflows/apply-backend-startup-animation-v5.yml \
+            .github/workflows/apply-backend-startup-animation-v6.yml \
+            .github/workflows/apply-backend-startup-animation-v7.yml \
+            .github/workflows/apply-backend-startup-animation-v9.yml \
+            .github/workflows/apply-backend-startup-animation-v10.yml \
+            .github/workflows/export-generated-startup-animation.yml \
+            .github/workflows/inspect-backend-startup-animation.yml \
+            .github/workflows/inspect-backend-startup-animation-v6.yml \
+            .github/workflows/inspect-backend-startup-animation-v9.yml \
+            backend-startup-animation-status.json \
+            backend-startup-animation-v6-status.json \
+            backend-startup-animation-patch.log \
+            backend-startup-animation-patch-v3.log \
+            backend-startup-animation-validation.log \
+            backend-startup-animation-validation-v6.log \
+            backend-startup-animation-validation-v7.log
+          git add core/control_panel.py tests/test_backend_startup_animation.py
+          git commit -m "fix: keep backend startup UI responsive"
+          git pull --rebase origin now
+          git push origin HEAD:now
