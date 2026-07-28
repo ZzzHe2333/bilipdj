@@ -17,8 +17,16 @@ import threading
 from typing import Any, Callable
 
 QUEUE_RANK_QUERY_COMMANDS = frozenset({"我的排队", "我的名次"})
+_SERVER_MODULE_NAMES = frozenset({"core.server", "server", "__main__"})
 _PATCH_LOCK = threading.RLock()
 _PATCHED_CLASS_IDS: set[int] = set()
+
+
+def _to_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value if value is not None else default)
+    except (TypeError, ValueError):
+        return default
 
 
 def _format_query_log(uname: str, uid: int, command: str, message: str) -> str:
@@ -60,10 +68,10 @@ def attach_queue_rank_query(queue_manager_cls: type[Any]) -> bool:
                 return None
 
             user_name = str(uname or "").strip()
-            numeric_uid = int(uid or 0)
+            numeric_uid = _to_int(uid)
             lock = getattr(self, "_lock")
             with lock:
-                index = int(self._find_index(user_name))
+                index = _to_int(self._find_index(user_name), -1)
                 total = len(getattr(self, "_persons", []))
 
             queued = index >= 0
@@ -121,7 +129,7 @@ def attach_queue_rank_query(queue_manager_cls: type[Any]) -> bool:
 
 
 def _patch_existing_queue_manager() -> bool:
-    for module_name in ("core.server", "server", "__main__"):
+    for module_name in _SERVER_MODULE_NAMES:
         module = sys.modules.get(module_name)
         if module is None:
             continue
@@ -132,7 +140,7 @@ def _patch_existing_queue_manager() -> bool:
 
 
 def install_queue_rank_query_hook() -> None:
-    """Install the interface now or patch the next QueueManager definition."""
+    """Install the interface now or patch the next backend QueueManager definition."""
     with _PATCH_LOCK:
         if _patch_existing_queue_manager():
             return
@@ -144,10 +152,15 @@ def install_queue_rank_query_hook() -> None:
         @functools.wraps(current_builder)
         def hooked_builder(func: Callable[..., Any], name: str, *bases: type[Any], **kwargs: Any) -> Any:
             created = current_builder(func, name, *bases, **kwargs)
-            if name == "QueueManager" and isinstance(created, type):
-                if attach_queue_rank_query(created):
-                    if builtins.__build_class__ is hooked_builder:
-                        builtins.__build_class__ = current_builder
+            module_name = str(getattr(created, "__module__", "") or "")
+            if (
+                name == "QueueManager"
+                and module_name in _SERVER_MODULE_NAMES
+                and isinstance(created, type)
+                and attach_queue_rank_query(created)
+            ):
+                if builtins.__build_class__ is hooked_builder:
+                    builtins.__build_class__ = current_builder
             return created
 
         setattr(hooked_builder, "_bilipdj_queue_rank_hook", True)
