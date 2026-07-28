@@ -9,6 +9,7 @@ from tkinter import messagebox, ttk
 from typing import Any
 
 from . import update_client
+from .version import APP_VERSION
 
 
 def _set_notes(app: Any, text: str) -> None:
@@ -33,6 +34,7 @@ def _set_busy(app: Any, busy: bool) -> None:
 
 
 def build_about_tab(app: Any, frame: ttk.Frame, app_name: str, current_version: str, app_dir: Path) -> None:
+    current_version = APP_VERSION
     app._update_current_version = current_version
     app._update_app_dir = Path(app_dir)
     app._update_busy = False
