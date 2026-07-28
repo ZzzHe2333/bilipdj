@@ -85,3 +85,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "chore: record v1.0.9 release status"
           git push --force origin HEAD:diagnostic/v1.0.9-release
+
+# refresh: 2
