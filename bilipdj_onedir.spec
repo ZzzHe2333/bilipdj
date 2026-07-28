@@ -4,6 +4,7 @@ from pathlib import Path
 project_root = Path(SPECPATH).resolve()
 
 datas = [
+    (str(project_root / "VERSION"), "."),
     (str(project_root / "core" / "ui"), "core/ui"),
 ]
 
