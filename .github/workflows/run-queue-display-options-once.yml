@@ -1,0 +1,61 @@
+name: Run queue display options once
+
+on:
+  push:
+    branches: [now]
+    paths:
+      - .github/workflows/run-queue-display-options-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: now
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Extract and apply implementation
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64
+          import gzip
+          import re
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/add-queue-display-options-once.yml').read_text(encoding='utf-8')
+          match = re.search(r"payload = '''([^']+)'''", workflow)
+          if not match:
+              raise RuntimeError('embedded implementation payload not found')
+          patch_path = Path('/tmp/apply_queue_display_options.py')
+          patch_path.write_bytes(gzip.decompress(base64.b64decode(match.group(1))))
+          PY
+          python /tmp/apply_queue_display_options.py
+
+      - name: Validate Python and JavaScript
+        shell: bash
+        run: |
+          python -m compileall -q core tests
+          node --check core/ui/myjs.js
+          python -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Commit implementation and clean workflows
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/add-queue-display-options-once.yml
+          git rm .github/workflows/run-queue-display-options-once.yml
+          git add core tests
+          git commit -m 'feat: add automatic queue scrolling and sequence display'
+          git push origin HEAD:now
