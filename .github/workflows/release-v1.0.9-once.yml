@@ -1,0 +1,104 @@
+name: Release v1.0.9 once
+
+on:
+  push:
+    branches: [now]
+    paths:
+      - .github/workflows/release-v1.0.9-once.yml
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: now
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Validate source
+        run: |
+          python -m pip install -r requirements.txt
+          python -m compileall -q core scripts tests
+          python -m unittest discover -s tests -v
+          python scripts/scan_secrets.py
+          test "$(tr -d '[:space:]' < VERSION)" = "1.0.9"
+          grep -q '^# 弹幕排队姬 v1.0.9$' RELEASE_NOTES.md
+
+      - name: Create release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_SHA="$(git rev-parse HEAD^)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git rev-parse -q --verify "refs/tags/v1.0.9" >/dev/null; then
+            EXISTING_SHA="$(git rev-list -n 1 v1.0.9)"
+            if [ "$EXISTING_SHA" != "$SOURCE_SHA" ]; then
+              echo "v1.0.9 已存在且指向其他提交：$EXISTING_SHA"
+              exit 1
+            fi
+          else
+            git tag -a v1.0.9 "$SOURCE_SHA" -m "弹幕排队姬 v1.0.9"
+            git push origin v1.0.9
+          fi
+          echo "Release source: $SOURCE_SHA"
+
+      - name: Build and publish all platforms
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          run_workflow() {
+            local workflow="$1"
+            shift
+            local before run_id
+            before="$(gh run list --workflow "$workflow" --event workflow_dispatch --branch now --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
+            gh workflow run "$workflow" --ref now "$@"
+
+            run_id=0
+            for _ in $(seq 1 60); do
+              sleep 5
+              run_id="$(gh run list --workflow "$workflow" --event workflow_dispatch --branch now --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
+              if [ "$run_id" != "0" ] && [ "$run_id" != "$before" ]; then
+                break
+              fi
+            done
+
+            if [ "$run_id" = "0" ] || [ "$run_id" = "$before" ]; then
+              echo "未找到新启动的工作流：$workflow"
+              exit 1
+            fi
+
+            echo "Watching $workflow run $run_id"
+            gh run watch "$run_id" --exit-status
+          }
+
+          run_workflow package-windows-x64.yml -f tag_name=v1.0.9
+          run_workflow package-macos.yml -f tag_name=v1.0.9 -f arch=arm64
+          run_workflow package-macos.yml -f tag_name=v1.0.9 -f arch=x86_64
+
+      - name: Remove one-time publisher
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE_PATH='.github/workflows/release-v1.0.9-once.yml'
+          FILE_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/contents/${FILE_PATH}?ref=now" --jq .sha)"
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/contents/${FILE_PATH}" \
+            -f message='chore: remove one-time v1.0.9 publisher' \
+            -f sha="$FILE_SHA" \
+            -f branch=now
