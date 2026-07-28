@@ -86,6 +86,7 @@ jobs:
           mkdir _package
           cp -R dist/bilipdj/* _package/
           [[ -f README.md ]]          && cp README.md          _package/
+          [[ -f RELEASE_NOTES.md ]]   && cp RELEASE_NOTES.md   _package/
           [[ -f core/quanxian.yaml ]] && cp core/quanxian.yaml _package/
           [[ -f core/kaiguan.yaml  ]] && cp core/kaiguan.yaml  _package/
           tar -czf "${{ steps.resolve_tag.outputs.asset_name }}" -C _package .
@@ -101,9 +102,10 @@ jobs:
         with:
           tag: ${{ steps.resolve_tag.outputs.tag_name }}
           commit: ${{ github.sha }}
-          name: ${{ steps.resolve_tag.outputs.tag_name }}
+          name: 弹幕排队姬 ${{ steps.resolve_tag.outputs.tag_name }}
           artifacts: ${{ steps.resolve_tag.outputs.asset_name }}
           artifactErrorsFailBuild: true
           allowUpdates: true
           replacesArtifacts: true
-          generateReleaseNotes: true
+          bodyFile: RELEASE_NOTES.md
+          generateReleaseNotes: false
