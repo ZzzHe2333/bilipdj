@@ -42,6 +42,7 @@ jobs:
           runs_payload = json.loads(Path('/tmp/runs.json').read_text(encoding='utf-8'))
           names = {
               'Release v1.0.9 once',
+              'Finish v1.0.9 release',
               'Package Windows x64',
               'Package macOS',
               'Quality and API compatibility',
@@ -86,4 +87,4 @@ jobs:
           git commit -m "chore: record v1.0.9 release status"
           git push --force origin HEAD:diagnostic/v1.0.9-release
 
-# refresh: 2
+# refresh: 3
