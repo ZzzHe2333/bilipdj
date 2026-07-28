@@ -3,177 +3,264 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>弹幕排队姬 - 登录配置</title>
+    <title>弹幕排队姬 - 配置</title>
+    <link rel="stylesheet" href="pdj_design.css">
     <style>
+        :root {
+            color-scheme: dark;
+            --page-bg: #07101e;
+            --panel-bg: rgba(7, 18, 36, 0.94);
+            --cyan: #00e5ff;
+            --muted: #7ec8e3;
+            --green: #22c55e;
+        }
+        * { box-sizing: border-box; }
         body {
             margin: 0;
-            background: #07101e;
-            background-image:
-                repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,229,255,0.025) 3px, rgba(0,229,255,0.025) 4px),
+            min-height: 100vh;
+            padding: 20px;
+            background:
                 radial-gradient(ellipse at 20% 20%, #0d1e36 0%, #060c18 55%, #030608 100%);
             color: #cce8ff;
-            font-family: "Microsoft YaHei", "Consolas", monospace;
+            font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
         }
-
-        .panel {
-            position: relative;
-            margin: 16px;
-            padding: 18px 20px;
-            border: 1px solid rgba(0,229,255,0.35);
-            border-left: 3px solid #00e5ff;
-            border-radius: 0;
-            max-width: 980px;
-            background: rgba(7, 18, 36, 0.92);
-            box-shadow: 0 0 18px rgba(0,229,255,0.12), inset 0 0 30px rgba(0,229,255,0.04);
+        .config-page {
+            width: min(920px, 100%);
+            margin: 0 auto;
+            display: grid;
+            gap: 18px;
         }
-
-        .panel::before,
-        .panel::after {
-            content: '';
-            position: absolute;
-            width: 12px;
-            height: 12px;
-            border-color: #00e5ff;
-            border-style: solid;
+        .page-title {
+            padding: 4px 2px;
         }
-        .panel::before { top: -1px; right: -1px; border-width: 2px 2px 0 0; }
-        .panel::after  { bottom: -1px; right: -1px; border-width: 0 2px 2px 0; }
-
-        .panel h3 {
-            margin: 0 0 16px;
-            font-family: "Consolas", monospace;
-            font-size: 15px;
-            letter-spacing: 2px;
-            text-transform: uppercase;
-            color: #00e5ff;
-            text-shadow: 0 0 8px rgba(0,229,255,0.6);
+        .page-title span {
+            color: var(--cyan);
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: .22em;
         }
-        .panel h3::before { content: '[ '; opacity: 0.6; }
-        .panel h3::after  { content: ' ]'; opacity: 0.6; }
-
-        .row {
+        .page-title h1 {
+            margin: 8px 0 4px;
+            color: #f6fbff;
+            font-size: clamp(26px, 5vw, 40px);
+        }
+        .page-title p {
+            margin: 0;
+            color: rgba(204,232,255,.66);
+        }
+        .config-card {
+            padding: 20px;
+            border: 1px solid rgba(0,229,255,.3);
+            border-left: 3px solid var(--cyan);
+            background: var(--panel-bg);
+            box-shadow: 0 0 22px rgba(0,229,255,.09);
+        }
+        .card-heading {
             display: flex;
             align-items: center;
-            margin: 10px 0;
-            gap: 8px;
+            gap: 12px;
+            margin-bottom: 16px;
         }
-
-        label {
-            width: 120px;
-            flex: 0 0 120px;
-            font-weight: 600;
-            font-size: 13px;
-            letter-spacing: 1px;
-            color: #7ec8e3;
-            text-transform: uppercase;
+        .step {
+            display: grid;
+            place-items: center;
+            width: 38px;
+            height: 38px;
+            border: 1px solid rgba(0,229,255,.4);
+            color: var(--cyan);
+            font-weight: 800;
         }
-
-        input,
-        textarea {
-            flex: 1;
-            padding: 7px 10px;
-            border-radius: 0;
-            border: 1px solid rgba(0,229,255,0.28);
-            border-bottom-color: rgba(0,229,255,0.55);
-            background: rgba(0,10,22,0.85);
-            color: #d4f0ff;
-            box-sizing: border-box;
-            font-family: "Consolas", monospace;
+        .card-heading h2 {
+            margin: 0;
+            color: #f4fbff;
+            font-size: 18px;
+        }
+        .card-heading p {
+            margin: 3px 0 0;
+            color: rgba(126,200,227,.7);
             font-size: 13px;
+        }
+        .field-row {
+            display: grid;
+            grid-template-columns: 150px 1fr;
+            align-items: start;
+            gap: 12px;
+            margin: 12px 0;
+        }
+        .field-row label {
+            padding-top: 8px;
+            color: var(--muted);
+            font-size: 13px;
+            font-weight: 700;
+        }
+        .field-row label small {
+            display: block;
+            margin-top: 3px;
+            color: rgba(126,200,227,.55);
+            font-weight: 400;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 9px 11px;
+            border: 1px solid rgba(0,229,255,.3);
+            background: rgba(0,10,22,.9);
+            color: #dff5ff;
+            font: inherit;
             outline: none;
-            transition: border-color 0.2s, box-shadow 0.2s;
         }
-
-        input:focus,
-        textarea:focus {
-            border-color: #00e5ff;
-            box-shadow: 0 0 0 1px rgba(0,229,255,0.3), 0 0 10px rgba(0,229,255,0.15);
+        input:focus, textarea:focus {
+            border-color: var(--cyan);
+            box-shadow: 0 0 0 2px rgba(0,229,255,.12);
         }
-
-        textarea {
-            resize: vertical;
-            min-height: 110px;
-        }
-
+        textarea { min-height: 105px; resize: vertical; }
         .actions {
             display: flex;
-            align-items: center;
             gap: 10px;
             flex-wrap: wrap;
             margin-top: 16px;
         }
-
-        button {
+        .action-button {
+            padding: 9px 16px;
             border: 1px solid #00b8d9;
-            border-radius: 0;
-            padding: 8px 16px;
-            background: rgba(0,40,60,0.9);
-            color: #00e5ff;
+            background: rgba(0,40,60,.9);
+            color: var(--cyan);
+            font: inherit;
+            font-weight: 700;
             cursor: pointer;
-            font-family: "Consolas", monospace;
+        }
+        .action-button:hover:not(:disabled) { background: rgba(0,229,255,.13); color: #fff; }
+        .action-button:disabled { opacity: .45; cursor: wait; }
+        .status {
+            margin-top: 14px;
+            color: rgba(204,232,255,.72);
             font-size: 13px;
-            letter-spacing: 1.5px;
-            text-transform: uppercase;
-            transition: background 0.2s, box-shadow 0.2s, color 0.2s;
         }
 
-        button:hover:not(:disabled) {
-            background: rgba(0,229,255,0.12);
-            box-shadow: 0 0 10px rgba(0,229,255,0.4), inset 0 0 6px rgba(0,229,255,0.1);
-            color: #fff;
+        /* 参考图样式：左侧标题与说明，右侧滑动开关。 */
+        .switch-list {
+            overflow: hidden;
+            border: 1px solid #e7e7e7;
+            border-radius: 14px;
+            background: #ffffff;
+            color: #222222;
         }
-
-        button:disabled {
-            cursor: wait;
-            opacity: 0.45;
-            border-color: rgba(0,184,217,0.35);
+        .switch-row {
+            min-height: 76px;
+            padding: 14px 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
         }
-
-        .hint {
-            color: #7ec8e3;
+        .switch-row + .switch-row { border-top: 1px solid #ececec; }
+        .switch-copy strong {
+            display: block;
+            color: #242424;
+            font-size: 17px;
+            font-weight: 650;
+        }
+        .switch-copy small {
+            display: block;
+            margin-top: 5px;
+            color: #7a7a7a;
             font-size: 13px;
-            font-family: "Consolas", monospace;
+            line-height: 1.4;
         }
-
-        .tip {
-            margin-top: 10px;
-            color: rgba(126,200,227,0.65);
+        .slider-switch {
+            position: relative;
+            flex: 0 0 auto;
+            width: 52px;
+            height: 30px;
+            padding: 0;
+            border: 0;
+            border-radius: 999px;
+            background: #c9cdd3;
+            cursor: pointer;
+            transition: background .18s ease;
+        }
+        .slider-switch::after {
+            content: "";
+            position: absolute;
+            top: 4px;
+            left: 4px;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: #ffffff;
+            box-shadow: 0 1px 4px rgba(0,0,0,.28);
+            transition: transform .18s ease;
+        }
+        .slider-switch.is-on { background: var(--green); }
+        .slider-switch.is-on::after { transform: translateX(22px); }
+        .slider-switch:focus-visible { outline: 3px solid rgba(34,197,94,.3); outline-offset: 3px; }
+        .slider-switch:disabled { opacity: .55; cursor: wait; }
+        .default-note {
+            margin: 10px 2px 0;
+            color: rgba(126,200,227,.66);
             font-size: 12px;
-            letter-spacing: 0.5px;
         }
-        .tip::before { content: '// '; opacity: 0.5; }
+
+        @media (max-width: 640px) {
+            body { padding: 12px; }
+            .config-card { padding: 16px; }
+            .field-row { grid-template-columns: 1fr; gap: 6px; }
+            .field-row label { padding-top: 0; }
+            .switch-row { padding: 13px 14px; }
+        }
     </style>
-    <link rel="stylesheet" href="pdj_design.css">
 </head>
 <body>
-    <main class="config-shell">
-      <section class="config-intro">
-        <span class="eyebrow">BILIPDJ · ACCOUNT</span>
-        <h1>连接你的<br><em>直播间</em></h1>
-        <p>一次配置，自动接入 Bilibili 实时弹幕。登录信息只保存在运行本机，不会上传到仓库。</p>
-        <div class="privacy-note"><span>✓</span><div><strong>本地隐私保护</strong><small>Cookie 不会显示在日志中，也不会进入构建产物。</small></div></div>
-      </section>
-      <section class="panel">
-        <div class="panel-heading"><span class="step">01</span><div><h3>账号连接</h3><p>扫码是最简单且推荐的方式</p></div></div>
+    <main class="config-page">
+        <header class="page-title">
+            <span>BILIPDJ · CONFIGURATION</span>
+            <h1>弹幕排队姬配置</h1>
+            <p>账号凭据与展示设置均只保存在运行本机。</p>
+        </header>
 
-        <div class="row">
-            <label for="uid">Bilibili UID <small>扫码后自动识别</small></label>
-            <input id="uid" type="number" inputmode="numeric" placeholder="例如 12345678">
-        </div>
+        <section class="config-card">
+            <div class="card-heading">
+                <span class="step">01</span>
+                <div><h2>账号连接</h2><p>扫码连接或手动填写 Bilibili 登录凭据</p></div>
+            </div>
+            <div class="field-row">
+                <label for="uid">Bilibili UID<small>扫码后自动识别</small></label>
+                <input id="uid" type="number" inputmode="numeric" placeholder="例如 12345678">
+            </div>
+            <div class="field-row">
+                <label for="cookie">登录凭据<small>至少包含 SESSDATA</small></label>
+                <textarea id="cookie" rows="4" placeholder="可手动粘贴 Cookie，或使用下方扫码自动填写"></textarea>
+            </div>
+            <div class="actions">
+                <button id="qr-btn" class="action-button" type="button">扫码连接</button>
+                <button id="save-btn" class="action-button" type="button">保存账号配置</button>
+            </div>
+            <div id="login-status" class="status">正在读取登录配置……</div>
+        </section>
 
-        <div class="row">
-            <label for="cookie">登录凭据 <small>至少包含 SESSDATA</small></label>
-            <textarea id="cookie" rows="4" placeholder="可手动粘贴 Cookie，或使用下方扫码自动填写"></textarea>
-        </div>
-
-        <div class="actions">
-            <button id="qr-btn" class="primary" type="button">▣ 扫码连接</button>
-            <button id="save-btn" type="button">保存配置</button>
-        </div>
-
-        <div id="status-text" class="status-card"><span class="pulse"></span>正在初始化页面...</div>
-        <div class="tip">扫码窗口可以立即打开，无需等待配置加载。</div>
-      </section>
+        <section class="config-card">
+            <div class="card-heading">
+                <span class="step">02</span>
+                <div><h2>排队显示</h2><p>设置队列看板的滚动方式和序号显示</p></div>
+            </div>
+            <div class="switch-list">
+                <div class="switch-row">
+                    <div class="switch-copy">
+                        <strong>自动滚动</strong>
+                        <small>排队人数超过显示框时，自动循环滚动排队列表</small>
+                    </div>
+                    <button id="auto-scroll-switch" class="slider-switch" type="button" role="switch" aria-checked="false" aria-label="自动滚动"></button>
+                </div>
+                <div class="switch-row">
+                    <div class="switch-copy">
+                        <strong>显示序号</strong>
+                        <small>在每位排队用户左侧显示当前队列序号</small>
+                    </div>
+                    <button id="sequence-switch" class="slider-switch" type="button" role="switch" aria-checked="false" aria-label="显示序号"></button>
+                </div>
+            </div>
+            <div class="default-note">两个功能默认均为关闭；切换后立即保存并通知已打开的队列看板。</div>
+            <div id="display-status" class="status">正在读取显示设置……</div>
+        </section>
     </main>
 
     <script>
@@ -182,125 +269,159 @@
             const cookieInput = document.getElementById("cookie");
             const saveButton = document.getElementById("save-btn");
             const qrButton = document.getElementById("qr-btn");
-            const statusText = document.getElementById("status-text");
+            const loginStatus = document.getElementById("login-status");
+            const displayStatus = document.getElementById("display-status");
+            const autoScrollSwitch = document.getElementById("auto-scroll-switch");
+            const sequenceSwitch = document.getElementById("sequence-switch");
 
             let configLoaded = false;
-            let busy = false;
+            let loginBusy = false;
+            let displayBusy = false;
+            let styleConfig = {};
 
-            function setStatus(text) {
-                statusText.textContent = text;
+            function asBool(value, fallback) {
+                if (typeof value === "boolean") return value;
+                if (typeof value === "number") return value !== 0;
+                const normalized = String(value == null ? "" : value).trim().toLowerCase();
+                if (["1", "true", "yes", "on"].includes(normalized)) return true;
+                if (["0", "false", "no", "off"].includes(normalized)) return false;
+                return !!fallback;
             }
 
-            function setBusy(nextBusy) {
-                busy = !!nextBusy;
-                saveButton.disabled = busy;
+            function setSwitch(button, enabled) {
+                const on = !!enabled;
+                button.classList.toggle("is-on", on);
+                button.setAttribute("aria-checked", on ? "true" : "false");
+            }
+
+            function getSwitch(button) {
+                return button.getAttribute("aria-checked") === "true";
             }
 
             async function loadLoginConfig() {
-                setStatus("正在读取登录配置...");
+                loginStatus.textContent = "正在读取登录配置……";
                 try {
                     const res = await fetch("/api/config/login", { cache: "no-store" });
-                    if (!res.ok) {
-                        throw new Error("HTTP " + res.status);
-                    }
+                    if (!res.ok) throw new Error("HTTP " + res.status);
                     const cfg = await res.json();
                     uidInput.value = cfg.uid ? String(cfg.uid) : "";
                     cookieInput.value = cfg.cookie || "";
                     configLoaded = true;
-                    setStatus("登录配置已加载，可直接扫码或手动保存。");
+                    loginStatus.textContent = "登录配置已加载。";
                 } catch (error) {
-                    setStatus("读取登录配置失败：" + error);
+                    loginStatus.textContent = "读取登录配置失败：" + error;
                 }
             }
 
             async function saveLoginConfig(options) {
                 const opts = options || {};
-                const silent = !!opts.silent;
-                if (busy) {
-                    return false;
-                }
-
-                setBusy(true);
+                if (loginBusy) return false;
+                loginBusy = true;
+                saveButton.disabled = true;
                 try {
-                    const body = {
-                        uid: Number(uidInput.value || 0),
-                        cookie: (cookieInput.value || "").trim()
-                    };
                     const res = await fetch("/api/config/login", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify(body)
+                        body: JSON.stringify({
+                            uid: Number(uidInput.value || 0),
+                            cookie: (cookieInput.value || "").trim()
+                        })
                     });
-                    if (!res.ok) {
-                        throw new Error("HTTP " + res.status);
-                    }
-
+                    if (!res.ok) throw new Error("HTTP " + res.status);
                     const result = await res.json();
                     const resolvedUid = Number(result && result.uid || 0);
-                    if (Number.isFinite(resolvedUid) && resolvedUid > 0) {
-                        uidInput.value = String(resolvedUid);
-                    }
-
-                    const resolvedName = typeof (result && result.uname) === "string"
-                        ? result.uname.trim()
-                        : "";
-                    if (silent) {
-                        setStatus("登录态已写入配置。");
-                    } else {
-                        setStatus("保存成功，弹幕连接会自动重连。");
-                    }
-                    if (resolvedName && resolvedUid > 0) {
-                        setStatus(statusText.textContent + " (" + resolvedName + "/" + resolvedUid + ")");
-                    }
+                    if (resolvedUid > 0) uidInput.value = String(resolvedUid);
+                    const resolvedName = typeof (result && result.uname) === "string" ? result.uname.trim() : "";
+                    loginStatus.textContent = opts.silent ? "扫码登录态已写入配置。" : "账号配置保存成功。";
+                    if (resolvedName && resolvedUid > 0) loginStatus.textContent += "（" + resolvedName + "/" + resolvedUid + "）";
                     configLoaded = true;
                     return true;
                 } catch (error) {
-                    setStatus("保存失败：" + error);
+                    loginStatus.textContent = "保存失败：" + error;
                     return false;
                 } finally {
-                    setBusy(false);
+                    loginBusy = false;
+                    saveButton.disabled = false;
                 }
+            }
+
+            async function loadDisplayStyle() {
+                displayStatus.textContent = "正在读取显示设置……";
+                try {
+                    const res = await fetch("/api/style", { cache: "no-store" });
+                    if (!res.ok) throw new Error("HTTP " + res.status);
+                    styleConfig = await res.json();
+                    setSwitch(autoScrollSwitch, asBool(styleConfig.auto_scroll, false));
+                    setSwitch(sequenceSwitch, asBool(styleConfig.show_sequence, false));
+                    displayStatus.textContent = "显示设置已加载。";
+                } catch (error) {
+                    styleConfig = {};
+                    setSwitch(autoScrollSwitch, false);
+                    setSwitch(sequenceSwitch, false);
+                    displayStatus.textContent = "读取显示设置失败：" + error;
+                }
+            }
+
+            async function saveDisplayOption(key, value) {
+                if (displayBusy) return;
+                displayBusy = true;
+                autoScrollSwitch.disabled = true;
+                sequenceSwitch.disabled = true;
+                const previous = styleConfig[key];
+                styleConfig[key] = !!value;
+                displayStatus.textContent = "正在保存显示设置……";
+                try {
+                    const res = await fetch("/api/style", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(styleConfig)
+                    });
+                    if (!res.ok) throw new Error("HTTP " + res.status);
+                    displayStatus.textContent = "显示设置已保存并生效。";
+                } catch (error) {
+                    styleConfig[key] = previous;
+                    setSwitch(autoScrollSwitch, asBool(styleConfig.auto_scroll, false));
+                    setSwitch(sequenceSwitch, asBool(styleConfig.show_sequence, false));
+                    displayStatus.textContent = "保存显示设置失败：" + error;
+                } finally {
+                    displayBusy = false;
+                    autoScrollSwitch.disabled = false;
+                    sequenceSwitch.disabled = false;
+                }
+            }
+
+            function toggleOption(button, key) {
+                if (displayBusy) return;
+                const next = !getSwitch(button);
+                setSwitch(button, next);
+                void saveDisplayOption(key, next);
             }
 
             function openCookieLogin() {
                 const popup = window.open("/cookie-login", "pdj-cookie-login", "width=560,height=760");
                 if (!popup) {
-                    setStatus("弹窗被浏览器拦截，请允许弹窗后重试。");
+                    loginStatus.textContent = "弹窗被浏览器拦截，请允许弹窗后重试。";
                     return;
                 }
-                setStatus(
-                    configLoaded
-                        ? "已打开扫码页面，请完成扫码后自动回填登录态。"
-                        : "已打开扫码页面，后台仍在读取配置，不影响扫码。"
-                );
+                loginStatus.textContent = configLoaded ? "已打开扫码页面。" : "已打开扫码页面，后台仍在读取配置。";
             }
 
             window.addEventListener("message", function (event) {
-                if (!event || !event.data || event.data.type !== "pdj-cookie-ready") {
-                    return;
-                }
-                if (typeof event.data.cookie === "string" && event.data.cookie.trim()) {
-                    cookieInput.value = event.data.cookie.trim();
-                    const loginUid = Number(event.data.uid || 0);
-                    if (Number.isFinite(loginUid) && loginUid > 0) {
-                        uidInput.value = String(loginUid);
-                    }
-                    const loginName = typeof event.data.uname === "string" ? event.data.uname.trim() : "";
-                    setStatus(
-                        loginName && loginUid > 0
-                            ? "扫码成功，已识别账号 " + loginName + "(" + loginUid + ")，正在写入配置..."
-                            : "扫码成功，正在写入登录配置..."
-                    );
-                    void saveLoginConfig({ silent: true });
-                }
+                if (!event || !event.data || event.data.type !== "pdj-cookie-ready") return;
+                if (typeof event.data.cookie !== "string" || !event.data.cookie.trim()) return;
+                cookieInput.value = event.data.cookie.trim();
+                const loginUid = Number(event.data.uid || 0);
+                if (loginUid > 0) uidInput.value = String(loginUid);
+                loginStatus.textContent = "扫码成功，正在写入登录配置……";
+                void saveLoginConfig({ silent: true });
             });
 
-            saveButton.addEventListener("click", function () {
-                void saveLoginConfig();
-            });
+            saveButton.addEventListener("click", function () { void saveLoginConfig(); });
             qrButton.addEventListener("click", openCookieLogin);
+            autoScrollSwitch.addEventListener("click", function () { toggleOption(autoScrollSwitch, "auto_scroll"); });
+            sequenceSwitch.addEventListener("click", function () { toggleOption(sequenceSwitch, "show_sequence"); });
 
-            void loadLoginConfig();
+            void Promise.all([loadLoginConfig(), loadDisplayStyle()]);
         })();
     </script>
 </body>
