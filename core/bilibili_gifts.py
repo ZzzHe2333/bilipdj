@@ -1,6 +1,16 @@
 """Built-in Bilibili gift catalog. Values are battery units (10 batteries = CNY 1)."""
 from __future__ import annotations
 
+if __package__:
+    from .queue_rank_query import install_queue_rank_query_hook
+else:
+    from queue_rank_query import install_queue_rank_query_hook
+
+# server.py imports this catalog before QueueManager is defined. Install the
+# read-only query interface for both package imports and direct script runs.
+install_queue_rank_query_hook()
+
+
 GIFT_BATTERIES: dict[str, int | None] = {
     "足迹": 1, "人气票": 1, "山市晴岚": 660, "心动盲盒": 150, "粉丝团灯牌": 1,
     "舰长一号": 1980, "小花花": 1, "你真好看": 10, "开球": 1, "星愿水晶球": 1000,
