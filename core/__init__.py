@@ -1,7 +1,7 @@
 """Shared UI bootstrap for bilipdj.
 
 The desktop control panel historically used native ttk checkboxes for boolean
-settings.  Install one compatible ttk.Checkbutton subclass here so every
+settings. Install one compatible ttk.Checkbutton subclass here so every
 existing boolean control keeps its variable/command behaviour while using the
 same pill-shaped switch appearance.
 """
@@ -26,12 +26,12 @@ _REGISTERED_THEMES: set[tuple[str, str]] = set()
 
 
 def _draw_fallback_switch(master: tk.Misc, *, selected: bool, disabled: bool) -> tk.PhotoImage:
-    """Draw a small switch without Pillow so source installs still work."""
+    """Draw a small transparent switch without Pillow."""
 
     width, height = 64, 30
+    # A newly created PhotoImage is transparent. Only the pill and knob pixels
+    # are filled, so the control works on both dark and light application themes.
     image = tk.PhotoImage(master=master, width=width, height=height)
-    image.put("#000000", to=(0, 0, width, height))
-    image.transparency_set(0, 0, True)
 
     track = "#aeb6c0" if disabled else ("#22c55e" if selected else "#c9cdd3")
     knob = "#eef1f4" if disabled else "#ffffff"
@@ -161,7 +161,7 @@ def _ensure_switch_style(widget: tk.Misc) -> None:
             ],
         )
     except tk.TclError:
-        # Some minimal Tk builds do not expose the focus element.  The label-only
+        # Some minimal Tk builds do not expose the focus element. The label-only
         # layout still removes the square native indicator.
         style.layout(
             _SWITCH_STYLE,
@@ -185,7 +185,7 @@ class SliderCheckbutton(_ORIGINAL_CHECKBUTTON):
     """Drop-in ttk.Checkbutton rendered as a pill-shaped ON/OFF switch."""
 
     def __init__(self, master: tk.Misc | None = None, **kwargs: Any) -> None:
-        # All boolean controls share one appearance.  Existing text, variable,
+        # All boolean controls share one appearance. Existing text, variable,
         # command, onvalue/offvalue, state and geometry behaviour remain native.
         kwargs.pop("image", None)
         kwargs.pop("compound", None)
