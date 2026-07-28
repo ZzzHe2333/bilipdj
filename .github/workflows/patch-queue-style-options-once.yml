@@ -1,0 +1,249 @@
+name: Patch queue style options once
+
+on:
+  push:
+    branches: [now]
+    paths:
+      - .github/queue-display-options.trigger
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: now
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Patch server and desktop controls
+        shell: bash
+        run: |
+          set +e
+          python - <<'PY' > .github/queue-display-options-status.txt 2>&1
+          from pathlib import Path
+
+          def replace_once(path: Path, old: str, new: str) -> None:
+              text = path.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f"{path}: expected exactly one match, got {count}: {old[:100]!r}")
+              path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          server = Path("core/server.py")
+          replace_once(
+              server,
+              '    "text_stroke_color": "#000000",\n    "text_stroke_enabled": True,\n}',
+              '    "text_stroke_color": "#000000",\n    "text_stroke_enabled": True,\n    "auto_scroll": False,\n    "show_sequence": False,\n}',
+          )
+          replace_once(
+              server,
+              'def save_style(data: dict[str, Any]) -> None:\n    merged = dict(DEFAULT_STYLE)\n    merged.update(data)',
+              'def save_style(data: dict[str, Any]) -> None:\n    # Preserve display options and future style fields omitted by older clients.\n    merged = load_style()\n    merged.update(data)',
+          )
+
+          panel = Path("core/control_panel.py")
+          replace_once(
+              panel,
+              '        "text_stroke_color": "#000000",\n        "text_stroke_enabled": True,\n    }',
+              '        "text_stroke_color": "#000000",\n        "text_stroke_enabled": True,\n        "auto_scroll": False,\n        "show_sequence": False,\n    }',
+          )
+          replace_once(
+              panel,
+              '        self._style_bool_vars: dict[str, tk.BooleanVar] = {\n            "text_stroke_enabled": tk.BooleanVar(\n                value=self._style_as_bool(self._DEFAULT_STYLE.get("text_stroke_enabled", True), True)\n            )\n        }',
+              '        self._style_bool_vars: dict[str, tk.BooleanVar] = {\n            "text_stroke_enabled": tk.BooleanVar(\n                value=self._style_as_bool(self._DEFAULT_STYLE.get("text_stroke_enabled", True), True)\n            ),\n            "auto_scroll": tk.BooleanVar(\n                value=self._style_as_bool(self._DEFAULT_STYLE.get("auto_scroll", False), False)\n            ),\n            "show_sequence": tk.BooleanVar(\n                value=self._style_as_bool(self._DEFAULT_STYLE.get("show_sequence", False), False)\n            ),\n        }',
+          )
+
+          helper_anchor = '    def _build_style_tab(self, frame: ttk.Frame) -> None:\n'
+          helper = '''    @staticmethod
+    def _draw_style_switch(canvas: tk.Canvas, enabled: bool) -> None:
+        canvas.delete("all")
+        track_color = "#22c55e" if enabled else "#c9cdd3"
+        canvas.create_oval(1, 1, 29, 29, fill=track_color, outline=track_color)
+        canvas.create_oval(23, 1, 51, 29, fill=track_color, outline=track_color)
+        canvas.create_rectangle(15, 1, 37, 29, fill=track_color, outline=track_color)
+        knob_left = 26 if enabled else 4
+        canvas.create_oval(
+            knob_left,
+            4,
+            knob_left + 22,
+            26,
+            fill="#ffffff",
+            outline="#ffffff",
+        )
+
+    def _build_style_switch_row(
+        self,
+        parent: ttk.Frame,
+        *,
+        row: int,
+        key: str,
+        title: str,
+        description: str,
+    ) -> None:
+        card = tk.Frame(
+            parent,
+            bg="#ffffff",
+            highlightbackground="#e7e7e7",
+            highlightthickness=1,
+            bd=0,
+        )
+        card.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(4, 0))
+        card.columnconfigure(0, weight=1)
+
+        copy_frame = tk.Frame(card, bg="#ffffff")
+        copy_frame.grid(row=0, column=0, sticky="w", padx=(16, 18), pady=12)
+        tk.Label(
+            copy_frame,
+            text=title,
+            bg="#ffffff",
+            fg="#242424",
+            anchor="w",
+            font=("Microsoft YaHei UI", 11, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            copy_frame,
+            text=description,
+            bg="#ffffff",
+            fg="#7a7a7a",
+            anchor="w",
+            justify="left",
+            font=("Microsoft YaHei UI", 9),
+        ).pack(anchor="w", pady=(4, 0))
+
+        switch = tk.Canvas(
+            card,
+            width=52,
+            height=30,
+            bg="#ffffff",
+            highlightthickness=0,
+            bd=0,
+            cursor="hand2",
+        )
+        switch.grid(row=0, column=1, padx=(0, 16), pady=12)
+        var = self._style_bool_vars[key]
+
+        def redraw(*_args) -> None:
+            self._draw_style_switch(switch, bool(var.get()))
+
+        def toggle(_event=None) -> None:
+            var.set(not bool(var.get()))
+
+        switch.bind("<Button-1>", toggle)
+        card.bind("<Button-1>", toggle)
+        copy_frame.bind("<Button-1>", toggle)
+        for child in copy_frame.winfo_children():
+            child.bind("<Button-1>", toggle)
+        var.trace_add("write", redraw)
+        redraw()
+
+'''
+          replace_once(panel, helper_anchor, helper + helper_anchor)
+
+          old_layout = '''        ttk.Checkbutton(
+            left,
+            text="启用文字描边",
+            variable=self._style_bool_vars["text_stroke_enabled"],
+        ).grid(row=len(fields) + 1, column=1, sticky="w", pady=(2, 6))
+
+        ttk.Label(left, text="CSS样式存档槽位", anchor="e", width=16).grid(
+            row=len(fields) + 2,
+            column=0,
+            sticky="e",
+            padx=(0, 6),
+            pady=3,
+        )
+        ttk.Combobox(
+            left,
+            textvariable=self._style_archive_slot_var,
+            values=[str(i) for i in range(1, MAX_QUEUE_ARCHIVE_SLOTS + 1)],
+            width=17,
+            state="readonly",
+        ).grid(row=len(fields) + 2, column=1, sticky="w")
+        ttk.Button(left, text="切换存档", command=self._switch_style_archive_from_ui, width=8).grid(
+            row=len(fields) + 2,
+            column=2,
+            padx=(4, 0),
+        )
+
+        btn_bar = ttk.Frame(left)
+        btn_bar.grid(row=len(fields) + 3, column=0, columnspan=3, sticky="w", pady=(12, 0))'''
+          new_layout = '''        ttk.Checkbutton(
+            left,
+            text="启用文字描边",
+            variable=self._style_bool_vars["text_stroke_enabled"],
+        ).grid(row=len(fields) + 1, column=1, sticky="w", pady=(2, 6))
+
+        self._build_style_switch_row(
+            left,
+            row=len(fields) + 2,
+            key="auto_scroll",
+            title="自动滚动",
+            description="排队人数超过显示框时，自动循环滚动排队列表",
+        )
+        self._build_style_switch_row(
+            left,
+            row=len(fields) + 3,
+            key="show_sequence",
+            title="显示序号",
+            description="在每位排队用户左侧显示当前队列序号",
+        )
+
+        ttk.Label(left, text="CSS样式存档槽位", anchor="e", width=16).grid(
+            row=len(fields) + 4,
+            column=0,
+            sticky="e",
+            padx=(0, 6),
+            pady=(10, 3),
+        )
+        ttk.Combobox(
+            left,
+            textvariable=self._style_archive_slot_var,
+            values=[str(i) for i in range(1, MAX_QUEUE_ARCHIVE_SLOTS + 1)],
+            width=17,
+            state="readonly",
+        ).grid(row=len(fields) + 4, column=1, sticky="w", pady=(10, 3))
+        ttk.Button(left, text="切换存档", command=self._switch_style_archive_from_ui, width=8).grid(
+            row=len(fields) + 4,
+            column=2,
+            padx=(4, 0),
+            pady=(10, 3),
+        )
+
+        btn_bar = ttk.Frame(left)
+        btn_bar.grid(row=len(fields) + 5, column=0, columnspan=3, sticky="w", pady=(12, 0))'''
+          replace_once(panel, old_layout, new_layout)
+
+          print("patch applied")
+          PY
+          patch_code=$?
+
+          if [ "$patch_code" -eq 0 ]; then
+            python -m compileall -q core tests >> .github/queue-display-options-status.txt 2>&1
+            test_code=$?
+          else
+            test_code=$patch_code
+          fi
+
+          if [ "$test_code" -eq 0 ]; then
+            python -m unittest discover -s tests -p 'test_*.py' >> .github/queue-display-options-status.txt 2>&1
+            test_code=$?
+          fi
+
+          echo "exit_code=$test_code" >> .github/queue-display-options-status.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add core/server.py core/control_panel.py .github/queue-display-options-status.txt
+          if [ "$test_code" -eq 0 ]; then
+            git commit -m 'feat: add desktop queue display switches and preserve options'
+          else
+            git commit -m 'chore: record queue display patch failure'
+          fi
+          git push origin HEAD:now
+          exit "$test_code"
