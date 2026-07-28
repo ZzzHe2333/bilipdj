@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 import threading
+import time
 import tkinter as tk
 import urllib.error
 import urllib.request
@@ -19,6 +20,10 @@ OVERLAY_REFRESH_MS = 1200
 OVERLAY_RESIZE_MARGIN = 8
 OVERLAY_MIN_WIDTH = 320
 OVERLAY_MIN_HEIGHT = 180
+SCROLL_FRAME_MS = 33
+SCROLL_SPEED_PX_PER_SECOND = 28.0
+SCROLL_TOP_PAUSE_SECONDS = 0.9
+SCROLL_BOTTOM_PAUSE_SECONDS = 1.3
 DEFAULT_STYLE = {
     "text_color": "#eaf6ff",
     "text_stroke_color": "#000000",
@@ -26,6 +31,8 @@ DEFAULT_STYLE = {
     "queue_font_size": 50,
     "queue_font_weight": "700",
     "queue_font_style": "italic",
+    "auto_scroll": False,
+    "show_sequence": False,
 }
 
 
@@ -70,6 +77,11 @@ def _style_bool(value: Any, default: bool = True) -> bool:
     return default
 
 
+def _display_queue_text(index: int, text: Any, show_sequence: bool) -> str:
+    content = str(text or "").strip()
+    return f"{index:02d}  {content}" if show_sequence else content
+
+
 class OverlayHostApp:
     def __init__(self, *, port: int, width: int, height: int, scale: int, topmost: bool = True) -> None:
         self.port = int(port)
@@ -86,12 +98,17 @@ class OverlayHostApp:
         self._resize_mode = ""
         self._resize_origin: tuple[int, int] | None = None
         self._resize_geometry: tuple[int, int, int, int] | None = None
+        self._scroll_offset = 0.0
+        self._scroll_content_height = 0.0
+        self._scroll_job: str | None = None
+        self._scroll_last_time = 0.0
+        self._scroll_pause_until = time.monotonic() + SCROLL_TOP_PAUSE_SECONDS
+        self._scroll_phase = "top-pause"
 
         self.root = tk.Tk()
-        self.root.withdraw()  # hide immediately to prevent decoration flash
+        self.root.withdraw()
         self.root.title("排队透明弹窗")
         if sys.platform != "win32":
-            # non-Windows: overrideredirect for frameless; Win32 handles this via ctypes instead
             self.root.overrideredirect(True)
         self.root.resizable(True, True)
         self.root.configure(bg=OVERLAY_TRANSPARENT_COLOR)
@@ -117,8 +134,6 @@ class OverlayHostApp:
         )
         self.canvas.pack(fill="both", expand=True)
 
-        # Escape still works as emergency close; right-click and double-click removed
-        # (close / topmost are now controlled from the main GUI)
         self.root.bind("<Escape>", lambda _event: self._close())
         self.root.bind("<Configure>", self._on_window_configure)
         self.canvas.bind("<Configure>", lambda _event: self._redraw())
@@ -161,14 +176,10 @@ class OverlayHostApp:
             SWP_NOZORDER = 0x0004
             SWP_FRAMECHANGED = 0x0020
 
-            # Strip all window decorations — leaves a plain frameless window that OBS can still
-            # find by title ("排队透明弹窗") via standard EnumWindows, unlike WS_POPUP windows
-            # created by overrideredirect which some OBS versions skip in their window list.
             style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_STYLE)
             style &= ~(WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME)
             ctypes.windll.user32.SetWindowLongW(hwnd, GWL_STYLE, style)
 
-            # Ensure taskbar visibility and OBS window enumeration
             exstyle = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
             exstyle = (exstyle | WS_EX_APPWINDOW) & ~WS_EX_TOOLWINDOW
             ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, exstyle)
@@ -315,6 +326,7 @@ class OverlayHostApp:
         self._redraw()
 
     def _close(self) -> None:
+        self._cancel_scroll_job()
         try:
             self.root.destroy()
         except tk.TclError:
@@ -352,7 +364,16 @@ class OverlayHostApp:
 
         next_style = dict(self.style)
         if isinstance(style_payload, dict):
-            for key in ("text_color", "text_stroke_color", "text_stroke_enabled", "queue_font_size", "queue_font_weight", "queue_font_style"):
+            for key in (
+                "text_color",
+                "text_stroke_color",
+                "text_stroke_enabled",
+                "queue_font_size",
+                "queue_font_weight",
+                "queue_font_style",
+                "auto_scroll",
+                "show_sequence",
+            ):
                 if key in style_payload:
                     next_style[key] = style_payload.get(key)
 
@@ -362,10 +383,83 @@ class OverlayHostApp:
             self.items = list(items)
             self.style = dict(next_style)
             if changed:
+                self._reset_scroll()
                 self._redraw()
             self.root.after(OVERLAY_REFRESH_MS, self._refresh_async)
 
         self.root.after(0, _apply)
+
+    def _cancel_scroll_job(self) -> None:
+        if self._scroll_job is None:
+            return
+        try:
+            self.root.after_cancel(self._scroll_job)
+        except tk.TclError:
+            pass
+        self._scroll_job = None
+
+    def _reset_scroll(self) -> None:
+        self._cancel_scroll_job()
+        self._scroll_offset = 0.0
+        self._scroll_content_height = 0.0
+        self._scroll_last_time = 0.0
+        self._scroll_pause_until = time.monotonic() + SCROLL_TOP_PAUSE_SECONDS
+        self._scroll_phase = "top-pause"
+
+    def _schedule_scroll(self, delay_ms: int = SCROLL_FRAME_MS) -> None:
+        if self._scroll_job is not None:
+            return
+        if not _style_bool(self.style.get("auto_scroll", False), False):
+            return
+        visible_height = max(1.0, float(self.canvas.winfo_height() - 24))
+        if self._scroll_content_height <= visible_height + 1:
+            return
+        self._scroll_job = self.root.after(max(16, int(delay_ms)), self._scroll_tick)
+
+    def _scroll_tick(self) -> None:
+        self._scroll_job = None
+        if not _style_bool(self.style.get("auto_scroll", False), False):
+            if self._scroll_offset:
+                self._scroll_offset = 0.0
+                self._redraw()
+            return
+
+        visible_height = max(1.0, float(self.canvas.winfo_height() - 24))
+        max_offset = max(0.0, self._scroll_content_height - visible_height)
+        if max_offset <= 1:
+            if self._scroll_offset:
+                self._scroll_offset = 0.0
+                self._redraw()
+            return
+
+        now = time.monotonic()
+        if now < self._scroll_pause_until:
+            remaining_ms = int((self._scroll_pause_until - now) * 1000)
+            self._schedule_scroll(min(100, max(16, remaining_ms)))
+            return
+
+        if self._scroll_phase == "top-pause":
+            self._scroll_phase = "moving"
+            self._scroll_last_time = now
+        elif self._scroll_phase == "bottom-pause":
+            self._scroll_offset = 0.0
+            self._scroll_phase = "top-pause"
+            self._scroll_pause_until = now + SCROLL_TOP_PAUSE_SECONDS
+            self._scroll_last_time = now
+            self._redraw()
+            return
+
+        elapsed = min(0.1, max(0.0, now - (self._scroll_last_time or now)))
+        self._scroll_last_time = now
+        self._scroll_offset = min(
+            max_offset,
+            self._scroll_offset + SCROLL_SPEED_PX_PER_SECOND * elapsed,
+        )
+        if self._scroll_offset >= max_offset - 0.5:
+            self._scroll_offset = max_offset
+            self._scroll_phase = "bottom-pause"
+            self._scroll_pause_until = now + SCROLL_BOTTOM_PAUSE_SECONDS
+        self._redraw()
 
     def _redraw(self) -> None:
         canvas = self.canvas
@@ -373,6 +467,12 @@ class OverlayHostApp:
         height = max(1, canvas.winfo_height())
         if width <= 1 or height <= 1:
             return
+
+        auto_scroll = _style_bool(self.style.get("auto_scroll", False), False)
+        show_sequence = _style_bool(self.style.get("show_sequence", False), False)
+        if not auto_scroll:
+            self._scroll_offset = 0.0
+            self._cancel_scroll_job()
 
         canvas.delete("all")
         canvas.create_rectangle(0, 0, width - 1, height - 1, outline="#7fa3b8", width=1)
@@ -398,15 +498,17 @@ class OverlayHostApp:
             if dx != 0 or dy != 0
         ]
 
-        y = 12
+        logical_y = 12.0
         max_text_width = max(80, width - 28)
         line_gap = max(2, int(queue_font_size * 0.16))
-        for text in self.items:
+        for index, item in enumerate(self.items, start=1):
+            text = _display_queue_text(index, item, show_sequence)
+            draw_y = logical_y - self._scroll_offset
             if stroke_enabled:
                 for dx, dy in stroke_offsets:
                     canvas.create_text(
                         14 + dx,
-                        y + dy,
+                        draw_y + dy,
                         anchor="nw",
                         text=text,
                         fill=queue_stroke_color,
@@ -416,7 +518,7 @@ class OverlayHostApp:
                     )
             draw_id = canvas.create_text(
                 14,
-                y,
+                draw_y,
                 anchor="nw",
                 text=text,
                 fill=queue_text_color,
@@ -426,11 +528,19 @@ class OverlayHostApp:
             )
             bbox = canvas.bbox(draw_id)
             if bbox is None:
-                y += queue_font_size + line_gap + stroke_radius
+                text_height = queue_font_size + stroke_radius
             else:
-                y = bbox[3] + line_gap + stroke_radius
-            if y >= height - queue_font_size:
-                break
+                text_height = max(queue_font_size, bbox[3] - bbox[1])
+            logical_y += text_height + line_gap + stroke_radius
+
+        self._scroll_content_height = max(0.0, logical_y - 12.0 - line_gap)
+        visible_height = max(1.0, float(height - 24))
+        max_offset = max(0.0, self._scroll_content_height - visible_height)
+        if self._scroll_offset > max_offset:
+            self._scroll_offset = max_offset
+
+        if auto_scroll and max_offset > 1:
+            self._schedule_scroll()
 
     def run(self) -> None:
         self.root.mainloop()
@@ -442,8 +552,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--width", type=int, default=400)
     parser.add_argument("--height", type=int, default=400)
     parser.add_argument("--scale", type=int, default=50)
-    parser.add_argument("--no-topmost", action="store_true", default=False,
-                        help="启动时不置顶（可从主控制台切换）")
+    parser.add_argument(
+        "--no-topmost",
+        action="store_true",
+        default=False,
+        help="启动时不置顶（可从主控制台切换）",
+    )
     return parser
 
 
