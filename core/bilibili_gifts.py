@@ -2,9 +2,18 @@
 from __future__ import annotations
 
 if __package__:
+    from . import bilibili_protocol as _bilibili_protocol
+    from .bilibili_socket_guard import install_bilibili_socket_guard
     from .queue_rank_query import install_queue_rank_query_hook
 else:
+    import bilibili_protocol as _bilibili_protocol
+    from bilibili_socket_guard import install_bilibili_socket_guard
     from queue_rank_query import install_queue_rank_query_hook
+
+# bilibili_protocol is fully imported before server.py imports this catalog. Patch
+# its exact socket reader so a partial body timeout forces a clean reconnect
+# instead of shifting the binary packet boundary.
+install_bilibili_socket_guard(_bilibili_protocol)
 
 # server.py imports this catalog before QueueManager is defined. Install the
 # read-only query interface for both package imports and direct script runs.
