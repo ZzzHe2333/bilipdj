@@ -33,15 +33,42 @@ def _set_busy(app: Any, busy: bool) -> None:
         install_button.configure(state="normal" if enabled else "disabled")
 
 
-def build_about_tab(app: Any, frame: ttk.Frame, app_name: str, current_version: str, app_dir: Path) -> None:
+def _discard_prepared_update(
+    app: Any,
+    prepared: update_client.PreparedUpdate | None = None,
+) -> None:
+    target = prepared or getattr(app, "_prepared_update", None)
+    update_client.cleanup_prepared_update(target)
+    if target is getattr(app, "_prepared_update", None):
+        app._prepared_update = None
+
+
+def _on_root_destroy(app: Any, event: tk.Event[Any]) -> None:
+    if event.widget is not app.root:
+        return
+    if not getattr(app, "_update_launched", False):
+        _discard_prepared_update(app)
+
+
+def build_about_tab(
+    app: Any,
+    frame: ttk.Frame,
+    app_name: str,
+    current_version: str,
+    app_dir: Path,
+) -> None:
+    # VERSION is the single source of truth; keep the argument for API
+    # compatibility with older callers.
     current_version = APP_VERSION
     app._update_current_version = current_version
     app._update_app_dir = Path(app_dir)
     app._update_busy = False
     app._available_update = None
     app._prepared_update = None
+    app._update_launched = False
     app.update_status_var = tk.StringVar(value="尚未检查更新")
     app.update_progress_var = tk.DoubleVar(value=0.0)
+    app.root.bind("<Destroy>", lambda event: _on_root_destroy(app, event), add="+")
 
     ttk.Label(
         frame,
@@ -121,6 +148,7 @@ def auto_check(app: Any) -> None:
 def check_for_updates(app: Any, *, silent: bool = False) -> None:
     if getattr(app, "_update_busy", False):
         return
+    _discard_prepared_update(app)
     _set_busy(app, True)
     app.update_progress_var.set(0)
     app.update_status_var.set("正在检查 GitHub 最新版本…")
@@ -141,7 +169,7 @@ def _check_succeeded(app: Any, release: update_client.ReleaseInfo, silent: bool)
     current_version = app._update_current_version
     if update_client.is_newer_version(release.version, current_version):
         app._available_update = release
-        size_mb = release.zip_asset.size / 1024 ** 2
+        size_mb = release.zip_asset.size / 1024**2
         app.update_status_var.set(f"发现新版本 v{release.version}，Windows 更新包约 {size_mb:.1f} MB。")
         _set_busy(app, False)
         if not silent:
@@ -203,10 +231,10 @@ def _show_download_progress(app: Any, downloaded: int, total: int) -> None:
         percent = min(100.0, downloaded * 100.0 / total)
         app.update_progress_var.set(percent)
         app.update_status_var.set(
-            f"正在下载更新包：{percent:.1f}%（{downloaded / 1024 ** 2:.1f} / {total / 1024 ** 2:.1f} MB）"
+            f"正在下载更新包：{percent:.1f}%（{downloaded / 1024**2:.1f} / {total / 1024**2:.1f} MB）"
         )
     else:
-        app.update_status_var.set(f"正在下载更新包：已下载 {downloaded / 1024 ** 2:.1f} MB")
+        app.update_status_var.set(f"正在下载更新包：已下载 {downloaded / 1024**2:.1f} MB")
 
 
 def _download_failed(app: Any, error: str) -> None:
@@ -216,16 +244,22 @@ def _download_failed(app: Any, error: str) -> None:
 
 
 def _download_ready(app: Any, prepared: update_client.PreparedUpdate, updater_exe: Path) -> None:
+    previous = getattr(app, "_prepared_update", None)
+    if previous is not None and previous is not prepared:
+        update_client.cleanup_prepared_update(previous)
     app._prepared_update = prepared
     app.update_progress_var.set(100)
     app.update_status_var.set(f"更新包校验通过：SHA-256 {prepared.sha256[:12]}…")
+
     if not app.save_to_file(use_backend_api=False, switch_queue_slot=False):
         app.update_status_var.set("配置保存失败，已取消安装。")
+        _discard_prepared_update(app, prepared)
         _set_busy(app, False)
         return
 
+    server_was_running = bool(app.server_proc and app.server_proc.poll() is None)
     try:
-        if app.server_proc and app.server_proc.poll() is None:
+        if server_was_running:
             app.stop_server()
         app._stop_overlay_process()
         app._close_overlay_window()
@@ -236,10 +270,17 @@ def _download_ready(app: Any, prepared: update_client.PreparedUpdate, updater_ex
             current_pid=os.getpid(),
         )
     except Exception as exc:  # noqa: BLE001
+        _discard_prepared_update(app, prepared)
         app.update_status_var.set(f"启动更新器失败：{exc}")
         _set_busy(app, False)
+        if server_was_running:
+            try:
+                app.start_server()
+            except Exception:
+                pass
         messagebox.showerror("更新失败", str(exc))
         return
 
+    app._update_launched = True
     messagebox.showinfo("开始安装", "更新包已校验。程序将关闭，并由独立更新器完成替换和重启。")
     app.root.after(250, app.root.destroy)
