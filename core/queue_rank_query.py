@@ -16,6 +16,11 @@ import sys
 import threading
 from typing import Any, Callable
 
+if __package__:
+    from .style_option_guard import install_style_persistence_guard
+else:
+    from style_option_guard import install_style_persistence_guard
+
 QUEUE_RANK_QUERY_COMMANDS = frozenset({"我的排队", "我的名次"})
 _SERVER_MODULE_NAMES = frozenset({"core.server", "server", "__main__"})
 _PATCH_LOCK = threading.RLock()
@@ -45,6 +50,7 @@ def attach_queue_rank_query(queue_manager_cls: type[Any]) -> bool:
         if class_id in _PATCHED_CLASS_IDS or bool(
             getattr(queue_manager_cls, "_queue_rank_query_installed", False)
         ):
+            install_style_persistence_guard(queue_manager_cls)
             return True
 
         original_process = getattr(queue_manager_cls, "_process", None)
@@ -90,7 +96,14 @@ def attach_queue_rank_query(queue_manager_cls: type[Any]) -> bool:
             }
             logger = getattr(self, "_logger", None)
             if logger is not None:
-                logger.info(_format_query_log(user_name, numeric_uid, command, message))
+                logger.info(
+                    _format_query_log(
+                        user_name,
+                        numeric_uid,
+                        command,
+                        message,
+                    )
+                )
             return result
 
         @functools.wraps(original_process)
@@ -120,7 +133,12 @@ def attach_queue_rank_query(queue_manager_cls: type[Any]) -> bool:
         setattr(queue_manager_cls, "query_queue_rank", query_queue_rank)
         setattr(queue_manager_cls, "_process", process_with_rank_query)
         setattr(queue_manager_cls, "_queue_rank_query_installed", True)
-        setattr(queue_manager_cls, "_queue_rank_query_commands", QUEUE_RANK_QUERY_COMMANDS)
+        setattr(
+            queue_manager_cls,
+            "_queue_rank_query_commands",
+            QUEUE_RANK_QUERY_COMMANDS,
+        )
+        install_style_persistence_guard(queue_manager_cls)
         _PATCHED_CLASS_IDS.add(class_id)
         return True
 
@@ -169,7 +187,11 @@ def _restore_build_class_hook() -> None:
     with _PATCH_LOCK:
         wrapper = _HOOK_WRAPPER
         original = _HOOK_ORIGINAL
-        if wrapper is not None and original is not None and builtins.__build_class__ is wrapper:
+        if (
+            wrapper is not None
+            and original is not None
+            and builtins.__build_class__ is wrapper
+        ):
             builtins.__build_class__ = original
         timer = _HOOK_TIMER
         _HOOK_ORIGINAL = None
@@ -225,7 +247,10 @@ def install_queue_rank_query_hook() -> bool:
         _HOOK_ORIGINAL = current_builder
         _HOOK_WRAPPER = hooked_builder
         builtins.__build_class__ = hooked_builder
-        timer = threading.Timer(_HOOK_TIMEOUT_SECONDS, _restore_build_class_hook)
+        timer = threading.Timer(
+            _HOOK_TIMEOUT_SECONDS,
+            _restore_build_class_hook,
+        )
         timer.daemon = True
         _HOOK_TIMER = timer
         timer.start()
