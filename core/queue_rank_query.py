@@ -130,6 +130,10 @@ def _patch_existing_queue_manager() -> bool:
         module = sys.modules.get(module_name)
         if module is None:
             continue
+        if module_name == "__main__" and os.path.basename(
+            str(getattr(module, "__file__", ""))
+        ) != "server.py":
+            continue
         candidate = getattr(module, "QueueManager", None)
         if isinstance(candidate, type) and attach_queue_rank_query(candidate):
             return True
