@@ -15,7 +15,9 @@ from pathlib import Path
 from typing import Callable
 
 GITHUB_REPOSITORY = "ZzzHe2333/bilipdj"
-LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPOSITORY}/releases/latest"
+LATEST_RELEASE_API = (
+    f"https://api.github.com/repos/{GITHUB_REPOSITORY}/releases/latest"
+)
 USER_AGENT = "bilipdj-auto-updater"
 WINDOWS_ASSET_PREFIX = "bilibili-danmuji-windows-x64-"
 UPDATER_EXE_NAME = "updater.exe"
@@ -88,6 +90,16 @@ def _request(url: str, *, timeout: float = 15.0):
         raise UpdateError("连接 GitHub 超时") from exc
 
 
+def _asset_size(value: object, asset_name: str) -> int:
+    try:
+        size = int(value or 0)
+    except (TypeError, ValueError) as exc:
+        raise UpdateError(f"Release 附件大小无效：{asset_name}") from exc
+    if size < 0:
+        raise UpdateError(f"Release 附件大小不能为负数：{asset_name}")
+    return size
+
+
 def fetch_latest_release(*, timeout: float = 15.0) -> ReleaseInfo:
     with _request(LATEST_RELEASE_API, timeout=timeout) as response:
         try:
@@ -95,10 +107,18 @@ def fetch_latest_release(*, timeout: float = 15.0) -> ReleaseInfo:
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise UpdateError("GitHub Release 返回内容无法解析") from exc
 
+    if not isinstance(payload, dict):
+        raise UpdateError("GitHub Release 返回内容不是对象")
+
     tag_name = str(payload.get("tag_name", "")).strip()
     if not tag_name:
         raise UpdateError("最新 Release 缺少版本标签")
     version = tag_name[1:] if tag_name.lower().startswith("v") else tag_name
+    try:
+        normalize_version(version)
+    except ValueError as exc:
+        raise UpdateError(f"最新 Release 版本标签无效：{tag_name}") from exc
+
     assets = payload.get("assets", [])
     if not isinstance(assets, list):
         raise UpdateError("最新 Release 的附件列表无效")
@@ -107,6 +127,7 @@ def fetch_latest_release(*, timeout: float = 15.0) -> ReleaseInfo:
     checksum_names = {f"{zip_name}.sha256", f"{zip_name}.sha256.txt"}
     zip_asset: ReleaseAsset | None = None
     checksum_asset: ReleaseAsset | None = None
+
     for raw_asset in assets:
         if not isinstance(raw_asset, dict):
             continue
@@ -114,7 +135,11 @@ def fetch_latest_release(*, timeout: float = 15.0) -> ReleaseInfo:
         url = str(raw_asset.get("browser_download_url", "")).strip()
         if not name or not url:
             continue
-        asset = ReleaseAsset(name=name, download_url=url, size=max(0, int(raw_asset.get("size", 0) or 0)))
+        asset = ReleaseAsset(
+            name=name,
+            download_url=url,
+            size=_asset_size(raw_asset.get("size", 0), name),
+        )
         if name == zip_name:
             zip_asset = asset
         elif name in checksum_names:
@@ -123,7 +148,9 @@ def fetch_latest_release(*, timeout: float = 15.0) -> ReleaseInfo:
     if zip_asset is None:
         raise UpdateError(f"最新 Release 缺少 Windows 更新包：{zip_name}")
     if checksum_asset is None:
-        raise UpdateError(f"最新 Release 缺少 SHA-256 校验文件：{zip_name}.sha256")
+        raise UpdateError(
+            f"最新 Release 缺少 SHA-256 校验文件：{zip_name}.sha256"
+        )
 
     return ReleaseInfo(
         version=version,
@@ -151,8 +178,11 @@ def download_file(
 
     try:
         with _request(url, timeout=timeout) as response, temp_path.open("wb") as output:
-            header_size = int(response.headers.get("Content-Length", "0") or 0)
-            total = expected_size or header_size
+            try:
+                header_size = int(response.headers.get("Content-Length", "0") or 0)
+            except (TypeError, ValueError):
+                header_size = 0
+            declared_size = max(0, int(expected_size or header_size))
             downloaded = 0
             while True:
                 chunk = response.read(1024 * 1024)
@@ -161,10 +191,13 @@ def download_file(
                 output.write(chunk)
                 downloaded += len(chunk)
                 if progress is not None:
-                    progress(downloaded, total)
-        if expected_size and temp_path.stat().st_size != expected_size:
+                    progress(downloaded, declared_size)
+
+        actual_size = temp_path.stat().st_size
+        if declared_size and actual_size != declared_size:
             raise UpdateError(
-                f"下载文件大小不一致：预期 {expected_size} 字节，实际 {temp_path.stat().st_size} 字节"
+                f"下载文件大小不一致：预期 {declared_size} 字节，"
+                f"实际 {actual_size} 字节"
             )
         temp_path.replace(destination)
         return destination
@@ -206,8 +239,18 @@ def calculate_sha256(path: Path) -> str:
 def verify_sha256(path: Path, expected_digest: str) -> str:
     actual = calculate_sha256(path)
     if actual.lower() != expected_digest.lower():
-        raise UpdateError(f"更新包 SHA-256 校验失败：期望 {expected_digest}，实际 {actual}")
+        raise UpdateError(
+            f"更新包 SHA-256 校验失败：期望 {expected_digest}，实际 {actual}"
+        )
     return actual
+
+
+def cleanup_prepared_update(prepared: PreparedUpdate | None) -> None:
+    """Remove downloaded update files that are no longer needed."""
+
+    if prepared is None:
+        return
+    shutil.rmtree(Path(prepared.work_dir), ignore_errors=True)
 
 
 def prepare_release_download(
@@ -216,31 +259,44 @@ def prepare_release_download(
     progress: ProgressCallback | None = None,
     work_dir: Path | None = None,
 ) -> PreparedUpdate:
-    target_dir = Path(work_dir) if work_dir is not None else Path(tempfile.mkdtemp(prefix="bilipdj-update-"))
+    owns_work_dir = work_dir is None
+    target_dir = (
+        Path(work_dir)
+        if work_dir is not None
+        else Path(tempfile.mkdtemp(prefix="bilipdj-update-"))
+    )
     target_dir.mkdir(parents=True, exist_ok=True)
     checksum_path = target_dir / release.checksum_asset.name
     zip_path = target_dir / release.zip_asset.name
 
-    download_file(
-        release.checksum_asset.download_url,
-        checksum_path,
-        expected_size=release.checksum_asset.size,
-    )
-    download_file(
-        release.zip_asset.download_url,
-        zip_path,
-        expected_size=release.zip_asset.size,
-        progress=progress,
-    )
-    expected_digest = parse_checksum_file(checksum_path, release.zip_asset.name)
-    actual_digest = verify_sha256(zip_path, expected_digest)
-    return PreparedUpdate(
-        release=release,
-        work_dir=target_dir,
-        zip_path=zip_path,
-        checksum_path=checksum_path,
-        sha256=actual_digest,
-    )
+    try:
+        download_file(
+            release.checksum_asset.download_url,
+            checksum_path,
+            expected_size=release.checksum_asset.size,
+        )
+        download_file(
+            release.zip_asset.download_url,
+            zip_path,
+            expected_size=release.zip_asset.size,
+            progress=progress,
+        )
+        expected_digest = parse_checksum_file(
+            checksum_path,
+            release.zip_asset.name,
+        )
+        actual_digest = verify_sha256(zip_path, expected_digest)
+        return PreparedUpdate(
+            release=release,
+            work_dir=target_dir,
+            zip_path=zip_path,
+            checksum_path=checksum_path,
+            sha256=actual_digest,
+        )
+    except Exception:
+        if owns_work_dir:
+            shutil.rmtree(target_dir, ignore_errors=True)
+        raise
 
 
 def copy_updater_to_work_dir(updater_exe: Path, work_dir: Path) -> Path:
@@ -260,7 +316,10 @@ def launch_updater(
     main_exe_name: str = "main.exe",
     current_pid: int | None = None,
 ) -> subprocess.Popen[bytes]:
-    updater_copy = copy_updater_to_work_dir(updater_exe, prepared.work_dir)
+    updater_copy = copy_updater_to_work_dir(
+        updater_exe,
+        prepared.work_dir,
+    )
     pid = int(current_pid or os.getpid())
     command = [
         str(updater_copy),
@@ -271,7 +330,7 @@ def launch_updater(
         "--zip",
         str(prepared.zip_path.resolve()),
         "--main-exe",
-        main_exe_name,
+        str(main_exe_name),
         "--target-version",
         prepared.release.version,
     ]
