@@ -60,6 +60,7 @@ def build_about_tab(
     # VERSION is the single source of truth; keep the argument for API
     # compatibility with older callers.
     current_version = APP_VERSION
+    app.root.title(f"{app_name} 控制台 v{current_version}")
     app._update_current_version = current_version
     app._update_app_dir = Path(app_dir)
     app._update_busy = False
