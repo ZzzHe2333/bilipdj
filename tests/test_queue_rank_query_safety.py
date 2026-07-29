@@ -15,6 +15,38 @@ class QueueRankSafetyTests(unittest.TestCase):
         self.assertFalse(install_queue_rank_query_hook())
         self.assertIs(builtins.__build_class__, before)
 
+    def test_unrelated_main_queue_manager_is_not_patched(self) -> None:
+        import __main__
+
+        class UnrelatedQueueManager:
+            def _find_index(self, name):
+                return -1
+
+            def _process(self, *args):
+                return False, None
+
+        previous_class = getattr(__main__, "QueueManager", None)
+        previous_file = getattr(__main__, "__file__", None)
+        try:
+            __main__.QueueManager = UnrelatedQueueManager
+            __main__.__file__ = "/tmp/other_app.py"
+            before = builtins.__build_class__
+            self.assertFalse(install_queue_rank_query_hook())
+            self.assertFalse(hasattr(UnrelatedQueueManager, "query_queue_rank"))
+            self.assertIs(builtins.__build_class__, before)
+        finally:
+            if previous_class is None:
+                delattr(__main__, "QueueManager")
+            else:
+                __main__.QueueManager = previous_class
+            if previous_file is None:
+                try:
+                    delattr(__main__, "__file__")
+                except AttributeError:
+                    pass
+            else:
+                __main__.__file__ = previous_file
+
     def test_direct_attachment_is_read_only(self) -> None:
         class Manager:
             def __init__(self) -> None:
