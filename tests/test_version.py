@@ -18,6 +18,14 @@ class VersionSourceTests(unittest.TestCase):
     def test_version_uses_numeric_release_format(self) -> None:
         self.assertRegex(APP_VERSION, re.compile(r"^\d+(?:\.\d+){2,}$"))
 
+    def test_desktop_title_is_corrected_from_version_module(self) -> None:
+        source = (ROOT / "core" / "update_ui.py").read_text(encoding="utf-8")
+        self.assertIn("from .version import APP_VERSION", source)
+        self.assertIn(
+            'app.root.title(f"{app_name} 控制台 v{current_version}")',
+            source,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
