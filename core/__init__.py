@@ -17,6 +17,7 @@ except ImportError:  # tkinter is optional for backend-only/headless usage
         return None
 
 from .control_panel_bootstrap import install_control_panel_class_hook
+from .overlay_performance_guard import install_overlay_performance_guard
 from .runtime_guards import install_runtime_guards
 from .update_network import install_update_client_network_guard
 from .web_queue_layout import install_web_queue_layout_guard
@@ -25,6 +26,12 @@ from .web_queue_layout import install_web_queue_layout_guard
 # the narrowly scoped class hook before that script reaches ControlPanelApp.
 install_control_panel_class_hook()
 install_web_queue_layout_guard()
+try:
+    install_overlay_performance_guard()
+except Exception:
+    # Real overlay startup will still use the thread-safe refresh guard when the
+    # optional performance wrapper cannot be initialized in a headless runtime.
+    pass
 install_runtime_guards()
 try:
     install_update_client_network_guard()
@@ -36,6 +43,7 @@ except Exception:
 __all__ = [
     "SliderCheckbutton",
     "install_control_panel_class_hook",
+    "install_overlay_performance_guard",
     "install_runtime_guards",
     "install_slider_switches",
     "install_update_client_network_guard",
