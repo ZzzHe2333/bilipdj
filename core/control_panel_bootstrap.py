@@ -69,9 +69,11 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
             try:
                 from .control_panel_guard import patch_control_panel_class
                 from .control_panel_features import patch_control_panel_features
+                from .gui_log_sink import patch_control_panel_logging
 
                 patch_control_panel_class(cls)
                 patch_control_panel_features(cls)
+                patch_control_panel_logging(cls)
             finally:
                 _restore_hook()
             return cls
