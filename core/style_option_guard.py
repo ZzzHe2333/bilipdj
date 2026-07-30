@@ -54,8 +54,34 @@ def patch_style_module(module: Any) -> bool:
         return True
 
 
+def _schedule_server_guards(module_name: str) -> None:
+    try:
+        from .server_runtime_guard import schedule_server_runtime_guards
+    except ImportError:
+        try:
+            from server_runtime_guard import schedule_server_runtime_guards
+        except ImportError:
+            return
+    schedule_server_runtime_guards(module_name)
+
+
+def _patch_complete_server_module(module: Any) -> None:
+    patch_style_module(module)
+    try:
+        from .server_runtime_guard import patch_api_handler
+    except ImportError:
+        try:
+            from server_runtime_guard import patch_api_handler
+        except ImportError:
+            return
+    patch_api_handler(module)
+
+
 def install_style_persistence_guard(queue_manager_cls: type[Any]) -> bool:
-    """Patch the owning server module when its QueueManager is instantiated."""
+    """Patch the owning server module during import and again at construction."""
+
+    module_name = str(getattr(queue_manager_cls, "__module__", "") or "")
+    _schedule_server_guards(module_name)
 
     with _PATCH_LOCK:
         if bool(getattr(queue_manager_cls, "_style_persistence_guard_installed", False)):
@@ -67,8 +93,8 @@ def install_style_persistence_guard(queue_manager_cls: type[Any]) -> bool:
         @functools.wraps(original_init)
         def init_with_style_guard(self: Any, *args: Any, **kwargs: Any) -> None:
             original_init(self, *args, **kwargs)
-            module = sys.modules.get(str(getattr(queue_manager_cls, "__module__", "")))
-            patch_style_module(module)
+            module = sys.modules.get(module_name)
+            _patch_complete_server_module(module)
 
         setattr(queue_manager_cls, "__init__", init_with_style_guard)
         setattr(queue_manager_cls, "_style_persistence_guard_installed", True)
