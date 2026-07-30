@@ -18,15 +18,23 @@ except ImportError:  # tkinter is optional for backend-only/headless usage
 
 from .control_panel_bootstrap import install_control_panel_class_hook
 from .runtime_guards import install_runtime_guards
+from .update_network import install_update_client_network_guard
 
-# The packaged entry point executes core/control_panel.py as __main__.  Install
+# The packaged entry point executes core/control_panel.py as __main__. Install
 # the narrowly scoped class hook before that script reaches ControlPanelApp.
 install_control_panel_class_hook()
 install_runtime_guards()
+try:
+    install_update_client_network_guard()
+except Exception:
+    # Update discovery remains available through the SDK's original request
+    # path if the optional network preference layer cannot initialize.
+    pass
 
 __all__ = [
     "SliderCheckbutton",
     "install_control_panel_class_hook",
     "install_runtime_guards",
     "install_slider_switches",
+    "install_update_client_network_guard",
 ]
