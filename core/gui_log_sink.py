@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import functools
+import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,10 @@ from typing import Any
 from . import log_manager
 
 _PATCH_LOCK = threading.RLock()
+_BACKEND_PANEL_LINE = re.compile(
+    r"^\d{2}:\d{2}:\d{2}\s+\[(DEBUG|INFO|WARNING|ERROR|CRITICAL)\]\s+",
+    re.IGNORECASE,
+)
 
 
 def _room_token(panel: Any) -> str:
@@ -29,6 +34,15 @@ def _is_error_message(message: str, warn: bool) -> bool:
         return True
     text = str(message or "")
     return any(marker in text for marker in ("失败", "错误", "异常", "Traceback", "CRITICAL", "[ERROR]"))
+
+
+def _is_backend_forwarded_line(message: str) -> bool:
+    text = str(message or "").strip()
+    return bool(
+        _BACKEND_PANEL_LINE.match(text)
+        or text.startswith("[STDOUT]")
+        or text.startswith("[STDERR]")
+    )
 
 
 def _append_file(panel: Any, module: Any, message: str, warn: bool) -> None:
@@ -57,10 +71,11 @@ def patch_control_panel_logging(panel_class: type[Any]) -> bool:
         def append_log_with_file(self: Any, message: str, warn: bool = False) -> None:
             sanitizer = getattr(module, "sanitize_log_message", None)
             safe_message = sanitizer(str(message)) if callable(sanitizer) else str(message)
-            try:
-                _append_file(self, module, safe_message, bool(warn))
-            except Exception:
-                pass
+            if not _is_backend_forwarded_line(safe_message):
+                try:
+                    _append_file(self, module, safe_message, bool(warn))
+                except Exception:
+                    pass
             return current(self, safe_message, warn=warn)
 
         setattr(append_log_with_file, "_bilipdj_gui_log_sink", True)
