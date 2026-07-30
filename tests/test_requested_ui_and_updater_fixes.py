@@ -127,9 +127,11 @@ class UpdaterDirectoryRetryTests(unittest.TestCase):
                     delay=0.01,
                 )
 
-    def test_updater_spec_uses_resilient_entry(self) -> None:
+    def test_updater_spec_uses_animated_resilient_entry(self) -> None:
         source = (ROOT / "updater.spec").read_text(encoding="utf-8")
-        self.assertIn('"core/updater_v2.py"', source)
+        self.assertIn('"core/updater_gui.py"', source)
+        self.assertIn('"core.updater_v2"', source)
+        self.assertIn('"core.log_manager"', source)
 
 
 if __name__ == "__main__":
