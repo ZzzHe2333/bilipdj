@@ -39,7 +39,10 @@ def _safe_css_text(value: Any, default: str) -> str:
 
 
 def _enhance_css(css: str, style: dict[str, Any]) -> str:
-    font_family = _safe_css_text(style.get("queue_font_family"), str(STYLE_OPTION_DEFAULTS["queue_font_family"]))
+    font_family = _safe_css_text(
+        style.get("queue_font_family"),
+        str(STYLE_OPTION_DEFAULTS["queue_font_family"]),
+    )
     letter = _clamp_int(style.get("queue_letter_spacing"), 0, -20, 100)
     word = _clamp_int(style.get("queue_word_spacing"), 0, -20, 200)
     gap = _clamp_int(style.get("queue_item_gap"), 10, 0, 200)
@@ -204,6 +207,8 @@ def _patch_login_callback(server_module: Any) -> None:
 
 
 def _patch_complete_server_module(module: Any) -> None:
+    if module is None:
+        return
     patch_style_module(module)
     try:
         from .server_runtime_guard import patch_api_handler
@@ -223,6 +228,9 @@ def install_style_persistence_guard(queue_manager_cls: type[Any]) -> bool:
 
     module_name = str(getattr(queue_manager_cls, "__module__", "") or "")
     _patch_queue_manager_class(queue_manager_cls)
+    # QueueManager is defined after setup_logging/build_index_css. Patch those
+    # synchronously now so run_server cannot race ahead of the background guard.
+    _patch_complete_server_module(sys.modules.get(module_name))
     _schedule_server_guards(module_name)
 
     with _PATCH_LOCK:
@@ -235,8 +243,7 @@ def install_style_persistence_guard(queue_manager_cls: type[Any]) -> bool:
         @functools.wraps(original_init)
         def init_with_style_guard(self: Any, *args: Any, **kwargs: Any) -> None:
             original_init(self, *args, **kwargs)
-            module = sys.modules.get(module_name)
-            _patch_complete_server_module(module)
+            _patch_complete_server_module(sys.modules.get(module_name))
 
         setattr(queue_manager_cls, "__init__", init_with_style_guard)
         setattr(queue_manager_cls, "_style_persistence_guard_installed", True)
