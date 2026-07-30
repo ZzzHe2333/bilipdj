@@ -16,12 +16,17 @@ except ImportError:  # tkinter is optional for backend-only/headless usage
     def install_slider_switches() -> None:
         return None
 
+from .control_panel_bootstrap import install_control_panel_class_hook
 from .runtime_guards import install_runtime_guards
 
+# The packaged entry point executes core/control_panel.py as __main__.  Install
+# the narrowly scoped class hook before that script reaches ControlPanelApp.
+install_control_panel_class_hook()
 install_runtime_guards()
 
 __all__ = [
     "SliderCheckbutton",
+    "install_control_panel_class_hook",
     "install_runtime_guards",
     "install_slider_switches",
 ]
