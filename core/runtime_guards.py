@@ -1,6 +1,7 @@
 """Small process-wide guards that do not require GUI or network access."""
 from __future__ import annotations
 
+import builtins
 import functools
 import json
 import os
@@ -10,19 +11,17 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 _GUARD_LOCK = threading.RLock()
 _CLEANUP_TARGETS: set[str] = set()
+_OVERLAY_IMPORT_ORIGINAL: Callable[..., Any] | None = None
+_OVERLAY_IMPORT_WRAPPER: Callable[..., Any] | None = None
+_OVERLAY_IMPORT_TIMER: threading.Timer | None = None
 
 
 def install_openai_protocol_guard(module: Any | None = None) -> bool:
-    """Keep a custom client's selected API protocol when only its model changes.
-
-    Catalog-backed providers may intentionally map different models to different
-    protocols, so this sticky behaviour is limited to the custom provider whose
-    model catalog is empty.
-    """
+    """Keep a custom client's selected API protocol when only its model changes."""
 
     if module is None:
         from . import openai_api as module
@@ -30,7 +29,6 @@ def install_openai_protocol_guard(module: Any | None = None) -> bool:
     client_class = getattr(module, "OpenAIAnswerClient", None)
     if not isinstance(client_class, type):
         return False
-
     original = getattr(client_class, "ask", None)
     if not callable(original):
         return False
@@ -55,6 +53,66 @@ def install_openai_protocol_guard(module: Any | None = None) -> bool:
     setattr(ask_with_sticky_custom_style, "_bilipdj_custom_style_guard", True)
     setattr(client_class, "ask", ask_with_sticky_custom_style)
     return True
+
+
+def _restore_overlay_import_guard() -> None:
+    global _OVERLAY_IMPORT_ORIGINAL, _OVERLAY_IMPORT_WRAPPER, _OVERLAY_IMPORT_TIMER
+    with _GUARD_LOCK:
+        wrapper = _OVERLAY_IMPORT_WRAPPER
+        original = _OVERLAY_IMPORT_ORIGINAL
+        if wrapper is not None and original is not None and builtins.__import__ is wrapper:
+            builtins.__import__ = original
+        timer = _OVERLAY_IMPORT_TIMER
+        _OVERLAY_IMPORT_ORIGINAL = None
+        _OVERLAY_IMPORT_WRAPPER = None
+        _OVERLAY_IMPORT_TIMER = None
+        if timer is not None and timer is not threading.current_thread():
+            timer.cancel()
+
+
+def install_overlay_import_guard(*, timeout: float = 120.0) -> bool:
+    """Patch ``core.overlay_host`` after import and before its caller gets control."""
+
+    global _OVERLAY_IMPORT_ORIGINAL, _OVERLAY_IMPORT_WRAPPER, _OVERLAY_IMPORT_TIMER
+    from .overlay_refresh_guard import patch_overlay_module
+
+    for module_name in ("core.overlay_host", "overlay_host"):
+        module = sys.modules.get(module_name)
+        if module is not None and patch_overlay_module(module):
+            return True
+
+    with _GUARD_LOCK:
+        if _OVERLAY_IMPORT_WRAPPER is not None:
+            return True
+        current_import: Callable[..., Any] = builtins.__import__
+
+        @functools.wraps(current_import)
+        def guarded_import(
+            name: str,
+            globals: dict[str, Any] | None = None,
+            locals: dict[str, Any] | None = None,
+            fromlist: tuple[str, ...] | list[str] = (),
+            level: int = 0,
+        ) -> Any:
+            imported = current_import(name, globals, locals, fromlist, level)
+            for module_name in ("core.overlay_host", "overlay_host"):
+                module = sys.modules.get(module_name)
+                if module is not None and patch_overlay_module(module):
+                    _restore_overlay_import_guard()
+                    break
+            return imported
+
+        _OVERLAY_IMPORT_ORIGINAL = current_import
+        _OVERLAY_IMPORT_WRAPPER = guarded_import
+        builtins.__import__ = guarded_import
+        timer = threading.Timer(
+            max(1.0, float(timeout)),
+            _restore_overlay_import_guard,
+        )
+        timer.daemon = True
+        _OVERLAY_IMPORT_TIMER = timer
+        timer.start()
+        return True
 
 
 def _application_dir() -> Path:
@@ -93,12 +151,7 @@ def cleanup_update_residue(
     attempts: int = 20,
     retry_delay: float = 1.0,
 ) -> bool:
-    """Delete the exact update work directory recorded by the updater.
-
-    The path is accepted only when it is a direct child of the system temporary
-    directory and has the updater's generated prefix. Symlinks are unlinked
-    rather than followed.
-    """
+    """Delete the exact update work directory recorded by the updater."""
 
     target = _validated_cleanup_target(app_dir)
     if target is None:
@@ -158,19 +211,21 @@ def install_runtime_guards() -> None:
         "on",
     }:
         return
-    try:
-        install_openai_protocol_guard()
-    except Exception:
-        pass
-    try:
-        schedule_update_residue_cleanup()
-    except Exception:
-        pass
+    for installer in (
+        install_openai_protocol_guard,
+        install_overlay_import_guard,
+        schedule_update_residue_cleanup,
+    ):
+        try:
+            installer()
+        except Exception:
+            pass
 
 
 __all__ = [
     "cleanup_update_residue",
     "install_openai_protocol_guard",
+    "install_overlay_import_guard",
     "install_runtime_guards",
     "schedule_update_residue_cleanup",
 ]
