@@ -36,6 +36,12 @@ def patch_control_panel_ui_finish(panel_class: type[Any]) -> bool:
 
         @functools.wraps(current)
         def build_ui_finalized(self: Any, *args: Any, **kwargs: Any) -> Any:
+            retention_var = getattr(self, "retention_days_var", None)
+            try:
+                if retention_var is not None and str(retention_var.get()).strip() in {"", "7"}:
+                    retention_var.set("31")
+            except Exception:
+                pass
             result = current(self, *args, **kwargs)
             try:
                 self.root.title(f"{module.APP_NAME} 控制台 v{APP_VERSION}")
