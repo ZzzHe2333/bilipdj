@@ -4,11 +4,11 @@ from pathlib import Path
 project_root = Path(SPECPATH).resolve()
 
 a = Analysis(
-    ["core/updater.py"],
-    pathex=[str(project_root)],
+    ["core/updater_v2.py"],
+    pathex=[str(project_root), str(project_root / "core")],
     binaries=[],
     datas=[],
-    hiddenimports=[],
+    hiddenimports=["updater"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
