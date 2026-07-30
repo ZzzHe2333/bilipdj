@@ -314,7 +314,10 @@ def perform_update(
             _write_log(log_path, "没有可重新启动的主程序")
         raise
     finally:
-        remove_path_with_retry(staging_dir)
+        try:
+            remove_path_with_retry(staging_dir)
+        except OSError as cleanup_error:
+            _write_log(log_path, f"清理更新暂存目录失败：{cleanup_error}")
 
 
 def parse_args() -> argparse.Namespace:
