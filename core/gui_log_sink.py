@@ -16,7 +16,14 @@ _BACKEND_PANEL_LINE = re.compile(
 )
 
 
-def _room_token(panel: Any) -> str:
+def _room_token(panel: Any, module: Any) -> str:
+    config_path = getattr(module, "CONFIG_PATH", None)
+    if config_path is not None:
+        try:
+            if not Path(config_path).is_file():
+                return "unknow"
+        except (OSError, TypeError, ValueError):
+            return "unknow"
     platform = str(getattr(getattr(panel, "platform_var", None), "get", lambda: "")()).strip()
     if "抖音" in platform:
         for attribute in ("douyin_live_id_var", "douyin_room_id_var", "douyin_user_unique_id_var"):
@@ -57,7 +64,7 @@ def _is_backend_forwarded_line(message: str) -> bool:
 
 def _append_file(panel: Any, module: Any, message: str, warn: bool) -> None:
     kind = "error" if _is_error_message(message, warn) else "common"
-    path = log_manager.daily_log_path(kind, _room_token(panel), module.APP_DIR)
+    path = log_manager.daily_log_path(kind, _room_token(panel, module), module.APP_DIR)
     timestamp = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
