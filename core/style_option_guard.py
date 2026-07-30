@@ -1,4 +1,4 @@
-"""Preserve queue display options when older style editors save partial data."""
+"""Preserve and extend queue display options for every style editor."""
 from __future__ import annotations
 
 import functools
@@ -6,33 +6,70 @@ import sys
 import threading
 from typing import Any
 
-DISPLAY_STYLE_DEFAULTS: dict[str, bool] = {
+STYLE_OPTION_DEFAULTS: dict[str, Any] = {
     "auto_scroll": False,
     "show_sequence": False,
+    "queue_font_family": "Microsoft YaHei, Noto Sans SC, PingFang SC, sans-serif",
+    "queue_letter_spacing": 0,
+    "queue_word_spacing": 0,
+    "queue_line_height": "1.20",
+    "queue_item_gap": 10,
+    "queue_text_align": "left",
+    "queue_text_opacity": 100,
+    "queue_item_padding_x": 14,
+    "queue_item_padding_y": 8,
+}
+DISPLAY_STYLE_DEFAULTS = STYLE_OPTION_DEFAULTS
+STYLE_CSS_VARIABLES: dict[str, str] = {
+    "queue_font_family": "--queue-font-family",
+    "queue_letter_spacing": "--queue-letter-spacing",
+    "queue_word_spacing": "--queue-word-spacing",
+    "queue_line_height": "--queue-line-height",
+    "queue_item_gap": "--queue-item-gap",
+    "queue_text_align": "--queue-text-align",
+    "queue_text_opacity": "--queue-text-opacity",
+    "queue_item_padding_x": "--queue-item-padding-x",
+    "queue_item_padding_y": "--queue-item-padding-y",
 }
 _PATCH_LOCK = threading.RLock()
 
 
+def _patch_logging(module: Any) -> None:
+    try:
+        from .log_manager import patch_server_logging
+    except ImportError:
+        try:
+            from log_manager import patch_server_logging
+        except ImportError:
+            return
+    patch_server_logging(module)
+
+
 def patch_style_module(module: Any) -> bool:
-    """Add display defaults and make ``save_style`` merge current full state."""
+    """Add style defaults and make ``save_style`` merge current full state."""
 
     if module is None:
         return False
     defaults = getattr(module, "DEFAULT_STYLE", None)
     default_config = getattr(module, "DEFAULT_CONFIG", None)
+    css_map = getattr(module, "STYLE_CSS_VAR_MAP", None)
     load_style = getattr(module, "load_style", None)
     save_style = getattr(module, "save_style", None)
     if not isinstance(defaults, dict) or not callable(load_style) or not callable(save_style):
         return False
 
     with _PATCH_LOCK:
-        for key, value in DISPLAY_STYLE_DEFAULTS.items():
+        for key, value in STYLE_OPTION_DEFAULTS.items():
             defaults.setdefault(key, value)
         if isinstance(default_config, dict):
             style_defaults = default_config.setdefault("style", {})
             if isinstance(style_defaults, dict):
-                for key, value in DISPLAY_STYLE_DEFAULTS.items():
+                for key, value in STYLE_OPTION_DEFAULTS.items():
                     style_defaults.setdefault(key, value)
+        if isinstance(css_map, dict):
+            for key, value in STYLE_CSS_VARIABLES.items():
+                css_map.setdefault(key, value)
+        _patch_logging(module)
 
         if bool(getattr(save_style, "_bilipdj_preserves_style_options", False)):
             return True
@@ -45,7 +82,7 @@ def patch_style_module(module: Any) -> bool:
             merged = dict(current) if isinstance(current, dict) else {}
             if isinstance(data, dict):
                 merged.update(data)
-            for key, value in DISPLAY_STYLE_DEFAULTS.items():
+            for key, value in STYLE_OPTION_DEFAULTS.items():
                 merged.setdefault(key, value)
             return original_save(merged)
 
@@ -143,6 +180,8 @@ def install_style_persistence_guard(queue_manager_cls: type[Any]) -> bool:
 
 __all__ = [
     "DISPLAY_STYLE_DEFAULTS",
+    "STYLE_CSS_VARIABLES",
+    "STYLE_OPTION_DEFAULTS",
     "install_style_persistence_guard",
     "patch_style_module",
 ]
