@@ -14,6 +14,8 @@ hiddenimports = [
     "core.bilibili_gifts",
     "core.update_client",
     "core.update_ui",
+    "core.control_panel_bootstrap",
+    "core.control_panel_guard",
     "qrcode",
     "qrcode.main",
     "qrcode.constants",
