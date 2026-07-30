@@ -24,15 +24,6 @@ _ADVANCED_STYLE_FIELDS = (
     ("queue_item_padding_x", "左右内边距(px)", "entry", ()),
     ("queue_item_padding_y", "上下内边距(px)", "entry", ()),
 )
-_INT_STYLE_KEYS = {
-    "queue_font_size",
-    "queue_letter_spacing",
-    "queue_word_spacing",
-    "queue_item_gap",
-    "queue_text_opacity",
-    "queue_item_padding_x",
-    "queue_item_padding_y",
-}
 
 
 def _iter_widgets(widget: Any):
@@ -110,7 +101,11 @@ def _add_advanced_style_controls(panel: Any, frame: Any, module: Any) -> None:
         row = index // 2
         column = (index % 2) * 2
         module.ttk.Label(advanced, text=label).grid(
-            row=row, column=column, sticky="w", padx=(0 if column == 0 else 16, 6), pady=4
+            row=row,
+            column=column,
+            sticky="w",
+            padx=(0 if column == 0 else 16, 6),
+            pady=4,
         )
         var = module.tk.StringVar(value=str(style.get(key, STYLE_OPTION_DEFAULTS[key])))
         panel._style_vars[key] = var
@@ -127,15 +122,21 @@ def _add_advanced_style_controls(panel: Any, frame: Any, module: Any) -> None:
         widget.grid(row=row, column=column + 1, sticky="ew", pady=4)
     module.ttk.Label(
         advanced,
-        text="字体族可填写系统字体名称并用逗号分隔；保存操作在后台执行，不会阻塞透明窗口。",
+        text="字体族可填写系统字体名称并用逗号分隔；字体样式保存后由网页和透明窗口热更新。",
         wraplength=760,
-    ).grid(row=(len(_ADVANCED_STYLE_FIELDS) + 1) // 2, column=0, columnspan=4, sticky="w", pady=(8, 0))
+    ).grid(
+        row=(len(_ADVANCED_STYLE_FIELDS) + 1) // 2,
+        column=0,
+        columnspan=4,
+        sticky="w",
+        pady=(8, 0),
+    )
     panel._bilipdj_advanced_style_controls = True
 
 
 def _clamp_int(value: Any, default: int, low: int, high: int) -> int:
     try:
-        parsed = int(str(value).strip())
+        parsed = int(float(str(value).strip().removesuffix("px")))
     except (TypeError, ValueError):
         parsed = default
     return max(low, min(high, parsed))
@@ -178,6 +179,20 @@ def _collect_style_payload(panel: Any) -> dict[str, Any]:
     for key, default in STYLE_OPTION_DEFAULTS.items():
         data.setdefault(key, default)
     return data
+
+
+def _save_style_synchronously(panel: Any, module: Any, payload: dict[str, Any]) -> bool:
+    try:
+        backend = module.load_backend_server_module()
+        backend.save_style(payload)
+    except Exception as exc:
+        if hasattr(panel, "_style_save_status_var"):
+            panel._style_save_status_var.set("保存失败")
+        panel._append_log(f"[GUI] 样式写入失败：{exc}", warn=True)
+        return False
+    if hasattr(panel, "_style_save_status_var"):
+        panel._style_save_status_var.set("保存成功")
+    return True
 
 
 def _start_async_style_save(panel: Any, module: Any, payload: dict[str, Any]) -> None:
@@ -253,7 +268,17 @@ def patch_control_panel_features(panel_class: type[Any]) -> bool:
         original_settings_tab = getattr(panel_class, "_build_settings_tab", None)
         original_load = getattr(panel_class, "load_from_file", None)
         original_gather = getattr(panel_class, "gather_config", None)
-        if not all(callable(item) for item in (original_build_ui, original_style_tab, original_settings_tab, original_load, original_gather)):
+        original_save_to_file = getattr(panel_class, "save_to_file", None)
+        original_restart_overlay = getattr(panel_class, "_restart_overlay_process", None)
+        required = (
+            original_build_ui,
+            original_style_tab,
+            original_settings_tab,
+            original_load,
+            original_gather,
+            original_save_to_file,
+        )
+        if not all(callable(item) for item in required):
             return False
 
         def build_about_tab(self: Any, frame: Any) -> None:
@@ -271,8 +296,11 @@ def patch_control_panel_features(panel_class: type[Any]) -> bool:
             _add_advanced_style_controls(self, frame, module)
             return result
 
-        def save_style_async(self: Any) -> bool:
-            _start_async_style_save(self, module, _collect_style_payload(self))
+        def save_style_nonblocking(self: Any) -> bool:
+            payload = _collect_style_payload(self)
+            if bool(getattr(self, "_bilipdj_force_sync_style_save", False)):
+                return _save_style_synchronously(self, module, payload)
+            _start_async_style_save(self, module, payload)
             return True
 
         @functools.wraps(original_settings_tab)
@@ -290,7 +318,12 @@ def patch_control_panel_features(panel_class: type[Any]) -> bool:
         def load_with_cleanup(self: Any, *args: Any, **kwargs: Any) -> Any:
             result = original_load(self, *args, **kwargs)
             try:
-                days = _clamp_int(self.retention_days_var.get(), log_manager.DEFAULT_RETENTION_DAYS, 1, 3650)
+                days = _clamp_int(
+                    self.retention_days_var.get(),
+                    log_manager.DEFAULT_RETENTION_DAYS,
+                    1,
+                    3650,
+                )
                 self.retention_days_var.set(str(days))
                 deleted = log_manager.cleanup_logs(module.APP_DIR, days)
                 if deleted:
@@ -316,13 +349,36 @@ def patch_control_panel_features(panel_class: type[Any]) -> bool:
                 payload["logging"] = logging_cfg
             return payload
 
+        @functools.wraps(original_save_to_file)
+        def save_to_file_without_overlay_restart(self: Any, *args: Any, **kwargs: Any) -> bool:
+            # The updater must persist style synchronously before the GUI exits.
+            force_sync = kwargs.get("use_backend_api") is False
+            self._bilipdj_force_sync_style_save = force_sync
+            self._bilipdj_suppress_overlay_restart = True
+            try:
+                return bool(original_save_to_file(self, *args, **kwargs))
+            finally:
+                self._bilipdj_force_sync_style_save = False
+                self._bilipdj_suppress_overlay_restart = False
+
         setattr(panel_class, "_build_about_tab", build_about_tab)
         setattr(panel_class, "_build_ui", build_ui_with_update_page)
         setattr(panel_class, "_build_style_tab", build_style_with_advanced_controls)
-        setattr(panel_class, "_save_style", save_style_async)
+        setattr(panel_class, "_save_style", save_style_nonblocking)
         setattr(panel_class, "_build_settings_tab", build_settings_with_log_retention)
         setattr(panel_class, "load_from_file", load_with_cleanup)
         setattr(panel_class, "gather_config", gather_with_retention)
+        setattr(panel_class, "save_to_file", save_to_file_without_overlay_restart)
+
+        if callable(original_restart_overlay):
+            @functools.wraps(original_restart_overlay)
+            def restart_overlay_unless_suppressed(self: Any, *args: Any, **kwargs: Any) -> Any:
+                if bool(getattr(self, "_bilipdj_suppress_overlay_restart", False)):
+                    return None
+                return original_restart_overlay(self, *args, **kwargs)
+
+            setattr(panel_class, "_restart_overlay_process", restart_overlay_unless_suppressed)
+
         setattr(panel_class, "_bilipdj_feature_pack_installed", True)
         return True
 
