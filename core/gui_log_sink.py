@@ -55,11 +55,13 @@ def patch_control_panel_logging(panel_class: type[Any]) -> bool:
 
         @functools.wraps(current)
         def append_log_with_file(self: Any, message: str, warn: bool = False) -> None:
+            sanitizer = getattr(module, "sanitize_log_message", None)
+            safe_message = sanitizer(str(message)) if callable(sanitizer) else str(message)
             try:
-                _append_file(self, module, str(message), bool(warn))
+                _append_file(self, module, safe_message, bool(warn))
             except Exception:
                 pass
-            return current(self, message, warn=warn)
+            return current(self, safe_message, warn=warn)
 
         setattr(append_log_with_file, "_bilipdj_gui_log_sink", True)
         setattr(panel_class, "_append_log", append_log_with_file)
