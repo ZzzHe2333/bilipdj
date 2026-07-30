@@ -29,12 +29,17 @@ def _gift_only_queue_plan(self: Any, uid: int, uname: str, msg: str) -> list[str
     lock = getattr(self, "_lock", None)
     if lock is None:
         return None
+    try:
+        numeric_uid = int(uid or 0)
+    except (TypeError, ValueError):
+        return None
     with lock:
-        if int(uid or 0) not in getattr(self, "_gift_queue_credits", {}):
+        credits = getattr(self, "_gift_queue_credits", {})
+        if numeric_uid not in credits:
             return None
         if self._find_index(str(uname or "").strip()) >= 0:
             return None
-        credit = max(0, int(getattr(self, "_gift_queue_credits", {}).get(int(uid), 0) or 0))
+        credit = max(0, int(credits.get(numeric_uid, 0) or 0))
         requested = [
             value
             for value in re.split(r"[\s,，、]+", command[2:].strip())
@@ -61,7 +66,7 @@ def _gift_only_queue_plan(self: Any, uid: int, uname: str, msg: str) -> list[str
 
 
 def patch_queue_manager(queue_manager_cls: type[Any]) -> bool:
-    """Install queue sanitizer and duplicate-insertion fixes."""
+    """Install queue sanitizer and, when available, duplicate-insertion fixes."""
 
     if not isinstance(queue_manager_cls, type):
         return False
@@ -69,9 +74,9 @@ def patch_queue_manager(queue_manager_cls: type[Any]) -> bool:
         if bool(getattr(queue_manager_cls, "_bilipdj_queue_logic_guard_installed", False)):
             return True
         original_strip = getattr(queue_manager_cls, "_strip_html", None)
-        original_process = getattr(queue_manager_cls, "_process", None)
-        if not callable(original_strip) or not callable(original_process):
+        if not callable(original_strip):
             return False
+        original_process = getattr(queue_manager_cls, "_process", None)
 
         @functools.wraps(original_strip)
         def strip_preserving_super_marker(text: Any) -> str:
@@ -84,58 +89,61 @@ def patch_queue_manager(queue_manager_cls: type[Any]) -> bool:
                     return f"<{item_id}>{extra}" if extra else f"<{item_id}>"
             return str(original_strip(raw) or "").strip()
 
-        @functools.wraps(original_process)
-        def process_without_double_insertion(
-            self: Any,
-            uid: int,
-            uname: str,
-            msg: str,
-            is_anchor: bool,
-            is_admin: bool,
-            is_guard: bool,
-            guard_level: int,
-        ):
-            gift_only_plan = _gift_only_queue_plan(self, uid, uname, msg)
-            result = original_process(
-                self,
-                uid,
-                uname,
-                msg,
-                is_anchor,
-                is_admin,
-                is_guard,
-                guard_level,
-            )
-            modified = bool(result[0]) if isinstance(result, tuple) and result else False
-            if not modified or gift_only_plan is None:
-                return result
-
-            lock = getattr(self, "_lock", None)
-            if lock is None:
-                return result
-            user_name = str(uname or "").strip()
-            with lock:
-                current = list(getattr(self, "_persons", []))
-                if len(current) != len(gift_only_plan) + 1:
-                    return result
-                for index, item in enumerate(current):
-                    if _queue_identity(item) != user_name:
-                        continue
-                    candidate = current[:index] + current[index + 1 :]
-                    if candidate != gift_only_plan:
-                        continue
-                    self._remove_queue_item_unlocked(index)
-                    logger = getattr(self, "_logger", None)
-                    if logger is not None:
-                        logger.warning(
-                            "[队列修复] 已移除礼物插队与舰长插队叠加产生的重复项：%s",
-                            user_name,
-                        )
-                    break
-            return result
-
         setattr(queue_manager_cls, "_strip_html", staticmethod(strip_preserving_super_marker))
-        setattr(queue_manager_cls, "_process", process_without_double_insertion)
+
+        if callable(original_process):
+            @functools.wraps(original_process)
+            def process_without_double_insertion(
+                self: Any,
+                uid: int,
+                uname: str,
+                msg: str,
+                is_anchor: bool,
+                is_admin: bool,
+                is_guard: bool,
+                guard_level: int,
+            ):
+                gift_only_plan = _gift_only_queue_plan(self, uid, uname, msg)
+                result = original_process(
+                    self,
+                    uid,
+                    uname,
+                    msg,
+                    is_anchor,
+                    is_admin,
+                    is_guard,
+                    guard_level,
+                )
+                modified = bool(result[0]) if isinstance(result, tuple) and result else False
+                if not modified or gift_only_plan is None:
+                    return result
+
+                lock = getattr(self, "_lock", None)
+                if lock is None:
+                    return result
+                user_name = str(uname or "").strip()
+                with lock:
+                    current = list(getattr(self, "_persons", []))
+                    if len(current) != len(gift_only_plan) + 1:
+                        return result
+                    for index, item in enumerate(current):
+                        if _queue_identity(item) != user_name:
+                            continue
+                        candidate = current[:index] + current[index + 1 :]
+                        if candidate != gift_only_plan:
+                            continue
+                        self._remove_queue_item_unlocked(index)
+                        logger = getattr(self, "_logger", None)
+                        if logger is not None:
+                            logger.warning(
+                                "[队列修复] 已移除礼物插队与舰长插队叠加产生的重复项：%s",
+                                user_name,
+                            )
+                        break
+                return result
+
+            setattr(queue_manager_cls, "_process", process_without_double_insertion)
+
         setattr(queue_manager_cls, "_bilipdj_queue_logic_guard_installed", True)
         return True
 
