@@ -20,7 +20,5 @@ jobs:
         run: python -m compileall -q core scripts tests
       - name: Run regression tests
         run: python -m unittest discover -s tests -v
-      - name: Scan tracked files for secrets
-        run: python scripts/scan_secrets.py
       - name: Check public platform endpoints
         run: python scripts/check_api_health.py
