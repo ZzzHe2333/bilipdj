@@ -124,6 +124,7 @@ class UpdateClientTests(unittest.TestCase):
             path = Path(tempfile.gettempdir()) / f"{prefix}cleanup-test"
             if path.exists():
                 import shutil
+
                 shutil.rmtree(path)
             path.mkdir()
             created.append(path)
@@ -217,8 +218,10 @@ class UpdaterTests(unittest.TestCase):
             self.assertTrue((root / ".bilipdj.update-backup" / "main.exe").is_file())
             result = json.loads((app_dir / "update-result.json").read_text(encoding="utf-8"))
             self.assertEqual(result["version"], "1.0.8")
+            self.assertEqual(result["status"], "installed")
+            self.assertEqual(result["cleanup_dir"], str(root))
 
-    def test_failed_new_version_rolls_back_old_directory(self) -> None:
+    def test_failed_new_version_rolls_back_and_restarts_old_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             app_dir = root / "bilipdj"
@@ -230,7 +233,11 @@ class UpdaterTests(unittest.TestCase):
             launch_results = iter([FakeFailedProcess(), FakeRunningProcess()])
             with (
                 mock.patch.object(updater, "wait_for_process_exit", return_value=True),
-                mock.patch.object(updater, "launch_main", side_effect=lambda *_: next(launch_results)),
+                mock.patch.object(
+                    updater,
+                    "launch_main",
+                    side_effect=lambda *_: next(launch_results),
+                ) as launch_mock,
                 mock.patch.object(updater, "STARTUP_GRACE_SECONDS", 0.01),
             ):
                 with self.assertRaises(updater.UpdaterError):
@@ -242,7 +249,44 @@ class UpdaterTests(unittest.TestCase):
                         target_version="1.0.8",
                     )
 
+            self.assertEqual(launch_mock.call_count, 2)
             self.assertEqual((app_dir / "main.exe").read_bytes(), b"old-main")
+            result = json.loads((app_dir / "update-result.json").read_text(encoding="utf-8"))
+            self.assertEqual(result["status"], "rolled_back")
+            self.assertEqual(result["cleanup_dir"], str(root))
+
+    def test_preflight_failure_restarts_untouched_old_version(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            app_dir = root / "bilipdj"
+            app_dir.mkdir()
+            (app_dir / "main.exe").write_bytes(b"old-main")
+            package = root / "invalid-update.zip"
+            with zipfile.ZipFile(package, "w") as archive:
+                archive.writestr("readme.txt", b"missing executables")
+
+            with (
+                mock.patch.object(updater, "wait_for_process_exit", return_value=True),
+                mock.patch.object(
+                    updater,
+                    "launch_main",
+                    return_value=FakeRunningProcess(),
+                ) as launch_mock,
+            ):
+                with self.assertRaises(updater.UpdaterError):
+                    updater.perform_update(
+                        pid=123,
+                        app_dir=app_dir,
+                        zip_path=package,
+                        main_exe_name="main.exe",
+                        target_version="1.0.8",
+                    )
+
+            self.assertEqual(launch_mock.call_count, 1)
+            self.assertEqual((app_dir / "main.exe").read_bytes(), b"old-main")
+            result = json.loads((app_dir / "update-result.json").read_text(encoding="utf-8"))
+            self.assertEqual(result["status"], "preflight_failed")
+            self.assertIn("缺少主程序", result["error"])
 
 
 if __name__ == "__main__":
