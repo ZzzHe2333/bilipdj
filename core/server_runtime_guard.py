@@ -1,8 +1,7 @@
 """Runtime guards for the local HTTP/WebSocket server.
 
-The server module is also executed directly in packaged builds, so these guards
-are attached after its classes and style functions become available instead of
-requiring package-only imports inside ``server.py``.
+The server can be imported as ``core.server`` or executed directly, so guards
+are attached after its classes and style functions become available.
 """
 from __future__ import annotations
 
@@ -19,7 +18,10 @@ from http import HTTPStatus
 from typing import Any
 from urllib.parse import urlparse
 
-from .style_option_guard import patch_style_module
+if __package__:
+    from .style_option_guard import patch_style_module
+else:
+    from style_option_guard import patch_style_module
 
 MAX_MANAGEMENT_BODY_BYTES = 2 * 1024 * 1024
 _PATCH_LOCK = threading.RLock()
@@ -32,9 +34,9 @@ def _server_module_valid(module: Any) -> bool:
     name = str(getattr(module, "__name__", "") or "")
     if name not in {"core.server", "server", "__main__"}:
         return False
-    if name == "__main__":
-        return os.path.basename(str(getattr(module, "__file__", ""))) == "server.py"
-    return True
+    return name != "__main__" or os.path.basename(
+        str(getattr(module, "__file__", ""))
+    ) == "server.py"
 
 
 def _authority(value: str, *, scheme: str = "") -> tuple[str, int | None]:
@@ -56,12 +58,10 @@ def _authority(value: str, *, scheme: str = "") -> tuple[str, int | None]:
 
 def _host_is_loopback(host_header: str) -> bool:
     host, _ = _authority(host_header)
-    if not host:
-        return False
     if host == "localhost" or host.endswith(".localhost"):
         return True
     try:
-        return ipaddress.ip_address(host).is_loopback
+        return bool(host) and ipaddress.ip_address(host).is_loopback
     except ValueError:
         return False
 
@@ -70,16 +70,13 @@ def _same_host_origin(headers: Any) -> bool:
     host_header = str(headers.get("Host", "") or "").strip()
     if not host_header:
         return True
-
-    origin = str(headers.get("Origin", "") or "").strip()
-    candidate = origin
+    candidate = str(headers.get("Origin", "") or "").strip()
     if not candidate:
         candidate = str(headers.get("Referer", "") or "").strip()
     if not candidate:
         return True
     if candidate.casefold() == "null":
         return False
-
     parsed = urlparse(candidate)
     if parsed.scheme not in {"http", "https"}:
         return False
@@ -88,7 +85,10 @@ def _same_host_origin(headers: Any) -> bool:
     return bool(origin_authority[0]) and origin_authority == host_authority
 
 
-def _read_masked_client_frame(handler: Any, conn: socket.socket) -> tuple[int, bool, bytes] | None:
+def _read_masked_client_frame(
+    handler: Any,
+    conn: socket.socket,
+) -> tuple[int, bool, bytes] | None:
     module = sys.modules.get(str(getattr(handler.__class__, "__module__", "")))
     recv_exact = getattr(module, "_ws_recv_exact", None)
     max_frame = int(getattr(module, "MAX_WS_FRAME_BYTES", 1024 * 1024))
@@ -100,12 +100,9 @@ def _read_masked_client_frame(handler: Any, conn: socket.socket) -> tuple[int, b
         return None
     first, second = head
     fin = bool(first & 0x80)
-    if first & 0x70:  # RSV bits without an negotiated extension
+    if first & 0x70 or not (second & 0x80):
         return None
     opcode = first & 0x0F
-    if not (second & 0x80):  # browser/client frames must be masked
-        return None
-
     payload_len = second & 0x7F
     if payload_len == 126:
         raw_length = recv_exact(conn, 2)
@@ -121,14 +118,14 @@ def _read_masked_client_frame(handler: Any, conn: socket.socket) -> tuple[int, b
     is_control = opcode >= 0x8
     if payload_len > max_frame or (is_control and (not fin or payload_len > 125)):
         return None
-
     mask_key = recv_exact(conn, 4)
-    if mask_key is None:
+    payload = recv_exact(conn, payload_len) if mask_key is not None else None
+    if mask_key is None or payload is None:
         return None
-    payload = recv_exact(conn, payload_len)
-    if payload is None:
-        return None
-    unmasked = bytes(value ^ mask_key[index % 4] for index, value in enumerate(payload))
+    unmasked = bytes(
+        value ^ mask_key[index % 4]
+        for index, value in enumerate(payload)
+    )
     return opcode, fin, unmasked
 
 
@@ -144,7 +141,6 @@ def patch_api_handler(module: Any) -> bool:
     with _PATCH_LOCK:
         if bool(getattr(handler_class, "_bilipdj_runtime_guard_installed", False)):
             return True
-
         original_post = getattr(handler_class, "do_POST", None)
         original_upgrade = getattr(handler_class, "_handle_websocket_upgrade", None)
         if not callable(original_post) or not callable(original_upgrade):
@@ -152,7 +148,7 @@ def patch_api_handler(module: Any) -> bool:
 
         local_get_paths = getattr(handler_class, "_LOCAL_ONLY_GET_PATHS", None)
         if isinstance(local_get_paths, set):
-            # Style data contains no credentials and is required by LAN display clients.
+            # Non-secret style options are needed by LAN display pages.
             local_get_paths.discard("/api/style")
 
         def write_json_no_store(
@@ -197,11 +193,7 @@ def patch_api_handler(module: Any) -> bool:
             try:
                 content_length = int(raw_length)
             except ValueError:
-                self._write_json(
-                    {"status": "error", "message": "Invalid Content-Length"},
-                    status=HTTPStatus.BAD_REQUEST,
-                )
-                return
+                content_length = -1
             if content_length < 0:
                 self._write_json(
                     {"status": "error", "message": "Invalid Content-Length"},
@@ -239,20 +231,20 @@ def patch_api_handler(module: Any) -> bool:
                 if frame is None:
                     return None
                 opcode, fin, payload = frame
-                if opcode == 0x8:  # close
+                if opcode == 0x8:
                     return None
-                if opcode == 0x9:  # ping
+                if opcode == 0x9:
                     self.server.ws_hub.send_frame(conn, payload, opcode=0xA)
                     return ""
-                if opcode == 0xA:  # pong
+                if opcode == 0xA:
                     return ""
-                if opcode == 0x1:  # text
+                if opcode == 0x1:
                     if not fin:
-                        return None  # fragmented messages are not supported
+                        return None
                     if not self._is_loopback_client():
-                        return ""  # LAN clients are subscribers, not publishers
+                        return ""
                     return payload.decode("utf-8", errors="replace")
-                if opcode == 0x2 and fin:  # binary frame, consumed and ignored
+                if opcode == 0x2 and fin:
                     return ""
                 return None
             except (ConnectionError, OSError, TimeoutError, struct.error):
@@ -268,19 +260,19 @@ def patch_api_handler(module: Any) -> bool:
 
 
 def patch_server_module(module: Any) -> bool:
-    style_ready = patch_style_module(module)
-    api_ready = patch_api_handler(module)
-    return style_ready and api_ready
+    return patch_style_module(module) and patch_api_handler(module)
 
 
-def schedule_server_runtime_guards(module_name: str, *, timeout: float = 10.0) -> bool:
+def schedule_server_runtime_guards(
+    module_name: str,
+    *,
+    timeout: float = 10.0,
+) -> bool:
     """Patch a server module as soon as its import finishes defining the APIs."""
 
     name = str(module_name or "").strip()
-    module = sys.modules.get(name)
-    if not _server_module_valid(module):
+    if not _server_module_valid(sys.modules.get(name)):
         return False
-
     with _PATCH_LOCK:
         if name in _SCHEDULED_MODULES:
             return False
