@@ -65,6 +65,20 @@ def _schedule_server_guards(module_name: str) -> None:
     schedule_server_runtime_guards(module_name)
 
 
+def _patch_douyin_module(server_module: Any) -> None:
+    protocol_module = getattr(server_module, "douyin_protocol", None)
+    if protocol_module is None:
+        return
+    try:
+        from .douyin_fallback_guard import patch_douyin_module
+    except ImportError:
+        try:
+            from douyin_fallback_guard import patch_douyin_module
+        except ImportError:
+            return
+    patch_douyin_module(protocol_module)
+
+
 def _patch_complete_server_module(module: Any) -> None:
     patch_style_module(module)
     try:
@@ -73,8 +87,10 @@ def _patch_complete_server_module(module: Any) -> None:
         try:
             from server_runtime_guard import patch_api_handler
         except ImportError:
-            return
-    patch_api_handler(module)
+            patch_api_handler = None
+    if callable(patch_api_handler):
+        patch_api_handler(module)
+    _patch_douyin_module(module)
 
 
 def install_style_persistence_guard(queue_manager_cls: type[Any]) -> bool:
