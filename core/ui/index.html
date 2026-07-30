@@ -1,33 +1,16 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
     <meta charset="utf-8">
-    <title>弹幕排队姬 · 实时队列</title>
+    <title>实时队列</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link id="pdj-style-link" rel="stylesheet" href="moren.css?v=2">
+    <link id="pdj-style-link" rel="stylesheet" href="moren.css?v=3">
 </head>
 <body>
     <p id="status" hidden></p>
     <p id="popularity" hidden></p>
 
     <main class="wk" aria-live="polite">
-        <header class="queue-header">
-            <div>
-                <span class="queue-kicker">LIVE QUEUE</span>
-                <h1>弹幕排队</h1>
-            </div>
-            <span id="connectionBadge" class="connection-badge">连接中</span>
-        </header>
-        <div class="vText">
-            <div>
-                <span></span>
-            </div>
-        </div>
-        <div id="emptyState" class="empty-state">
-            <span class="empty-icon">✦</span>
-            <strong>队列还是空的</strong>
-            <small>发送“排队”弹幕即可加入</small>
-        </div>
         <div id="danmu" class="div" role="list"></div>
     </main>
 
