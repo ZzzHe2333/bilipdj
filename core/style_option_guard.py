@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import functools
+import re
 import sys
 import threading
 from typing import Any
@@ -20,18 +21,85 @@ STYLE_OPTION_DEFAULTS: dict[str, Any] = {
     "queue_item_padding_y": 8,
 }
 DISPLAY_STYLE_DEFAULTS = STYLE_OPTION_DEFAULTS
-STYLE_CSS_VARIABLES: dict[str, str] = {
-    "queue_font_family": "--queue-font-family",
-    "queue_letter_spacing": "--queue-letter-spacing",
-    "queue_word_spacing": "--queue-word-spacing",
-    "queue_line_height": "--queue-line-height",
-    "queue_item_gap": "--queue-item-gap",
-    "queue_text_align": "--queue-text-align",
-    "queue_text_opacity": "--queue-text-opacity",
-    "queue_item_padding_x": "--queue-item-padding-x",
-    "queue_item_padding_y": "--queue-item-padding-y",
-}
 _PATCH_LOCK = threading.RLock()
+
+
+def _clamp_int(value: Any, default: int, low: int, high: int) -> int:
+    try:
+        parsed = int(float(str(value).strip().removesuffix("px")))
+    except (TypeError, ValueError):
+        parsed = default
+    return max(low, min(high, parsed))
+
+
+def _safe_css_text(value: Any, default: str) -> str:
+    text = str(value or default).replace("\r", " ").replace("\n", " ")
+    text = re.sub(r"[;{}]", "", text).strip()
+    return text or default
+
+
+def _enhance_css(css: str, style: dict[str, Any]) -> str:
+    font_family = _safe_css_text(style.get("queue_font_family"), str(STYLE_OPTION_DEFAULTS["queue_font_family"]))
+    letter = _clamp_int(style.get("queue_letter_spacing"), 0, -20, 100)
+    word = _clamp_int(style.get("queue_word_spacing"), 0, -20, 200)
+    gap = _clamp_int(style.get("queue_item_gap"), 10, 0, 200)
+    opacity = _clamp_int(style.get("queue_text_opacity"), 100, 0, 100)
+    padding_x = _clamp_int(style.get("queue_item_padding_x"), 14, 0, 200)
+    padding_y = _clamp_int(style.get("queue_item_padding_y"), 8, 0, 200)
+    try:
+        line_height = float(str(style.get("queue_line_height", "1.20")).strip())
+    except (TypeError, ValueError):
+        line_height = 1.2
+    line_height = max(0.6, min(5.0, line_height))
+    align = str(style.get("queue_text_align", "left") or "left").strip().lower()
+    if align not in {"left", "center", "right"}:
+        align = "left"
+
+    variables = (
+        f"    --queue-font-family: {font_family};\n"
+        f"    --queue-letter-spacing: {letter}px;\n"
+        f"    --queue-word-spacing: {word}px;\n"
+        f"    --queue-line-height: {line_height:.2f};\n"
+        f"    --queue-item-gap: {gap}px;\n"
+        f"    --queue-text-align: {align};\n"
+        f"    --queue-text-opacity: {opacity / 100:.2f};\n"
+        f"    --queue-item-padding-x: {padding_x}px;\n"
+        f"    --queue-item-padding-y: {padding_y}px;\n"
+    )
+    root_end = css.find("}")
+    if root_end >= 0:
+        css = css[:root_end] + variables + css[root_end:]
+    else:
+        css = ":root {\n" + variables + "}\n" + css
+    return css + (
+        "\n/* bilipdj advanced typography */\n"
+        ".div { gap: var(--queue-item-gap); }\n"
+        ".queue-item { padding: var(--queue-item-padding-y) var(--queue-item-padding-x); }\n"
+        ".queue-content {\n"
+        "  font-family: var(--queue-font-family);\n"
+        "  letter-spacing: var(--queue-letter-spacing);\n"
+        "  word-spacing: var(--queue-word-spacing);\n"
+        "  line-height: var(--queue-line-height);\n"
+        "  text-align: var(--queue-text-align);\n"
+        "  opacity: var(--queue-text-opacity);\n"
+        "}\n"
+    )
+
+
+def _patch_css_builder(module: Any) -> None:
+    current = getattr(module, "build_index_css", None)
+    if not callable(current) or bool(getattr(current, "_bilipdj_advanced_typography", False)):
+        return
+
+    @functools.wraps(current)
+    def build_index_css(style: dict[str, Any] | None = None) -> str:
+        merged = dict(STYLE_OPTION_DEFAULTS)
+        if isinstance(style, dict):
+            merged.update(style)
+        return _enhance_css(current(merged), merged)
+
+    setattr(build_index_css, "_bilipdj_advanced_typography", True)
+    setattr(module, "build_index_css", build_index_css)
 
 
 def _patch_logging(module: Any) -> None:
@@ -52,7 +120,6 @@ def patch_style_module(module: Any) -> bool:
         return False
     defaults = getattr(module, "DEFAULT_STYLE", None)
     default_config = getattr(module, "DEFAULT_CONFIG", None)
-    css_map = getattr(module, "STYLE_CSS_VAR_MAP", None)
     load_style = getattr(module, "load_style", None)
     save_style = getattr(module, "save_style", None)
     if not isinstance(defaults, dict) or not callable(load_style) or not callable(save_style):
@@ -66,9 +133,7 @@ def patch_style_module(module: Any) -> bool:
             if isinstance(style_defaults, dict):
                 for key, value in STYLE_OPTION_DEFAULTS.items():
                     style_defaults.setdefault(key, value)
-        if isinstance(css_map, dict):
-            for key, value in STYLE_CSS_VARIABLES.items():
-                css_map.setdefault(key, value)
+        _patch_css_builder(module)
         _patch_logging(module)
 
         if bool(getattr(save_style, "_bilipdj_preserves_style_options", False)):
@@ -180,7 +245,6 @@ def install_style_persistence_guard(queue_manager_cls: type[Any]) -> bool:
 
 __all__ = [
     "DISPLAY_STYLE_DEFAULTS",
-    "STYLE_CSS_VARIABLES",
     "STYLE_OPTION_DEFAULTS",
     "install_style_persistence_guard",
     "patch_style_module",
