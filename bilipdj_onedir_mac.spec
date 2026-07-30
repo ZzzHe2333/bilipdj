@@ -22,6 +22,7 @@ hiddenimports = [
     "core.control_panel_guard",
     "core.control_panel_features",
     "core.control_panel_ui_finish",
+    "core.style_save_transport",
     "core.style_option_guard",
     "core.web_queue_layout",
     "core.overlay_refresh_guard",
