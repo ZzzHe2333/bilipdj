@@ -65,6 +65,17 @@ def _schedule_server_guards(module_name: str) -> None:
     schedule_server_runtime_guards(module_name)
 
 
+def _patch_queue_manager_class(queue_manager_cls: type[Any]) -> None:
+    try:
+        from .queue_logic_guard import patch_queue_manager
+    except ImportError:
+        try:
+            from queue_logic_guard import patch_queue_manager
+        except ImportError:
+            return
+    patch_queue_manager(queue_manager_cls)
+
+
 def _patch_douyin_module(server_module: Any) -> None:
     protocol_module = getattr(server_module, "douyin_protocol", None)
     if protocol_module is None:
@@ -97,6 +108,7 @@ def install_style_persistence_guard(queue_manager_cls: type[Any]) -> bool:
     """Patch the owning server module during import and again at construction."""
 
     module_name = str(getattr(queue_manager_cls, "__module__", "") or "")
+    _patch_queue_manager_class(queue_manager_cls)
     _schedule_server_guards(module_name)
 
     with _PATCH_LOCK:
