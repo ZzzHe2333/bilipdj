@@ -113,6 +113,41 @@ def cleanup_logs(app_dir: Path | None = None, retention_days: int = DEFAULT_RETE
     return deleted
 
 
+class DailyCategoryFileHandler(logging.FileHandler):
+    """File handler whose base filename changes at local midnight."""
+
+    def __init__(self, kind: str, room_token: str, app_dir: Path) -> None:
+        self.kind = str(kind)
+        self.room_token = _safe_room_token(room_token)
+        self.app_dir = Path(app_dir)
+        self._current_day = dt.datetime.now().date()
+        super().__init__(
+            daily_log_path(self.kind, self.room_token, self.app_dir),
+            mode="a",
+            encoding="utf-8",
+            delay=True,
+        )
+
+    def _rollover_if_needed(self) -> None:
+        today = dt.datetime.now().date()
+        if today == self._current_day:
+            return
+        if self.stream is not None:
+            try:
+                self.flush()
+            finally:
+                self.stream.close()
+                self.stream = None
+        self._current_day = today
+        self.baseFilename = os.fspath(
+            daily_log_path(self.kind, self.room_token, self.app_dir)
+        )
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self._rollover_if_needed()
+        super().emit(record)
+
+
 class _BelowErrorFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         return record.levelno < logging.ERROR
@@ -180,12 +215,12 @@ def configure_backend_logging(module: Any, config: dict[str, Any]) -> logging.Lo
     root.setLevel(level)
     formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
-    common_handler = logging.FileHandler(common_path, mode="a", encoding="utf-8")
+    common_handler = DailyCategoryFileHandler("common", room, directory.parent)
     common_handler.setLevel(level)
     common_handler.addFilter(_BelowErrorFilter())
     common_handler.setFormatter(formatter)
 
-    error_handler = logging.FileHandler(error_path, mode="a", encoding="utf-8")
+    error_handler = DailyCategoryFileHandler("error", room, directory.parent)
     error_handler.setLevel(logging.ERROR)
     error_handler.addFilter(_AtLeastErrorFilter())
     error_handler.setFormatter(formatter)
@@ -237,6 +272,7 @@ def patch_server_logging(module: Any) -> bool:
 
 __all__ = [
     "DEFAULT_RETENTION_DAYS",
+    "DailyCategoryFileHandler",
     "append_update_log",
     "cleanup_logs",
     "configure_backend_logging",
