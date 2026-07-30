@@ -1,4 +1,4 @@
-"""Install the control-panel class patch during the packaged entry script."""
+"""Install control-panel patches during the packaged entry script."""
 from __future__ import annotations
 
 import builtins
@@ -68,8 +68,10 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
                 return cls
             try:
                 from .control_panel_guard import patch_control_panel_class
+                from .control_panel_features import patch_control_panel_features
 
                 patch_control_panel_class(cls)
+                patch_control_panel_features(cls)
             finally:
                 _restore_hook()
             return cls
