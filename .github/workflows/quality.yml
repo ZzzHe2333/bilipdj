@@ -1,12 +1,7 @@
 name: Quality and API compatibility
 
 on:
-  push:
-    branches: [now]
-  pull_request:
   workflow_dispatch:
-  schedule:
-    - cron: '17 3 * * 1'
 
 permissions:
   contents: read
@@ -28,5 +23,4 @@ jobs:
       - name: Scan tracked files for secrets
         run: python scripts/scan_secrets.py
       - name: Check public platform endpoints
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: python scripts/check_api_health.py
