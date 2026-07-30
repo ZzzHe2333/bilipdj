@@ -90,6 +90,17 @@ def _patch_douyin_module(server_module: Any) -> None:
     patch_douyin_module(protocol_module)
 
 
+def _patch_login_callback(server_module: Any) -> None:
+    try:
+        from .login_callback_guard import patch_login_callback
+    except ImportError:
+        try:
+            from login_callback_guard import patch_login_callback
+        except ImportError:
+            return
+    patch_login_callback(server_module)
+
+
 def _patch_complete_server_module(module: Any) -> None:
     patch_style_module(module)
     try:
@@ -102,6 +113,7 @@ def _patch_complete_server_module(module: Any) -> None:
     if callable(patch_api_handler):
         patch_api_handler(module)
     _patch_douyin_module(module)
+    _patch_login_callback(module)
 
 
 def install_style_persistence_guard(queue_manager_cls: type[Any]) -> bool:
