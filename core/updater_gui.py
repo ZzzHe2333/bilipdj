@@ -9,46 +9,31 @@ from typing import Any
 
 try:
     from core import log_manager, updater_v2
+    from core.updater_model import (
+        BOARD_COLUMNS,
+        BOARD_ROWS,
+        BOARD_SIZE,
+        CELL_SIZE,
+        PIECE_COLORS,
+        PIECE_COLUMNS,
+        WINDOW_SIZE,
+        progress_for_message,
+        select_update_log_root,
+    )
 except ImportError:
     import log_manager  # type: ignore[no-redef]
     import updater_v2  # type: ignore[no-redef]
-
-WINDOW_SIZE = 520
-BOARD_COLUMNS = 10
-BOARD_ROWS = 10
-CELL_SIZE = 30
-BOARD_SIZE = BOARD_COLUMNS * CELL_SIZE
-PIECE_COLUMNS = (4, 0, 8, 2, 6)
-PIECE_COLORS = ("#00bcd4", "#f59e0b", "#8b5cf6", "#22c55e", "#ef4444")
-
-_PROGRESS_MESSAGES = (
-    ("准备更新", 6),
-    ("解压更新包", 22),
-    ("备份当前版本", 46),
-    ("新版本文件替换完成", 78),
-    ("正在启动主程序", 90),
-    ("启动成功", 100),
-    ("开始回滚", 82),
-    ("旧版本已恢复", 96),
-)
-
-
-def progress_for_message(message: str, current: int) -> int:
-    text = str(message or "")
-    for marker, value in _PROGRESS_MESSAGES:
-        if marker in text:
-            return max(current, value)
-    return min(92, max(current, current + 1))
-
-
-def select_update_log_root(app_dir: Path) -> Path:
-    app_dir = Path(app_dir)
-    backup = app_dir.parent / f".{app_dir.name or 'bilipdj'}.update-backup"
-    if app_dir.is_dir():
-        return app_dir
-    if backup.is_dir():
-        return backup
-    return app_dir
+    from updater_model import (  # type: ignore[no-redef]
+        BOARD_COLUMNS,
+        BOARD_ROWS,
+        BOARD_SIZE,
+        CELL_SIZE,
+        PIECE_COLORS,
+        PIECE_COLUMNS,
+        WINDOW_SIZE,
+        progress_for_message,
+        select_update_log_root,
+    )
 
 
 class TetrisAnimator:
@@ -153,6 +138,7 @@ class UpdaterWindow:
         self.progress_value = 0
         self.completed = False
         self.failed = False
+        self.last_log_path = "log/update_*.log"
 
         self.root = tk.Tk()
         self.root.title("弹幕排队姬更新器")
@@ -163,7 +149,11 @@ class UpdaterWindow:
 
         container = ttk.Frame(self.root, padding=12)
         container.pack(fill="both", expand=True)
-        ttk.Label(container, text="正在更新弹幕排队姬", font=("Microsoft YaHei UI", 14, "bold")).pack(pady=(2, 5))
+        ttk.Label(
+            container,
+            text="正在更新弹幕排队姬",
+            font=("Microsoft YaHei UI", 14, "bold"),
+        ).pack(pady=(2, 5))
         self.canvas = tk.Canvas(
             container,
             width=WINDOW_SIZE - 24,
@@ -176,7 +166,9 @@ class UpdaterWindow:
         self.animator = TetrisAnimator(self.canvas)
 
         self.status_var = tk.StringVar(value=f"准备更新到 v{args.target_version}")
-        ttk.Label(container, textvariable=self.status_var, anchor="w", wraplength=480).pack(fill="x", pady=(7, 5))
+        ttk.Label(container, textvariable=self.status_var, anchor="w", wraplength=480).pack(
+            fill="x", pady=(7, 5)
+        )
         self.progress = ttk.Progressbar(container, mode="determinate", maximum=100, length=470)
         self.progress.pack(fill="x", pady=(0, 5))
         self.percent_var = tk.StringVar(value="0%")
@@ -211,7 +203,11 @@ class UpdaterWindow:
         def categorized_write_log(_legacy_path: Path, message: str) -> None:
             target_root = select_update_log_root(app_dir)
             try:
-                log_path = log_manager.append_update_log(target_root, str(message), room_token=room_token)
+                log_path = log_manager.append_update_log(
+                    target_root,
+                    str(message),
+                    room_token=room_token,
+                )
             except Exception:
                 log_path = target_root / "log" / f"update_unknown_{room_token}.log"
             self._emit("status", (str(message), str(log_path)))
@@ -226,6 +222,7 @@ class UpdaterWindow:
                 target_version=self.args.target_version,
             )
         except Exception as exc:
+            categorized_write_log(Path(), f"更新失败：{exc}")
             self._emit("error", str(exc))
         else:
             self._emit("success", self.args.target_version)
@@ -260,7 +257,7 @@ class UpdaterWindow:
                 self._set_progress(max(1, self.progress_value))
                 messagebox.showerror(
                     "更新失败",
-                    f"更新失败：\n{payload}\n\n日志：\n{getattr(self, 'last_log_path', 'log/update_*.log')}",
+                    f"更新失败：\n{payload}\n\n日志：\n{self.last_log_path}",
                     parent=self.root,
                 )
         if not self.completed:
