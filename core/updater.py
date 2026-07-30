@@ -43,6 +43,32 @@ def _write_log(log_path: Path, message: str) -> None:
         handle.write(f"[{_timestamp()}] {message}\n")
 
 
+def _write_update_result(
+    app_dir: Path,
+    *,
+    status: str,
+    target_version: str,
+    backup_dir: Path,
+    cleanup_dir: Path,
+    error: str = "",
+) -> None:
+    if not app_dir.is_dir():
+        return
+    result = {
+        "status": str(status),
+        "version": str(target_version),
+        "installed_at": _timestamp(),
+        "backup_dir": str(backup_dir),
+        "cleanup_dir": str(cleanup_dir),
+    }
+    if error:
+        result["error"] = str(error)
+    (app_dir / "update-result.json").write_text(
+        json.dumps(result, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
 def validate_executable_name(name: str) -> str:
     """Return a safe executable basename used only inside the application dir."""
 
@@ -214,6 +240,7 @@ def perform_update(
     safe_name = app_dir.name or "bilipdj"
     staging_dir = parent / f".{safe_name}.update-staging"
     backup_dir = parent / f".{safe_name}.update-backup"
+    cleanup_dir = zip_path.parent
     log_path = parent / f"{safe_name}-update.log"
 
     _write_log(log_path, f"准备更新到 v{target_version}")
@@ -224,29 +251,27 @@ def perform_update(
     if not wait_for_process_exit(pid):
         raise UpdaterError("等待主程序退出超时，请完全关闭程序后重试")
 
-    remove_path_with_retry(staging_dir)
-    staging_dir.mkdir(parents=True, exist_ok=True)
-    _write_log(log_path, f"解压更新包：{zip_path}")
-    safe_extract(zip_path, staging_dir)
-    validate_staging(staging_dir, executable_name)
-
-    remove_path_with_retry(backup_dir)
-    _write_log(log_path, f"备份当前版本到：{backup_dir}")
-    app_dir.replace(backup_dir)
-
+    backup_created = False
     try:
+        remove_path_with_retry(staging_dir)
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        _write_log(log_path, f"解压更新包：{zip_path}")
+        safe_extract(zip_path, staging_dir)
+        validate_staging(staging_dir, executable_name)
+
+        remove_path_with_retry(backup_dir)
+        _write_log(log_path, f"备份当前版本到：{backup_dir}")
+        app_dir.replace(backup_dir)
+        backup_created = True
+
         staging_dir.replace(app_dir)
         copy_preserved_data(backup_dir, app_dir)
-        result = {
-            "status": "installed",
-            "version": target_version,
-            "installed_at": _timestamp(),
-            "backup_dir": str(backup_dir),
-            "cleanup_dir": str(zip_path.parent),
-        }
-        (app_dir / "update-result.json").write_text(
-            json.dumps(result, ensure_ascii=False, indent=2),
-            encoding="utf-8",
+        _write_update_result(
+            app_dir,
+            status="installed",
+            target_version=target_version,
+            backup_dir=backup_dir,
+            cleanup_dir=cleanup_dir,
         )
         _write_log(log_path, "新版本文件替换完成，正在启动主程序")
         process = launch_main(app_dir, executable_name)
@@ -262,15 +287,31 @@ def perform_update(
             log_path,
             f"v{target_version} 启动成功，保留上一版本备份：{backup_dir}",
         )
-    except Exception:
-        rollback(app_dir, backup_dir, log_path)
-        try:
-            launch_main(app_dir, executable_name)
-        except Exception as restart_error:
-            _write_log(
-                log_path,
-                f"回滚后重新启动旧版本失败：{restart_error}",
-            )
+    except Exception as exc:
+        if backup_created:
+            try:
+                rollback(app_dir, backup_dir, log_path)
+            except Exception as rollback_error:
+                _write_log(log_path, f"恢复旧版本失败：{rollback_error}")
+        else:
+            _write_log(log_path, "更新预检失败，原程序目录未被替换")
+
+        _write_update_result(
+            app_dir,
+            status="rolled_back" if backup_created else "preflight_failed",
+            target_version=target_version,
+            backup_dir=backup_dir,
+            cleanup_dir=cleanup_dir,
+            error=str(exc),
+        )
+        if app_dir.is_dir() and (app_dir / executable_name).is_file():
+            try:
+                launch_main(app_dir, executable_name)
+                _write_log(log_path, "已重新启动旧版本")
+            except Exception as restart_error:
+                _write_log(log_path, f"重新启动旧版本失败：{restart_error}")
+        else:
+            _write_log(log_path, "没有可重新启动的主程序")
         raise
     finally:
         remove_path_with_retry(staging_dir)
