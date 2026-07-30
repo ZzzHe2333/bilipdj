@@ -5,6 +5,7 @@ are attached after its classes and style functions become available.
 """
 from __future__ import annotations
 
+import errno
 import functools
 import ipaddress
 import json
@@ -26,6 +27,18 @@ else:
 MAX_MANAGEMENT_BODY_BYTES = 2 * 1024 * 1024
 _PATCH_LOCK = threading.RLock()
 _SCHEDULED_MODULES: set[str] = set()
+_CLIENT_DISCONNECT_ERRNOS = {
+    errno.EPIPE,
+    errno.ECONNRESET,
+    errno.ECONNABORTED,
+    errno.EBADF,
+}
+_CLIENT_DISCONNECT_WINERRORS = {
+    10038,  # WSAENOTSOCK
+    10053,  # WSAECONNABORTED
+    10054,  # WSAECONNRESET
+    10058,  # WSAESHUTDOWN
+}
 
 
 def _server_module_valid(module: Any) -> bool:
@@ -83,6 +96,20 @@ def _same_host_origin(headers: Any) -> bool:
     origin_authority = _authority(candidate)
     host_authority = _authority(host_header, scheme=parsed.scheme)
     return bool(origin_authority[0]) and origin_authority == host_authority
+
+
+def _is_client_disconnect_error(exc: BaseException) -> bool:
+    """Return whether an HTTP write failed only because the peer went away."""
+
+    if isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+        return True
+    if not isinstance(exc, OSError):
+        return False
+    return (
+        getattr(exc, "errno", None) in _CLIENT_DISCONNECT_ERRNOS
+        or getattr(exc, "errno", None) in _CLIENT_DISCONNECT_WINERRORS
+        or getattr(exc, "winerror", None) in _CLIENT_DISCONNECT_WINERRORS
+    )
 
 
 def _read_masked_client_frame(
@@ -157,13 +184,22 @@ def patch_api_handler(module: Any) -> bool:
             status: int = HTTPStatus.OK,
         ) -> None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except OSError as exc:
+                if not _is_client_disconnect_error(exc):
+                    raise
+                # The browser/GUI cancelled the request after the server had
+                # already processed it. This is normal during refresh, window
+                # close and rapid repeated saves, so do not let socketserver
+                # print a misleading traceback into the application log.
+                self.close_connection = True
 
         def require_loopback_and_local_host(self: Any) -> bool:
             if not self._is_loopback_client():
