@@ -4,6 +4,7 @@ import functools
 import threading
 from typing import Any
 
+from .style_option_guard import STYLE_OPTION_DEFAULTS
 from .version import APP_VERSION
 
 _PATCH_LOCK = threading.RLock()
@@ -28,6 +29,11 @@ def patch_control_panel_ui_finish(panel_class: type[Any]) -> bool:
         return False
     module = __import__(str(panel_class.__module__), fromlist=["*"])
     with _PATCH_LOCK:
+        desktop_defaults = getattr(panel_class, "_DEFAULT_STYLE", None)
+        if isinstance(desktop_defaults, dict):
+            for key, value in STYLE_OPTION_DEFAULTS.items():
+                desktop_defaults.setdefault(key, value)
+
         current = getattr(panel_class, "_build_ui", None)
         if not callable(current):
             return False
