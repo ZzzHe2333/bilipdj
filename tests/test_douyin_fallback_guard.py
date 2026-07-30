@@ -59,6 +59,12 @@ class DouyinFallbackGuardTests(unittest.TestCase):
                 return dict(self.cfg)
 
             def _connect_and_stream(self):
+                started = self.cfg.get("_started")
+                release = self.cfg.get("_release")
+                if isinstance(started, threading.Event):
+                    started.set()
+                if isinstance(release, threading.Event):
+                    release.wait(2)
                 info = module.parse_douyin_live_info_html(
                     '{"room_status":"2"}',
                     "123",
@@ -110,27 +116,20 @@ class DouyinFallbackGuardTests(unittest.TestCase):
 
     def test_thread_local_leniency_does_not_leak_to_other_threads(self) -> None:
         errors: list[type[BaseException]] = []
+        started = threading.Event()
+        release = threading.Event()
         relay = self.Relay(
             {
                 "preset_room_id": "room-1",
                 "preset_user_id": "user-1",
+                "_started": started,
+                "_release": release,
             }
         )
 
-        original = self.Relay.__dict__["_connect_and_stream"].__wrapped__
-
-        def blocking_connect(instance):
-            started.set()
-            release.wait(2)
-            return original(instance)
-
-        started = threading.Event()
-        release = threading.Event()
-        self.Relay._connect_and_stream.__wrapped__ = blocking_connect
-
         thread = threading.Thread(target=relay._connect_and_stream)
         thread.start()
-        started.wait(0.2)
+        self.assertTrue(started.wait(0.5))
         try:
             self.module.parse_douyin_live_info_html("{}", "123")
         except BaseException as exc:  # noqa: BLE001
@@ -138,6 +137,7 @@ class DouyinFallbackGuardTests(unittest.TestCase):
         finally:
             release.set()
             thread.join(2)
+        self.assertFalse(thread.is_alive())
         self.assertIn(ProtocolError, errors)
 
 
