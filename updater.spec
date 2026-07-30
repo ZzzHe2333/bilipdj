@@ -11,9 +11,11 @@ a = Analysis(
     hiddenimports=[
         "core.updater_v2",
         "core.updater",
+        "core.updater_model",
         "core.log_manager",
         "updater_v2",
         "updater",
+        "updater_model",
         "log_manager",
     ],
     hookspath=[],
