@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>弹幕排队姬 - 配置</title>
+    <title>弹幕排队姬 - 登录配置</title>
     <link rel="stylesheet" href="pdj_design.css">
     <style>
         :root {
@@ -12,15 +12,13 @@
             --panel-bg: rgba(7, 18, 36, 0.94);
             --cyan: #00e5ff;
             --muted: #7ec8e3;
-            --green: #22c55e;
         }
         * { box-sizing: border-box; }
         body {
             margin: 0;
             min-height: 100vh;
             padding: 20px;
-            background:
-                radial-gradient(ellipse at 20% 20%, #0d1e36 0%, #060c18 55%, #030608 100%);
+            background: radial-gradient(ellipse at 20% 20%, #0d1e36 0%, #060c18 55%, #030608 100%);
             color: #cce8ff;
             font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
         }
@@ -30,9 +28,7 @@
             display: grid;
             gap: 18px;
         }
-        .page-title {
-            padding: 4px 2px;
-        }
+        .page-title { padding: 4px 2px; }
         .page-title span {
             color: var(--cyan);
             font-size: 12px;
@@ -135,86 +131,20 @@
             color: rgba(204,232,255,.72);
             font-size: 13px;
         }
-
-        /* 参考图样式：左侧标题与说明，右侧滑动开关。 */
-        .switch-list {
-            overflow: hidden;
-            border: 1px solid #e7e7e7;
-            border-radius: 14px;
-            background: #ffffff;
-            color: #222222;
-        }
-        .switch-row {
-            min-height: 76px;
-            padding: 14px 18px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 20px;
-        }
-        .switch-row + .switch-row { border-top: 1px solid #ececec; }
-        .switch-copy strong {
-            display: block;
-            color: #242424;
-            font-size: 17px;
-            font-weight: 650;
-        }
-        .switch-copy small {
-            display: block;
-            margin-top: 5px;
-            color: #7a7a7a;
-            font-size: 13px;
-            line-height: 1.4;
-        }
-        .slider-switch {
-            position: relative;
-            flex: 0 0 auto;
-            width: 52px;
-            height: 30px;
-            padding: 0;
-            border: 0;
-            border-radius: 999px;
-            background: #c9cdd3;
-            cursor: pointer;
-            transition: background .18s ease;
-        }
-        .slider-switch::after {
-            content: "";
-            position: absolute;
-            top: 4px;
-            left: 4px;
-            width: 22px;
-            height: 22px;
-            border-radius: 50%;
-            background: #ffffff;
-            box-shadow: 0 1px 4px rgba(0,0,0,.28);
-            transition: transform .18s ease;
-        }
-        .slider-switch.is-on { background: var(--green); }
-        .slider-switch.is-on::after { transform: translateX(22px); }
-        .slider-switch:focus-visible { outline: 3px solid rgba(34,197,94,.3); outline-offset: 3px; }
-        .slider-switch:disabled { opacity: .55; cursor: wait; }
-        .default-note {
-            margin: 10px 2px 0;
-            color: rgba(126,200,227,.66);
-            font-size: 12px;
-        }
-
         @media (max-width: 640px) {
             body { padding: 12px; }
             .config-card { padding: 16px; }
             .field-row { grid-template-columns: 1fr; gap: 6px; }
             .field-row label { padding-top: 0; }
-            .switch-row { padding: 13px 14px; }
         }
     </style>
 </head>
 <body>
     <main class="config-page">
         <header class="page-title">
-            <span>BILIPDJ · CONFIGURATION</span>
-            <h1>弹幕排队姬配置</h1>
-            <p>账号凭据与展示设置均只保存在运行本机。</p>
+            <span>BILIPDJ · LOGIN</span>
+            <h1>弹幕排队姬登录配置</h1>
+            <p>这里只配置账号连接；滚动和序号设置已移至桌面程序的“透明窗口”页面。</p>
         </header>
 
         <section class="config-card">
@@ -236,31 +166,6 @@
             </div>
             <div id="login-status" class="status">正在读取登录配置……</div>
         </section>
-
-        <section class="config-card">
-            <div class="card-heading">
-                <span class="step">02</span>
-                <div><h2>排队显示</h2><p>设置队列看板的滚动方式和序号显示</p></div>
-            </div>
-            <div class="switch-list">
-                <div class="switch-row">
-                    <div class="switch-copy">
-                        <strong>自动滚动</strong>
-                        <small>排队人数超过显示框时，自动循环滚动排队列表</small>
-                    </div>
-                    <button id="auto-scroll-switch" class="slider-switch" type="button" role="switch" aria-checked="false" aria-label="自动滚动"></button>
-                </div>
-                <div class="switch-row">
-                    <div class="switch-copy">
-                        <strong>显示序号</strong>
-                        <small>在每位排队用户左侧显示当前队列序号</small>
-                    </div>
-                    <button id="sequence-switch" class="slider-switch" type="button" role="switch" aria-checked="false" aria-label="显示序号"></button>
-                </div>
-            </div>
-            <div class="default-note">两个功能默认均为关闭；切换后立即保存并通知已打开的队列看板。</div>
-            <div id="display-status" class="status">正在读取显示设置……</div>
-        </section>
     </main>
 
     <script>
@@ -270,33 +175,8 @@
             const saveButton = document.getElementById("save-btn");
             const qrButton = document.getElementById("qr-btn");
             const loginStatus = document.getElementById("login-status");
-            const displayStatus = document.getElementById("display-status");
-            const autoScrollSwitch = document.getElementById("auto-scroll-switch");
-            const sequenceSwitch = document.getElementById("sequence-switch");
-
             let configLoaded = false;
             let loginBusy = false;
-            let displayBusy = false;
-            let styleConfig = {};
-
-            function asBool(value, fallback) {
-                if (typeof value === "boolean") return value;
-                if (typeof value === "number") return value !== 0;
-                const normalized = String(value == null ? "" : value).trim().toLowerCase();
-                if (["1", "true", "yes", "on"].includes(normalized)) return true;
-                if (["0", "false", "no", "off"].includes(normalized)) return false;
-                return !!fallback;
-            }
-
-            function setSwitch(button, enabled) {
-                const on = !!enabled;
-                button.classList.toggle("is-on", on);
-                button.setAttribute("aria-checked", on ? "true" : "false");
-            }
-
-            function getSwitch(button) {
-                return button.getAttribute("aria-checked") === "true";
-            }
 
             async function loadLoginConfig() {
                 loginStatus.textContent = "正在读取登录配置……";
@@ -333,7 +213,9 @@
                     if (resolvedUid > 0) uidInput.value = String(resolvedUid);
                     const resolvedName = typeof (result && result.uname) === "string" ? result.uname.trim() : "";
                     loginStatus.textContent = opts.silent ? "扫码登录态已写入配置。" : "账号配置保存成功。";
-                    if (resolvedName && resolvedUid > 0) loginStatus.textContent += "（" + resolvedName + "/" + resolvedUid + "）";
+                    if (resolvedName && resolvedUid > 0) {
+                        loginStatus.textContent += "（" + resolvedName + "/" + resolvedUid + "）";
+                    }
                     configLoaded = true;
                     return true;
                 } catch (error) {
@@ -343,58 +225,6 @@
                     loginBusy = false;
                     saveButton.disabled = false;
                 }
-            }
-
-            async function loadDisplayStyle() {
-                displayStatus.textContent = "正在读取显示设置……";
-                try {
-                    const res = await fetch("/api/style", { cache: "no-store" });
-                    if (!res.ok) throw new Error("HTTP " + res.status);
-                    styleConfig = await res.json();
-                    setSwitch(autoScrollSwitch, asBool(styleConfig.auto_scroll, false));
-                    setSwitch(sequenceSwitch, asBool(styleConfig.show_sequence, false));
-                    displayStatus.textContent = "显示设置已加载。";
-                } catch (error) {
-                    styleConfig = {};
-                    setSwitch(autoScrollSwitch, false);
-                    setSwitch(sequenceSwitch, false);
-                    displayStatus.textContent = "读取显示设置失败：" + error;
-                }
-            }
-
-            async function saveDisplayOption(key, value) {
-                if (displayBusy) return;
-                displayBusy = true;
-                autoScrollSwitch.disabled = true;
-                sequenceSwitch.disabled = true;
-                const previous = styleConfig[key];
-                styleConfig[key] = !!value;
-                displayStatus.textContent = "正在保存显示设置……";
-                try {
-                    const res = await fetch("/api/style", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify(styleConfig)
-                    });
-                    if (!res.ok) throw new Error("HTTP " + res.status);
-                    displayStatus.textContent = "显示设置已保存并生效。";
-                } catch (error) {
-                    styleConfig[key] = previous;
-                    setSwitch(autoScrollSwitch, asBool(styleConfig.auto_scroll, false));
-                    setSwitch(sequenceSwitch, asBool(styleConfig.show_sequence, false));
-                    displayStatus.textContent = "保存显示设置失败：" + error;
-                } finally {
-                    displayBusy = false;
-                    autoScrollSwitch.disabled = false;
-                    sequenceSwitch.disabled = false;
-                }
-            }
-
-            function toggleOption(button, key) {
-                if (displayBusy) return;
-                const next = !getSwitch(button);
-                setSwitch(button, next);
-                void saveDisplayOption(key, next);
             }
 
             function openCookieLogin() {
@@ -407,7 +237,8 @@
             }
 
             window.addEventListener("message", function (event) {
-                if (!event || !event.data || event.data.type !== "pdj-cookie-ready") return;
+                if (event.origin !== window.location.origin) return;
+                if (!event.data || event.data.type !== "pdj-cookie-ready") return;
                 if (typeof event.data.cookie !== "string" || !event.data.cookie.trim()) return;
                 cookieInput.value = event.data.cookie.trim();
                 const loginUid = Number(event.data.uid || 0);
@@ -418,10 +249,7 @@
 
             saveButton.addEventListener("click", function () { void saveLoginConfig(); });
             qrButton.addEventListener("click", openCookieLogin);
-            autoScrollSwitch.addEventListener("click", function () { toggleOption(autoScrollSwitch, "auto_scroll"); });
-            sequenceSwitch.addEventListener("click", function () { toggleOption(sequenceSwitch, "show_sequence"); });
-
-            void Promise.all([loadLoginConfig(), loadDisplayStyle()]);
+            void loadLoginConfig();
         })();
     </script>
 </body>
