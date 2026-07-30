@@ -24,7 +24,7 @@ def log_dir(app_dir: Path | None = None) -> Path:
 
 def _safe_room_token(value: Any) -> str:
     text = str(value or "").strip()
-    if not text or text in {"0", "None", "null"}:
+    if not text or text.casefold() in {"0", "none", "null", "unknow", "unknown"}:
         return "unknow"
     normalized = re.sub(r"[^0-9A-Za-z_-]+", "-", text).strip("-_")
     return normalized[:64] or "unknow"
@@ -77,7 +77,13 @@ def room_token_from_config_file(app_dir: Path | None = None) -> str:
     return _safe_room_token(match.group(1).strip().strip('"\'')) if match else "unknow"
 
 
-def daily_log_path(kind: str, room_token: str, app_dir: Path | None = None, *, when: dt.datetime | None = None) -> Path:
+def daily_log_path(
+    kind: str,
+    room_token: str,
+    app_dir: Path | None = None,
+    *,
+    when: dt.datetime | None = None,
+) -> Path:
     normalized_kind = str(kind or "common").strip().lower()
     if normalized_kind not in {"common", "error", "update"}:
         raise ValueError(f"未知日志类型：{kind}")
@@ -95,7 +101,6 @@ def cleanup_logs(app_dir: Path | None = None, retention_days: int = DEFAULT_RETE
     deleted = 0
     for path in directory.glob("*.log"):
         if not path.name.startswith(LOG_PREFIXES):
-            # Also clean legacy backend/update logs so migration does not leave them forever.
             if not (path.name.startswith("backend_") or path.name.endswith("-update.log")):
                 continue
         try:
@@ -133,6 +138,17 @@ def _utf8_stream_handler() -> logging.StreamHandler[Any]:
     return handler
 
 
+def _configured_room_token(module: Any, config: dict[str, Any]) -> str:
+    config_path = getattr(module, "CONFIG_PATH", None)
+    if config_path is not None:
+        try:
+            if not Path(config_path).is_file():
+                return "unknow"
+        except (OSError, TypeError, ValueError):
+            return "unknow"
+    return room_token_from_config(config)
+
+
 def configure_backend_logging(module: Any, config: dict[str, Any]) -> logging.Logger:
     directory = Path(getattr(module, "LOG_DIR", log_dir()))
     directory.mkdir(parents=True, exist_ok=True)
@@ -140,11 +156,17 @@ def configure_backend_logging(module: Any, config: dict[str, Any]) -> logging.Lo
     if not isinstance(log_cfg, dict):
         log_cfg = {}
     to_int = getattr(module, "_to_int", lambda value, default: int(value or default))
-    retention_days = max(1, to_int(log_cfg.get("retention_days", DEFAULT_RETENTION_DAYS), DEFAULT_RETENTION_DAYS))
+    retention_days = max(
+        1,
+        to_int(
+            log_cfg.get("retention_days", DEFAULT_RETENTION_DAYS),
+            DEFAULT_RETENTION_DAYS,
+        ),
+    )
     cleanup_logs(directory.parent, retention_days)
     level_name = str(log_cfg.get("level", "INFO") or "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
-    room = room_token_from_config(config)
+    room = _configured_room_token(module, config)
     common_path = daily_log_path("common", room, directory.parent)
     error_path = daily_log_path("error", room, directory.parent)
 
