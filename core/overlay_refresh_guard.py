@@ -1,10 +1,14 @@
-"""Thread-safe refresh loop and advanced typography for the standalone Tk overlay."""
+"""Thread-safe refresh loop and advanced typography for the standalone Tk overlay.
+
+Tk font support is imported only while a real overlay is being drawn. Backend,
+model and test-only imports therefore continue working on Python builds where
+``tkinter`` is unavailable.
+"""
 from __future__ import annotations
 
 import functools
 import queue
 import threading
-import tkinter.font as tkfont
 from typing import Any
 
 from .style_option_guard import STYLE_OPTION_DEFAULTS
@@ -91,12 +95,18 @@ def _font_style_spec(weight_value: Any, style_value: Any) -> tuple[str, str]:
     return weight, slant
 
 
-def _character_advance(font: tkfont.Font, character: str, letter_spacing: int, word_spacing: int) -> int:
+def _create_font(*, root: Any, family: str, size: int, weight: str, slant: str) -> Any:
+    from tkinter import font as tkfont  # imported only by the real overlay process
+
+    return tkfont.Font(root=root, family=family, size=size, weight=weight, slant=slant)
+
+
+def _character_advance(font: Any, character: str, letter_spacing: int, word_spacing: int) -> int:
     extra = word_spacing if character.isspace() else letter_spacing
     return max(0, int(font.measure(character)) + extra)
 
 
-def _measure_spaced(font: tkfont.Font, text: str, letter_spacing: int, word_spacing: int) -> int:
+def _measure_spaced(font: Any, text: str, letter_spacing: int, word_spacing: int) -> int:
     if not text:
         return 0
     if letter_spacing == 0 and word_spacing == 0:
@@ -104,7 +114,7 @@ def _measure_spaced(font: tkfont.Font, text: str, letter_spacing: int, word_spac
     return sum(_character_advance(font, character, letter_spacing, word_spacing) for character in text)
 
 
-def _wrap_text(font: tkfont.Font, text: str, max_width: int, letter_spacing: int, word_spacing: int) -> list[str]:
+def _wrap_text(font: Any, text: str, max_width: int, letter_spacing: int, word_spacing: int) -> list[str]:
     if not text:
         return [""]
     lines: list[str] = []
@@ -127,19 +137,17 @@ def _wrap_text(font: tkfont.Font, text: str, max_width: int, letter_spacing: int
 def _build_refresh_result(app: Any, style_snapshot: dict[str, Any]):
     queue_payload = app._request_json("/api/queue/state")
     style_payload = app._request_json("/api/style")
-
     entries = []
     if isinstance(queue_payload, dict):
-        payload_entries = queue_payload.get("entries", [])
-        if isinstance(payload_entries, list):
-            entries = payload_entries
+        raw_entries = queue_payload.get("entries", [])
+        if isinstance(raw_entries, list):
+            entries = raw_entries
     items = [
         f"{str(entry.get('id', '')).strip()} {str(entry.get('content', '')).strip()}".rstrip()
         for entry in entries
         if isinstance(entry, dict)
         and str(entry.get("id", "") or entry.get("content", "")).strip()
     ]
-
     next_style = dict(STYLE_OPTION_DEFAULTS)
     next_style.update(style_snapshot)
     if isinstance(style_payload, dict):
@@ -157,7 +165,7 @@ def _draw_spaced_line(
     y: float,
     available_width: int,
     align: str,
-    font: tkfont.Font,
+    font: Any,
     fill: str,
     stroke_fill: str,
     stroke_enabled: bool,
@@ -229,7 +237,7 @@ def _redraw_advanced(app: Any, module: Any) -> None:
     font_size = _int_value(style.get("queue_font_size"), 50, 8, 300)
     font_size = max(8, int(font_size * scale / 100))
     weight, slant = _font_style_spec(style.get("queue_font_weight"), style.get("queue_font_style"))
-    font = tkfont.Font(
+    font = _create_font(
         root=app.root,
         family=_font_family(style.get("queue_font_family")),
         size=font_size,
@@ -366,7 +374,6 @@ def patch_overlay_module(module: Any) -> bool:
             if self._refresh_closed:
                 self._refresh_running = False
                 return
-
             latest = ...
             while True:
                 try:
@@ -376,7 +383,6 @@ def patch_overlay_module(module: Any) -> bool:
             if latest is ...:
                 schedule_poll(self)
                 return
-
             self._refresh_running = False
             if latest is not None:
                 items, next_style = latest
@@ -386,7 +392,6 @@ def patch_overlay_module(module: Any) -> bool:
                 if changed:
                     self._reset_scroll()
                     self._redraw()
-
             if not self._refresh_closed:
                 try:
                     self._refresh_timer_job = self.root.after(
