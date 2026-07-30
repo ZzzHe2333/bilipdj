@@ -242,6 +242,7 @@ def perform_update(
             "version": target_version,
             "installed_at": _timestamp(),
             "backup_dir": str(backup_dir),
+            "cleanup_dir": str(zip_path.parent),
         }
         (app_dir / "update-result.json").write_text(
             json.dumps(result, ensure_ascii=False, indent=2),
