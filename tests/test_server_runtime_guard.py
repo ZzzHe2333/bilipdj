@@ -23,6 +23,14 @@ class _BufferedSocket:
         return chunk
 
 
+class _RaisingWriter:
+    def __init__(self, error: OSError) -> None:
+        self.error = error
+
+    def write(self, _data: bytes) -> int:
+        raise self.error
+
+
 def _recv_exact(conn: _BufferedSocket, size: int) -> bytes | None:
     chunks = bytearray()
     while len(chunks) < size:
@@ -93,6 +101,7 @@ class ServerRuntimeGuardTests(unittest.TestCase):
                 self.response_headers: dict[str, str] = {}
                 self.post_called = False
                 self.upgrade_called = False
+                self.close_connection = False
                 self.server = SimpleNamespace(ws_hub=_Hub())
 
             def _is_loopback_client(self) -> bool:
@@ -171,6 +180,22 @@ class ServerRuntimeGuardTests(unittest.TestCase):
         )
         valid.do_POST()
         self.assertTrue(valid.post_called)
+
+    def test_json_response_ignores_client_disconnects_only(self) -> None:
+        aborted = self.module.ApiHandler()
+        aborted.wfile = _RaisingWriter(ConnectionAbortedError(10053, "aborted"))
+        aborted._write_json({"status": "ok"})
+        self.assertTrue(aborted.close_connection)
+
+        reset = self.module.ApiHandler()
+        reset.wfile = _RaisingWriter(ConnectionResetError(10054, "reset"))
+        reset._write_json({"status": "ok"})
+        self.assertTrue(reset.close_connection)
+
+        unexpected = self.module.ApiHandler()
+        unexpected.wfile = _RaisingWriter(OSError(13, "permission denied"))
+        with self.assertRaises(OSError):
+            unexpected._write_json({"status": "ok"})
 
     def test_websocket_consumes_unsupported_frames_without_losing_alignment(self) -> None:
         stream = _BufferedSocket(
