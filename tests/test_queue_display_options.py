@@ -22,16 +22,17 @@ class QueueDisplayOptionsTests(unittest.TestCase):
         self.assertEqual(_display_queue_text(3, "玩家甲", False), "玩家甲")
         self.assertEqual(_display_queue_text(3, "玩家甲", True), "03  玩家甲")
 
-    def test_browser_queue_contains_scroll_and_sequence_controls(self) -> None:
+    def test_display_controls_are_only_in_desktop_overlay_settings(self) -> None:
         script = (REPO_DIR / "core" / "ui" / "myjs.js").read_text(encoding="utf-8")
-        page = (REPO_DIR / "core" / "ui" / "config.html").read_text(encoding="utf-8")
+        login_page = (REPO_DIR / "core" / "ui" / "config.html").read_text(encoding="utf-8")
+        desktop_guard = (REPO_DIR / "core" / "control_panel_guard.py").read_text(encoding="utf-8")
 
         self.assertIn("PDJ_AutoScrollStep", script)
         self.assertIn("pdjDisplayOptions.show_sequence", script)
-        self.assertIn('id="auto-scroll-switch"', page)
-        self.assertIn('id="sequence-switch"', page)
-        self.assertIn('role="switch"', page)
-        self.assertIn("#22c55e", page)
+        self.assertNotIn('id="auto-scroll-switch"', login_page)
+        self.assertNotIn('id="sequence-switch"', login_page)
+        self.assertIn('text="自动滚动"', desktop_guard)
+        self.assertIn('text="显示序号"', desktop_guard)
 
 
 if __name__ == "__main__":
