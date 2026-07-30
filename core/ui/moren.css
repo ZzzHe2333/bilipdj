@@ -12,6 +12,14 @@
     --text-stroke-enabled: 1;
     --neon: #00e5ff;
     --queue-font-family: "Microsoft YaHei", "Noto Sans SC", "PingFang SC", sans-serif;
+    --queue-letter-spacing: 0px;
+    --queue-word-spacing: 0px;
+    --queue-line-height: 1.20;
+    --queue-item-gap: 10px;
+    --queue-text-align: left;
+    --queue-text-opacity: 1;
+    --queue-item-padding-x: 14px;
+    --queue-item-padding-y: 8px;
     --queue-glow-sm: 0 0 8px rgba(0,229,255,0.7);
     --queue-glow-lg: 0 0 22px rgba(0,229,255,0.35);
 }
@@ -45,7 +53,7 @@ html, body {
 .div {
     position: relative;
     display: grid;
-    gap: 10px;
+    gap: var(--queue-item-gap);
     margin-top: 0;
     max-height: 68vh;
     overflow: auto;
@@ -57,7 +65,7 @@ html, body {
     grid-template-columns: 44px 1fr;
     align-items: center;
     min-height: 54px;
-    padding: 8px 14px 8px 8px;
+    padding: var(--queue-item-padding-y) var(--queue-item-padding-x);
     border: 1px solid rgba(255,255,255,.08);
     border-radius: 14px;
     background: linear-gradient(90deg, rgba(255,255,255,.08), rgba(255,255,255,.025));
@@ -75,11 +83,18 @@ html, body {
     font-weight: 800;
 }
 .queue-content {
+    min-width: 0;
     overflow: hidden;
     color: var(--neon);
+    font-family: var(--queue-font-family);
     font-size: var(--queue-font-size);
     font-weight: var(--queue-font-weight);
     font-style: var(--queue-font-style);
+    letter-spacing: var(--queue-letter-spacing);
+    word-spacing: var(--queue-word-spacing);
+    line-height: var(--queue-line-height);
+    text-align: var(--queue-text-align);
+    opacity: var(--queue-text-opacity);
     text-overflow: ellipsis;
     text-shadow: var(--queue-glow-sm);
     white-space: nowrap;
