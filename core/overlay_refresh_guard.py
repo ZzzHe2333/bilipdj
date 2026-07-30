@@ -67,7 +67,10 @@ def _blend_color(foreground: str, background: str, opacity_percent: int) -> str:
         bg = tuple(int(background[index:index + 2], 16) for index in (1, 3, 5))
     except (ValueError, IndexError):
         return foreground
-    mixed = tuple(round(bg_value + (fg_value - bg_value) * opacity) for fg_value, bg_value in zip(fg, bg, strict=False))
+    mixed = tuple(
+        round(bg_value + (fg_value - bg_value) * opacity)
+        for fg_value, bg_value in zip(fg, bg, strict=False)
+    )
     return "#" + "".join(f"{value:02x}" for value in mixed)
 
 
@@ -248,8 +251,6 @@ def _redraw_advanced(app: Any, module: Any) -> None:
     text_color = _blend_color(_safe_color(style.get("text_color"), "#eaf6ff"), transparent_color, opacity)
     stroke_color = _blend_color(_safe_color(style.get("text_stroke_color"), "#000000"), transparent_color, opacity)
     stroke_enabled = _style_bool(style.get("text_stroke_enabled"), True)
-    # Limit the offset matrix. The old radius scaled without a ceiling and could
-    # create hundreds of canvas objects for each glyph at very large font sizes.
     stroke_radius = max(1, min(3, int(font_size * 0.045)))
     line_step = max(1, int(font.metrics("linespace") * line_height))
 
@@ -296,8 +297,12 @@ def patch_overlay_module(module: Any) -> bool:
         if bool(getattr(app_class, "_bilipdj_refresh_guard_installed", False)):
             return True
         original_close = getattr(app_class, "_close", None)
-        if not callable(original_close):
+        original_redraw = getattr(app_class, "_redraw", None)
+        if not callable(original_close) or not callable(original_redraw):
             return False
+        advanced_supported = callable(getattr(module, "_display_queue_text", None)) and isinstance(
+            getattr(module, "DEFAULT_STYLE", None), dict
+        )
         defaults = getattr(module, "DEFAULT_STYLE", None)
         if isinstance(defaults, dict):
             for key, value in STYLE_OPTION_DEFAULTS.items():
@@ -313,6 +318,11 @@ def patch_overlay_module(module: Any) -> bool:
                 self._refresh_timer_job = None
             if not hasattr(self, "_refresh_closed"):
                 self._refresh_closed = False
+
+        def runtime_redraw(self: Any) -> None:
+            if advanced_supported:
+                return _redraw_advanced(self, module)
+            return original_redraw(self)
 
         def schedule_poll(self: Any) -> None:
             ensure_state(self)
@@ -375,7 +385,7 @@ def patch_overlay_module(module: Any) -> bool:
                 self.style = dict(next_style)
                 if changed:
                     self._reset_scroll()
-                    _redraw_advanced(self, module)
+                    self._redraw()
 
             if not self._refresh_closed:
                 try:
@@ -405,13 +415,10 @@ def patch_overlay_module(module: Any) -> bool:
                     setattr(self, attribute, None)
             return original_close(self)
 
-        def redraw(self: Any) -> None:
-            return _redraw_advanced(self, module)
-
         setattr(app_class, "_refresh_async", refresh_async)
         setattr(app_class, "_refresh_worker", refresh_worker)
         setattr(app_class, "_poll_refresh_results", poll_refresh_results)
-        setattr(app_class, "_redraw", redraw)
+        setattr(app_class, "_redraw", runtime_redraw)
         setattr(app_class, "_close", close_with_refresh_shutdown)
         setattr(app_class, "_bilipdj_refresh_guard_installed", True)
         return True
