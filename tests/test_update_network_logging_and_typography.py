@@ -10,7 +10,7 @@ from pathlib import Path
 
 from core import log_manager, update_network
 from core.style_option_guard import STYLE_OPTION_DEFAULTS, patch_style_module
-from core.updater_gui import PIECE_COLUMNS, progress_for_message, select_update_log_root
+from core.updater_model import PIECE_COLUMNS, progress_for_message, select_update_log_root
 
 
 ROOT = Path(__file__).resolve().parents[1]
