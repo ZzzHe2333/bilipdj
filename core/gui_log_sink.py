@@ -29,11 +29,21 @@ def _room_token(panel: Any) -> str:
     return log_manager._safe_room_token(value)  # noqa: SLF001
 
 
-def _is_error_message(message: str, warn: bool) -> bool:
-    if warn:
-        return True
+def _is_error_message(message: str, _warn: bool) -> bool:
     text = str(message or "")
-    return any(marker in text for marker in ("失败", "错误", "异常", "Traceback", "CRITICAL", "[ERROR]"))
+    return any(
+        marker in text
+        for marker in (
+            "失败",
+            "错误",
+            "异常",
+            "Traceback",
+            "CRITICAL",
+            "[ERROR]",
+            "ConnectionError",
+            "PermissionError",
+        )
+    )
 
 
 def _is_backend_forwarded_line(message: str) -> bool:
