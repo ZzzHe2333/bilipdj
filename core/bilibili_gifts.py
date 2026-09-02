@@ -3,21 +3,25 @@ from __future__ import annotations
 
 if __package__:
     from . import bilibili_protocol as _bilibili_protocol
+    from . import queue_rank_query as _queue_rank_query
     from .bilibili_socket_guard import install_bilibili_socket_guard
-    from .queue_rank_query import install_queue_rank_query_hook
+    from .multi_platform_danmu import install_queue_rank_integration
 else:
     import bilibili_protocol as _bilibili_protocol
+    import queue_rank_query as _queue_rank_query
     from bilibili_socket_guard import install_bilibili_socket_guard
-    from queue_rank_query import install_queue_rank_query_hook
+    from multi_platform_danmu import install_queue_rank_integration
 
 # bilibili_protocol is fully imported before server.py imports this catalog. Patch
 # its exact socket reader so a partial body timeout forces a clean reconnect
 # instead of shifting the binary packet boundary.
 install_bilibili_socket_guard(_bilibili_protocol)
 
-# server.py imports this catalog before QueueManager is defined. Install the
-# read-only query interface for both package imports and direct script runs.
-install_queue_rank_query_hook()
+# Reuse the existing QueueManager construction hook. This avoids installing a
+# second __build_class__ hook while still guaranteeing the multi-platform runtime
+# is patched before run_server() can start any relay.
+install_queue_rank_integration(_queue_rank_query)
+_queue_rank_query.install_queue_rank_query_hook()
 
 
 GIFT_BATTERIES: dict[str, int | None] = {
