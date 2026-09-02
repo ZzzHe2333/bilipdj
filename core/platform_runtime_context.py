@@ -17,9 +17,10 @@ def patch_platform_runtime_context(server_module: Any, queue_manager_cls: type[A
         return True
 
     load_config = getattr(server_module, "load_config", None)
+    save_config = getattr(server_module, "save_config", None)
     ensure_relay = getattr(server_module, "_ensure_danmu_relay", None)
     process_danmu = getattr(queue_manager_cls, "process_danmu_json", None)
-    if not all(callable(item) for item in (load_config, ensure_relay, process_danmu)):
+    if not all(callable(item) for item in (load_config, save_config, ensure_relay, process_danmu)):
         return False
 
     if not bool(getattr(load_config, "_bilipdj_runtime_context_aware", False)):
@@ -33,7 +34,17 @@ def patch_platform_runtime_context(server_module: Any, queue_manager_cls: type[A
         setattr(load_config_with_context, "_bilipdj_runtime_context_aware", True)
         setattr(server_module, "load_config", load_config_with_context)
 
-    # Capture the possibly wrapped version after the load_config update.
+    if not bool(getattr(save_config, "_bilipdj_runtime_context_aware", False)):
+        @functools.wraps(save_config)
+        def save_config_with_context(config: dict[str, Any], *args: Any, **kwargs: Any) -> Any:
+            result = save_config(config, *args, **kwargs)
+            if isinstance(getattr(_RUNTIME_LOCAL, "config", None), dict) and isinstance(config, dict):
+                _RUNTIME_LOCAL.config = copy.deepcopy(config)
+            return result
+
+        setattr(save_config_with_context, "_bilipdj_runtime_context_aware", True)
+        setattr(server_module, "save_config", save_config_with_context)
+
     current_ensure = getattr(server_module, "_ensure_danmu_relay", ensure_relay)
     if not bool(getattr(current_ensure, "_bilipdj_runtime_context_aware", False)):
         @functools.wraps(current_ensure)
@@ -56,7 +67,11 @@ def patch_platform_runtime_context(server_module: Any, queue_manager_cls: type[A
             if isinstance(runtime, dict):
                 _RUNTIME_LOCAL.config = runtime
             try:
-                return current_process(self, payload)
+                result = current_process(self, payload)
+                updated_runtime = getattr(_RUNTIME_LOCAL, "config", None)
+                if server is not None and isinstance(updated_runtime, dict):
+                    server.runtime_config = copy.deepcopy(updated_runtime)
+                return result
             finally:
                 if previous is None:
                     try:
