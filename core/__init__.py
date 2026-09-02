@@ -17,10 +17,18 @@ except ImportError:  # tkinter is optional for backend-only/headless usage
         return None
 
 from .control_panel_bootstrap import install_control_panel_class_hook
+from .multi_platform_danmu import install_control_panel_feature_patch
 from .overlay_performance_guard import install_overlay_performance_guard
 from .runtime_guards import install_runtime_guards
 from .update_network import install_update_client_network_guard
 from .web_queue_layout import install_web_queue_layout_guard
+
+# Extend the existing control-panel feature pack before its class hook fires.
+# This avoids adding a competing __build_class__ hook.
+try:
+    install_control_panel_feature_patch()
+except Exception:
+    pass
 
 # The packaged entry point executes core/control_panel.py as __main__. Install
 # the narrowly scoped class hook before that script reaches ControlPanelApp.
@@ -43,6 +51,7 @@ except Exception:
 __all__ = [
     "SliderCheckbutton",
     "install_control_panel_class_hook",
+    "install_control_panel_feature_patch",
     "install_overlay_performance_guard",
     "install_runtime_guards",
     "install_slider_switches",
