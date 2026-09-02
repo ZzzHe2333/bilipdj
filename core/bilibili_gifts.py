@@ -7,12 +7,14 @@ if __package__:
     from .bilibili_socket_guard import install_bilibili_socket_guard
     from .multi_platform_danmu import install_queue_rank_integration
     from .platform_queue_identity import install_queue_rank_identity_integration
+    from .platform_runtime_context import install_queue_rank_runtime_context_integration
 else:
     import bilibili_protocol as _bilibili_protocol
     import queue_rank_query as _queue_rank_query
     from bilibili_socket_guard import install_bilibili_socket_guard
     from multi_platform_danmu import install_queue_rank_integration
     from platform_queue_identity import install_queue_rank_identity_integration
+    from platform_runtime_context import install_queue_rank_runtime_context_integration
 
 # bilibili_protocol is fully imported before server.py imports this catalog. Patch
 # its exact socket reader so a partial body timeout forces a clean reconnect
@@ -20,10 +22,12 @@ else:
 install_bilibili_socket_guard(_bilibili_protocol)
 
 # Reuse the existing QueueManager construction hook. This avoids installing a
-# second __build_class__ hook while still guaranteeing both the multi-platform
-# runtime and platform-aware queue identities are ready before run_server().
+# second __build_class__ hook while still guaranteeing the multi-platform
+# runtime, platform-aware queue identities and live runtime context are ready
+# before run_server().
 install_queue_rank_integration(_queue_rank_query)
 install_queue_rank_identity_integration(_queue_rank_query)
+install_queue_rank_runtime_context_integration(_queue_rank_query)
 _queue_rank_query.install_queue_rank_query_hook()
 
 
