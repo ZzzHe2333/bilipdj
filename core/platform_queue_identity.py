@@ -3,7 +3,7 @@
 Queue display text remains backward compatible. A parallel in-memory key list
 tracks the platform user identifier for entries created by live danmu commands.
 Archive files remain readable by older versions; restored legacy rows simply have
-no platform key until they are re-created by a live command.
+no platform key until they are claimed by a live user again.
 """
 from __future__ import annotations
 
@@ -134,6 +134,8 @@ def patch_queue_manager_platform_identity(queue_manager_cls: type[Any]) -> bool:
                 return index
             if row_key is None and legacy_match < 0:
                 legacy_match = index
+        if legacy_match >= 0:
+            keys[legacy_match] = current_key
         return legacy_match
 
     def _key_for_item(self: Any, item: Any) -> str | None:
@@ -158,8 +160,6 @@ def patch_queue_manager_platform_identity(queue_manager_cls: type[Any]) -> bool:
         before = len(getattr(self, "_persons", []))
         insert_pos = max(0, min(int(pos), before))
         keys = _sync_keys(self)
-        # Insert a placeholder before the original mutation so _sync_keys called by
-        # nested code cannot incorrectly append it at the end.
         keys.insert(insert_pos, None)
         try:
             result = bool(original_insert(self, pos, item, *args, **kwargs))
@@ -217,19 +217,25 @@ def patch_queue_manager_platform_identity(queue_manager_cls: type[Any]) -> bool:
         def move_with_keys(self: Any, index: int, direction: str):
             with self._lock:
                 count = len(getattr(self, "_persons", []))
-            should_swap = (
-                (direction == "up" and 2 <= int(index) <= count)
-                or (direction == "down" and 1 <= int(index) <= count - 1)
-            )
-            result = original_move(self, index, direction)
-            if should_swap:
-                with self._lock:
+                should_swap = (
+                    (direction == "up" and 2 <= int(index) <= count)
+                    or (direction == "down" and 1 <= int(index) <= count - 1)
+                )
+                if should_swap:
                     keys = _sync_keys(self)
                     left = int(index) - 2 if direction == "up" else int(index) - 1
                     right = int(index) - 1 if direction == "up" else int(index)
                     if 0 <= left < len(keys) and 0 <= right < len(keys):
                         keys[left], keys[right] = keys[right], keys[left]
-            return result
+            try:
+                return original_move(self, index, direction)
+            except Exception:
+                if should_swap:
+                    with self._lock:
+                        keys = _sync_keys(self)
+                        if 0 <= left < len(keys) and 0 <= right < len(keys):
+                            keys[left], keys[right] = keys[right], keys[left]
+                raise
 
         setattr(queue_manager_cls, "move_item", move_with_keys)
 
