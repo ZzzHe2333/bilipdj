@@ -2,9 +2,11 @@
 config.yaml
 kaiguan.yaml
 quanxian.yaml
+multi_platform_danmu.json
 core/config.yaml
 core/kaiguan.yaml
 core/quanxian.yaml
+core/multi_platform_danmu.json
 core/platform_config_archive*.json
 core/*cookie*
 core/*token*
@@ -178,6 +180,7 @@ venv.bak/
 
 # Rope project settings
 .ropeproject
+.spyproject
 
 # mkdocs documentation
 /site
