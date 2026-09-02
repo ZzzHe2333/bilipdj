@@ -2,9 +2,11 @@
 config.yaml
 kaiguan.yaml
 quanxian.yaml
+admin_permissions.json
 core/config.yaml
 core/kaiguan.yaml
 core/quanxian.yaml
+core/admin_permissions.json
 core/platform_config_archive*.json
 core/*cookie*
 core/*token*
@@ -111,8 +113,7 @@ ipython_config.py
 # pipenv
 #   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
 #   However, in case of collaboration, if having platform-specific dependencies or dependencies
-#   having no cross-platform support, pipenv may install dependencies that don't work, or not
-#   install all needed dependencies.
+#   may not install all needed dependencies.
 #Pipfile.lock
 
 # UV
@@ -125,7 +126,7 @@ ipython_config.py
 #   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
 #   This is especially recommended for binary packages to ensure reproducibility, and is more
 #   commonly ignored for libraries.
-#   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
+#   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-in-version-control
 #poetry.lock
 #poetry.toml
 
@@ -213,7 +214,7 @@ cython_debug/
 #  Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore 
 #  that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
 #  and can be added to the global gitignore or merged into this file. However, if you prefer, 
-#  you could uncomment the following to ignore the entire vscode folder
+#  you could uncomment the following to ignore the .vscode folder
 # .vscode/
 
 # Ruff stuff:
