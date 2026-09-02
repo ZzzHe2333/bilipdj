@@ -17,8 +17,10 @@ import threading
 from typing import Any, Callable
 
 if __package__:
+    from .admin_permission_guard import attach_admin_permission_guard
     from .style_option_guard import install_style_persistence_guard
 else:
+    from admin_permission_guard import attach_admin_permission_guard
     from style_option_guard import install_style_persistence_guard
 
 QUEUE_RANK_QUERY_COMMANDS = frozenset({"我的排队", "我的名次"})
@@ -43,7 +45,7 @@ def _format_query_log(uname: str, uid: int, command: str, message: str) -> str:
 
 
 def attach_queue_rank_query(queue_manager_cls: type[Any]) -> bool:
-    """Attach the query interface to one QueueManager-compatible class."""
+    """Attach the query and granular-admin interfaces to a QueueManager class."""
 
     with _PATCH_LOCK:
         class_id = id(queue_manager_cls)
@@ -51,6 +53,7 @@ def attach_queue_rank_query(queue_manager_cls: type[Any]) -> bool:
             getattr(queue_manager_cls, "_queue_rank_query_installed", False)
         ):
             install_style_persistence_guard(queue_manager_cls)
+            attach_admin_permission_guard(queue_manager_cls)
             return True
 
         original_process = getattr(queue_manager_cls, "_process", None)
@@ -139,6 +142,7 @@ def attach_queue_rank_query(queue_manager_cls: type[Any]) -> bool:
             QUEUE_RANK_QUERY_COMMANDS,
         )
         install_style_persistence_guard(queue_manager_cls)
+        attach_admin_permission_guard(queue_manager_cls)
         _PATCHED_CLASS_IDS.add(class_id)
         return True
 
