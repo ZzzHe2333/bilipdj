@@ -209,6 +209,13 @@ def attach_admin_permission_guard(queue_manager_cls: type[Any]) -> bool:
     def _permission_map(self: Any) -> dict[str, list[str]]:
         return load_admin_permission_store(_store_path(self))
 
+    def _current_admin_names(self: Any) -> set[str]:
+        lock = getattr(self, "_lock", None)
+        if lock is not None:
+            with lock:
+                return {str(name) for name in getattr(self, "_admins", []) if str(name).strip()}
+        return {str(name) for name in getattr(self, "_admins", []) if str(name).strip()}
+
     def _is_super(self: Any, uname: str, is_anchor: bool) -> bool:
         checker = getattr(self, "_has_super_admin", None)
         if callable(checker):
@@ -236,12 +243,7 @@ def attach_admin_permission_guard(queue_manager_cls: type[Any]) -> bool:
         if not _is_super(self, uname, is_anchor):
             return True, "权限不足，仅最高管理员可调整管理员细分权限"
 
-        lock = getattr(self, "_lock", None)
-        if lock is not None:
-            with lock:
-                current_admins = {str(name) for name in getattr(self, "_admins", [])}
-        else:
-            current_admins = {str(name) for name in getattr(self, "_admins", [])}
+        current_admins = _current_admin_names(self)
         path = _store_path(self)
 
         if msg.startswith("设置管理员权限 "):
@@ -301,18 +303,13 @@ def attach_admin_permission_guard(queue_manager_cls: type[Any]) -> bool:
 
         required = required_permission_for_command(msg)
         if required and not _is_super(self, uname, is_anchor):
-            lock = getattr(self, "_lock", None)
-            if lock is not None:
-                with lock:
-                    named_admin = uname in getattr(self, "_admins", [])
-            else:
-                named_admin = uname in getattr(self, "_admins", [])
+            named_admin = uname in _current_admin_names(self)
             if named_admin:
                 mapping = _permission_map(self)
                 if uname in mapping and required not in mapping[uname]:
                     return False, f"权限不足：未授予「{_PERMISSION_LABELS.get(required, required)}」"
 
-        return original_process(
+        result = original_process(
             self,
             uid,
             uname,
@@ -322,6 +319,14 @@ def attach_admin_permission_guard(queue_manager_cls: type[Any]) -> bool:
             is_guard,
             guard_level,
         )
+
+        # Commands such as blacklisting or removing an administrator can change
+        # the admin role inside the original queue engine. Drop stale overrides
+        # immediately so re-adding that person later starts with legacy full
+        # permissions instead of unexpectedly inheriting an old restriction.
+        if msg.startswith(("拉黑 ", "取消管理员 ")):
+            prune_admin_permissions(_current_admin_names(self), _store_path(self))
+        return result
 
     setattr(queue_manager_cls, "_process", process_with_admin_permissions)
     setattr(queue_manager_cls, "get_admin_permission_overrides", _permission_map)
