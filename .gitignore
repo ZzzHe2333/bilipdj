@@ -2,9 +2,11 @@
 config.yaml
 kaiguan.yaml
 quanxian.yaml
+admin_permissions.json
 core/config.yaml
 core/kaiguan.yaml
 core/quanxian.yaml
+core/admin_permissions.json
 core/platform_config_archive*.json
 core/*cookie*
 core/*token*
