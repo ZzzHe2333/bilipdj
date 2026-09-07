@@ -18,10 +18,10 @@ else:
 install_bilibili_socket_guard(_bilibili_protocol)
 
 # server.py imports this catalog before WebSocketHub and QueueManager are defined.
-# Install short-lived class hooks for the non-blocking display broadcaster and
-# the read-only queue-rank query interface in package and direct-script runs.
-install_websocket_performance_guard()
+# Install the existing QueueManager hook first, then layer the WebSocketHub hook
+# on top so each wrapper restores builtins.__build_class__ in strict LIFO order.
 install_queue_rank_query_hook()
+install_websocket_performance_guard()
 
 
 GIFT_BATTERIES: dict[str, int | None] = {
