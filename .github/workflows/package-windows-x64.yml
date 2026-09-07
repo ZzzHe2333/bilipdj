@@ -14,6 +14,12 @@ on:
       - 'v*'
     paths:
       - 'VERSION'
+  pull_request:
+    paths:
+      - 'requirements.txt'
+      - 'core/**'
+      - 'apps/windows/**'
+      - 'apps/web/**'
 
 permissions:
   contents: write
@@ -26,7 +32,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Resolve release tag
+      - name: Resolve build/release name
         id: resolve_tag
         shell: bash
         run: |
@@ -36,7 +42,9 @@ jobs:
             exit 1
           fi
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            TAG_NAME="pr-${{ github.event.pull_request.number }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TAG_NAME="${{ inputs.tag_name }}"
           elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
             TAG_NAME="${{ github.ref_name }}"
@@ -44,13 +52,15 @@ jobs:
             TAG_NAME="v$VERSION"
           fi
 
-          if [[ ! "$TAG_NAME" =~ ^v[0-9A-Za-z._-]+$ ]]; then
-            echo "标签格式不合法：$TAG_NAME（需以 v 开头，例如 v1.0.0）"
-            exit 1
-          fi
-          if [ "$TAG_NAME" != "v$VERSION" ]; then
-            echo "发布标签与 VERSION 不一致：标签=$TAG_NAME，VERSION=$VERSION"
-            exit 1
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            if [[ ! "$TAG_NAME" =~ ^v[0-9A-Za-z._-]+$ ]]; then
+              echo "标签格式不合法：$TAG_NAME（需以 v 开头，例如 v1.0.0）"
+              exit 1
+            fi
+            if [ "$TAG_NAME" != "v$VERSION" ]; then
+              echo "发布标签与 VERSION 不一致：标签=$TAG_NAME，VERSION=$VERSION"
+              exit 1
+            fi
           fi
 
           echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
@@ -61,32 +71,20 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Debug Python env
-        shell: pwsh
-        run: |
-          python -V
-          python -c "import sys; print(sys.executable)"
-          $httpPkg = pip list | Select-String -Pattern "^http\s" -CaseSensitive:$false
-          if ($httpPkg) { Write-Host "WARNING: http package installed: $httpPkg" } else { Write-Host "http package not installed (OK)" }
-
       - name: Build Windows executable (x64)
         shell: pwsh
         run: |
           python scripts\scan_secrets.py
-          .\scripts\package-amd64.ps1 -InstallDependencies
+          .\apps\windows\package.ps1 -InstallDependencies
 
-      - name: Create release zip and checksum
+      - name: Create build zip and checksum
         shell: pwsh
         run: |
-          if (Test-Path package) {
-            Remove-Item -LiteralPath package -Recurse -Force
-          }
+          if (Test-Path package) { Remove-Item -LiteralPath package -Recurse -Force }
           New-Item -ItemType Directory -Path package -Force | Out-Null
           Copy-Item -Recurse "dist\bilipdj\*" package\
-          if (Test-Path README.md)           { Copy-Item README.md           package\ }
-          if (Test-Path RELEASE_NOTES.md)    { Copy-Item RELEASE_NOTES.md    package\ }
-          if (Test-Path core\quanxian.yaml)  { Copy-Item core\quanxian.yaml  package\ }
-          if (Test-Path core\kaiguan.yaml)   { Copy-Item core\kaiguan.yaml   package\ }
+          if (Test-Path README.md)        { Copy-Item README.md package\ }
+          if (Test-Path RELEASE_NOTES.md) { Copy-Item RELEASE_NOTES.md package\ }
           $zipName = "${{ steps.resolve_tag.outputs.zip_name }}"
           Compress-Archive -Path package\* -DestinationPath $zipName -Force
           $sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $zipName).Hash.ToLowerInvariant()
@@ -101,6 +99,7 @@ jobs:
             ${{ steps.resolve_tag.outputs.zip_name }}.sha256
 
       - name: Create GitHub Release
+        if: github.event_name != 'pull_request'
         uses: ncipollo/release-action@v1
         with:
           tag: ${{ steps.resolve_tag.outputs.tag_name }}

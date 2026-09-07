@@ -1,0 +1,36 @@
+name: Validate Server
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [now]
+    paths:
+      - 'apps/server/**'
+      - 'apps/web/**'
+      - 'core/**'
+      - 'requirements.txt'
+  pull_request:
+    paths:
+      - 'apps/server/**'
+      - 'apps/web/**'
+      - 'core/**'
+      - 'requirements.txt'
+
+jobs:
+  validate-server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt
+      - run: python -m compileall -q core apps/server
+      - name: Validate standalone entry point
+        run: |
+          python - <<'PY'
+          from apps.server.main import configure_web_assets
+          path = configure_web_assets()
+          assert (path / 'index.html').is_file()
+          print(path)
+          PY

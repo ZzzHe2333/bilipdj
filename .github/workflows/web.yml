@@ -1,0 +1,30 @@
+name: Build Web
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [now]
+    paths:
+      - 'apps/web/**'
+  pull_request:
+    paths:
+      - 'apps/web/**'
+
+jobs:
+  build-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python apps/web/build.py
+      - name: Verify output
+        run: |
+          test -f apps/web/dist/index.html
+          test -f apps/web/dist/config.html
+          test -f apps/web/dist/myjs.js
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bilipdj-web
+          path: apps/web/dist/
