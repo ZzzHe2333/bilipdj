@@ -11,13 +11,25 @@ if str(REPO_ROOT) not in sys.path:
 
 from core import server as backend  # noqa: E402
 
-DEFAULT_WEB_DIR = REPO_ROOT / "apps" / "web" / "static"
+SOURCE_WEB_DIR = REPO_ROOT / "apps" / "web" / "static"
+BUNDLED_WEB_DIR = Path(getattr(sys, "_MEIPASS", REPO_ROOT)) / "core" / "ui"
+
+
+def _resolve_default_web_dir() -> Path:
+    for candidate in (SOURCE_WEB_DIR, BUNDLED_WEB_DIR, backend.UI_DIR, backend.BUNDLE_UI_DIR):
+        try:
+            path = Path(candidate).resolve()
+        except Exception:
+            continue
+        if path.is_dir():
+            return path
+    return SOURCE_WEB_DIR.resolve()
 
 
 def configure_web_assets(web_dir: str | os.PathLike[str] | None = None) -> Path:
-    """Point the legacy-compatible backend at the canonical Web app assets."""
-    target = Path(web_dir).expanduser().resolve() if web_dir else DEFAULT_WEB_DIR.resolve()
-    if not target.exists():
+    """Point the backend at the canonical Web assets for source or packaged runs."""
+    target = Path(web_dir).expanduser().resolve() if web_dir else _resolve_default_web_dir()
+    if not target.is_dir():
         raise FileNotFoundError(f"Web assets directory does not exist: {target}")
     backend.UI_DIR = target
     backend.BUNDLE_UI_DIR = target
@@ -32,7 +44,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--web-dir",
         default=os.getenv("BILIPDJ_WEB_DIR", ""),
-        help="Web static directory; defaults to apps/web/static",
+        help="Web static directory; defaults to apps/web/static (or bundled core/ui)",
     )
     args = parser.parse_args(argv)
 
