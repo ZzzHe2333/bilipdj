@@ -5,18 +5,22 @@ if __package__:
     from . import bilibili_protocol as _bilibili_protocol
     from .bilibili_socket_guard import install_bilibili_socket_guard
     from .queue_rank_query import install_queue_rank_query_hook
+    from .websocket_performance_guard import install_websocket_performance_guard
 else:
     import bilibili_protocol as _bilibili_protocol
     from bilibili_socket_guard import install_bilibili_socket_guard
     from queue_rank_query import install_queue_rank_query_hook
+    from websocket_performance_guard import install_websocket_performance_guard
 
 # bilibili_protocol is fully imported before server.py imports this catalog. Patch
 # its exact socket reader so a partial body timeout forces a clean reconnect
 # instead of shifting the binary packet boundary.
 install_bilibili_socket_guard(_bilibili_protocol)
 
-# server.py imports this catalog before QueueManager is defined. Install the
-# read-only query interface for both package imports and direct script runs.
+# server.py imports this catalog before WebSocketHub and QueueManager are defined.
+# Install short-lived class hooks for the non-blocking display broadcaster and
+# the read-only queue-rank query interface in package and direct-script runs.
+install_websocket_performance_guard()
 install_queue_rank_query_hook()
 
 
