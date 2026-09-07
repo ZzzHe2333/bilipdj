@@ -1,0 +1,84 @@
+# -*- mode: python ; coding: utf-8 -*-
+from pathlib import Path
+
+spec_dir = Path(SPECPATH).resolve()
+project_root = spec_dir.parents[1]
+
+datas = [
+    (str(project_root / "VERSION"), "."),
+    (str(project_root / "apps" / "web" / "static"), "core/ui"),
+]
+
+hiddenimports = [
+    "core.server",
+    "core.mirrorchyan",
+    "core.bilibili_gifts",
+    "core.update_client",
+    "core.update_ui",
+    "core.update_network",
+    "core.update_page",
+    "core.log_manager",
+    "core.gui_log_sink",
+    "core.control_panel_bootstrap",
+    "core.control_panel_guard",
+    "core.control_panel_features",
+    "core.control_panel_ui_finish",
+    "core.style_save_transport",
+    "core.style_option_guard",
+    "core.web_queue_layout",
+    "core.overlay_refresh_guard",
+    "core.overlay_performance_guard",
+    "qrcode",
+    "qrcode.main",
+    "qrcode.constants",
+    "qrcode.util",
+    "qrcode.image.base",
+    "qrcode.image.pil",
+    "qrcode.image.pure",
+    "PIL",
+    "PIL.Image",
+    "PIL.PngImagePlugin",
+    "brotli",
+    "psutil",
+    "google.protobuf",
+    "google.protobuf.internal.builder",
+]
+
+a = Analysis(
+    [str(project_root / "apps" / "windows" / "main.py")],
+    pathex=[str(project_root)],
+    binaries=[],
+    datas=datas,
+    hiddenimports=hiddenimports,
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    noarchive=False,
+    optimize=0,
+)
+pyz = PYZ(a.pure)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name="main",
+    icon=str(project_root / "core" / "256x.ico"),
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    console=False,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name="bilipdj",
+)

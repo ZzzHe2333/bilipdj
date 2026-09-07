@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>弹幕排队姬 - 登录配置</title>
+    <link rel="stylesheet" href="pdj_design.css">
+    <style>
+        :root {
+            color-scheme: dark;
+            --page-bg: #07101e;
+            --panel-bg: rgba(7, 18, 36, 0.94);
+            --cyan: #00e5ff;
+            --muted: #7ec8e3;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            padding: 20px;
+            background: radial-gradient(ellipse at 20% 20%, #0d1e36 0%, #060c18 55%, #030608 100%);
+            color: #cce8ff;
+            font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+        }
+        .config-page {
+            width: min(920px, 100%);
+            margin: 0 auto;
+            display: grid;
+            gap: 18px;
+        }
+        .page-title { padding: 4px 2px; }
+        .page-title span {
+            color: var(--cyan);
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: .22em;
+        }
+        .page-title h1 {
+            margin: 8px 0 4px;
+            color: #f6fbff;
+            font-size: clamp(26px, 5vw, 40px);
+        }
+        .page-title p {
+            margin: 0;
+            color: rgba(204,232,255,.66);
+        }
+        .config-card {
+            padding: 20px;
+            border: 1px solid rgba(0,229,255,.3);
+            border-left: 3px solid var(--cyan);
+            background: var(--panel-bg);
+            box-shadow: 0 0 22px rgba(0,229,255,.09);
+        }
+        .card-heading {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .step {
+            display: grid;
+            place-items: center;
+            width: 38px;
+            height: 38px;
+            border: 1px solid rgba(0,229,255,.4);
+            color: var(--cyan);
+            font-weight: 800;
+        }
+        .card-heading h2 {
+            margin: 0;
+            color: #f4fbff;
+            font-size: 18px;
+        }
+        .card-heading p {
+            margin: 3px 0 0;
+            color: rgba(126,200,227,.7);
+            font-size: 13px;
+        }
+        .field-row {
+            display: grid;
+            grid-template-columns: 150px 1fr;
+            align-items: start;
+            gap: 12px;
+            margin: 12px 0;
+        }
+        .field-row label {
+            padding-top: 8px;
+            color: var(--muted);
+            font-size: 13px;
+            font-weight: 700;
+        }
+        .field-row label small {
+            display: block;
+            margin-top: 3px;
+            color: rgba(126,200,227,.55);
+            font-weight: 400;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 9px 11px;
+            border: 1px solid rgba(0,229,255,.3);
+            background: rgba(0,10,22,.9);
+            color: #dff5ff;
+            font: inherit;
+            outline: none;
+        }
+        input:focus, textarea:focus {
+            border-color: var(--cyan);
+            box-shadow: 0 0 0 2px rgba(0,229,255,.12);
+        }
+        textarea { min-height: 105px; resize: vertical; }
+        .actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 16px;
+        }
+        .action-button {
+            padding: 9px 16px;
+            border: 1px solid #00b8d9;
+            background: rgba(0,40,60,.9);
+            color: var(--cyan);
+            font: inherit;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .action-button:hover:not(:disabled) { background: rgba(0,229,255,.13); color: #fff; }
+        .action-button:disabled { opacity: .45; cursor: wait; }
+        .status {
+            margin-top: 14px;
+            color: rgba(204,232,255,.72);
+            font-size: 13px;
+        }
+        @media (max-width: 640px) {
+            body { padding: 12px; }
+            .config-card { padding: 16px; }
+            .field-row { grid-template-columns: 1fr; gap: 6px; }
+            .field-row label { padding-top: 0; }
+        }
+    </style>
+</head>
+<body>
+    <main class="config-page">
+        <header class="page-title">
+            <span>BILIPDJ · LOGIN</span>
+            <h1>弹幕排队姬登录配置</h1>
+            <p>这里只配置账号连接；滚动和序号设置已移至桌面程序的“透明窗口”页面。</p>
+        </header>
+
+        <section class="config-card">
+            <div class="card-heading">
+                <span class="step">01</span>
+                <div><h2>账号连接</h2><p>扫码连接或手动填写 Bilibili 登录凭据</p></div>
+            </div>
+            <div class="field-row">
+                <label for="uid">Bilibili UID<small>扫码后自动识别</small></label>
+                <input id="uid" type="number" inputmode="numeric" placeholder="例如 12345678">
+            </div>
+            <div class="field-row">
+                <label for="cookie">登录凭据<small>至少包含 SESSDATA</small></label>
+                <textarea id="cookie" rows="4" placeholder="可手动粘贴 Cookie，或使用下方扫码自动填写"></textarea>
+            </div>
+            <div class="actions">
+                <button id="qr-btn" class="action-button" type="button">扫码连接</button>
+                <button id="save-btn" class="action-button" type="button">保存账号配置</button>
+            </div>
+            <div id="login-status" class="status">正在读取登录配置……</div>
+        </section>
+    </main>
+
+    <script>
+        (function () {
+            const uidInput = document.getElementById("uid");
+            const cookieInput = document.getElementById("cookie");
+            const saveButton = document.getElementById("save-btn");
+            const qrButton = document.getElementById("qr-btn");
+            const loginStatus = document.getElementById("login-status");
+            let configLoaded = false;
+            let loginBusy = false;
+
+            async function loadLoginConfig() {
+                loginStatus.textContent = "正在读取登录配置……";
+                try {
+                    const res = await fetch("/api/config/login", { cache: "no-store" });
+                    if (!res.ok) throw new Error("HTTP " + res.status);
+                    const cfg = await res.json();
+                    uidInput.value = cfg.uid ? String(cfg.uid) : "";
+                    cookieInput.value = cfg.cookie || "";
+                    configLoaded = true;
+                    loginStatus.textContent = "登录配置已加载。";
+                } catch (error) {
+                    loginStatus.textContent = "读取登录配置失败：" + error;
+                }
+            }
+
+            async function saveLoginConfig(options) {
+                const opts = options || {};
+                if (loginBusy) return false;
+                loginBusy = true;
+                saveButton.disabled = true;
+                try {
+                    const res = await fetch("/api/config/login", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            uid: Number(uidInput.value || 0),
+                            cookie: (cookieInput.value || "").trim()
+                        })
+                    });
+                    if (!res.ok) throw new Error("HTTP " + res.status);
+                    const result = await res.json();
+                    const resolvedUid = Number(result && result.uid || 0);
+                    if (resolvedUid > 0) uidInput.value = String(resolvedUid);
+                    const resolvedName = typeof (result && result.uname) === "string" ? result.uname.trim() : "";
+                    loginStatus.textContent = opts.silent ? "扫码登录态已写入配置。" : "账号配置保存成功。";
+                    if (resolvedName && resolvedUid > 0) {
+                        loginStatus.textContent += "（" + resolvedName + "/" + resolvedUid + "）";
+                    }
+                    configLoaded = true;
+                    return true;
+                } catch (error) {
+                    loginStatus.textContent = "保存失败：" + error;
+                    return false;
+                } finally {
+                    loginBusy = false;
+                    saveButton.disabled = false;
+                }
+            }
+
+            function openCookieLogin() {
+                const popup = window.open("/cookie-login", "pdj-cookie-login", "width=560,height=760");
+                if (!popup) {
+                    loginStatus.textContent = "弹窗被浏览器拦截，请允许弹窗后重试。";
+                    return;
+                }
+                loginStatus.textContent = configLoaded ? "已打开扫码页面。" : "已打开扫码页面，后台仍在读取配置。";
+            }
+
+            window.addEventListener("message", function (event) {
+                if (event.origin !== window.location.origin) return;
+                if (!event.data || event.data.type !== "pdj-cookie-ready") return;
+                if (typeof event.data.cookie !== "string" || !event.data.cookie.trim()) return;
+                cookieInput.value = event.data.cookie.trim();
+                const loginUid = Number(event.data.uid || 0);
+                if (loginUid > 0) uidInput.value = String(loginUid);
+                loginStatus.textContent = "扫码成功，正在写入登录配置……";
+                void saveLoginConfig({ silent: true });
+            });
+
+            saveButton.addEventListener("click", function () { void saveLoginConfig(); });
+            qrButton.addEventListener("click", openCookieLogin);
+            void loadLoginConfig();
+        })();
+    </script>
+</body>
+</html>

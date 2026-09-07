@@ -14,6 +14,10 @@ on:
       - 'v*'
     paths:
       - 'VERSION'
+      - 'requirements.txt'
+      - 'core/**'
+      - 'apps/windows/**'
+      - 'apps/web/**'
 
 permissions:
   contents: write
@@ -61,32 +65,20 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Debug Python env
-        shell: pwsh
-        run: |
-          python -V
-          python -c "import sys; print(sys.executable)"
-          $httpPkg = pip list | Select-String -Pattern "^http\s" -CaseSensitive:$false
-          if ($httpPkg) { Write-Host "WARNING: http package installed: $httpPkg" } else { Write-Host "http package not installed (OK)" }
-
       - name: Build Windows executable (x64)
         shell: pwsh
         run: |
           python scripts\scan_secrets.py
-          .\scripts\package-amd64.ps1 -InstallDependencies
+          .\apps\windows\package.ps1 -InstallDependencies
 
       - name: Create release zip and checksum
         shell: pwsh
         run: |
-          if (Test-Path package) {
-            Remove-Item -LiteralPath package -Recurse -Force
-          }
+          if (Test-Path package) { Remove-Item -LiteralPath package -Recurse -Force }
           New-Item -ItemType Directory -Path package -Force | Out-Null
           Copy-Item -Recurse "dist\bilipdj\*" package\
-          if (Test-Path README.md)           { Copy-Item README.md           package\ }
-          if (Test-Path RELEASE_NOTES.md)    { Copy-Item RELEASE_NOTES.md    package\ }
-          if (Test-Path core\quanxian.yaml)  { Copy-Item core\quanxian.yaml  package\ }
-          if (Test-Path core\kaiguan.yaml)   { Copy-Item core\kaiguan.yaml   package\ }
+          if (Test-Path README.md)        { Copy-Item README.md package\ }
+          if (Test-Path RELEASE_NOTES.md) { Copy-Item RELEASE_NOTES.md package\ }
           $zipName = "${{ steps.resolve_tag.outputs.zip_name }}"
           Compress-Archive -Path package\* -DestinationPath $zipName -Force
           $sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $zipName).Hash.ToLowerInvariant()
