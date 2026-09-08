@@ -19,7 +19,7 @@ on:
       - 'apps/windows/**'
       - 'apps/web/**'
       - 'update-manifest.json'
-      - 'RELEASE_NOTES.md'
+      - 'core/RELEASE_NOTES.md'
       - '.github/workflows/package-windows-x64.yml'
   pull_request:
     paths:
@@ -29,7 +29,7 @@ on:
       - 'apps/windows/**'
       - 'apps/web/**'
       - 'update-manifest.json'
-      - 'RELEASE_NOTES.md'
+      - 'core/RELEASE_NOTES.md'
       - '.github/workflows/package-windows-x64.yml'
 
 permissions:
@@ -122,11 +122,15 @@ jobs:
 
           Copy-Item -Recurse "dist\bilipdj\*" "package-tk\"
           Copy-Item -Recurse "dist\web-portable\bilipdj-web\*" "package-web\"
-          foreach ($file in @("VERSION", "README.md", "RELEASE_NOTES.md")) {
+          foreach ($file in @("VERSION", "README.md")) {
             if (Test-Path $file) {
               Copy-Item $file "package-tk\" -Force
               Copy-Item $file "package-web\" -Force
             }
+          }
+          if (Test-Path "core\RELEASE_NOTES.md") {
+            Copy-Item "core\RELEASE_NOTES.md" "package-tk\RELEASE_NOTES.md" -Force
+            Copy-Item "core\RELEASE_NOTES.md" "package-web\RELEASE_NOTES.md" -Force
           }
 
           @"
@@ -209,5 +213,5 @@ jobs:
           artifactErrorsFailBuild: true
           allowUpdates: true
           replacesArtifacts: true
-          bodyFile: RELEASE_NOTES.md
+          bodyFile: core/RELEASE_NOTES.md
           generateReleaseNotes: false
