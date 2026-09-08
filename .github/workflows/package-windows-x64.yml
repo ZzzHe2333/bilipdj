@@ -18,6 +18,7 @@ on:
       - 'apps/server/**'
       - 'apps/windows/**'
       - 'apps/web/**'
+      - 'update-manifest.json'
       - 'RELEASE_NOTES.md'
       - '.github/workflows/package-windows-x64.yml'
   pull_request:
@@ -27,6 +28,7 @@ on:
       - 'apps/server/**'
       - 'apps/windows/**'
       - 'apps/web/**'
+      - 'update-manifest.json'
       - 'tests/**'
       - 'RELEASE_NOTES.md'
       - '.github/workflows/package-windows-x64.yml'
@@ -111,7 +113,7 @@ jobs:
           if (-not $tkConfig) { throw "Tk portable bundle does not contain Web assets" }
           if (-not $webConfig) { throw "Web portable bundle does not contain Web assets" }
 
-      - name: Create portable zips and checksums
+      - name: Create portable zips, checksums and update manifest
         shell: pwsh
         run: |
           foreach ($path in @("package-tk", "package-web")) {
@@ -133,18 +135,18 @@ jobs:
 
           1. 请完整解压 ZIP，不要只拖出 main.exe。
           2. 双击 main.exe 启动桌面前端。
-          3. 便携版会自动启动内置后端，无需安装 Python、无需另开命令行。
-          4. 关闭桌面程序时，它启动的后端会一并关闭。
+          3. 后端服务器必须保持运行；后端停止后，排队、弹幕和管理功能均不可用。
+          4. 更新程序会先读取 update-manifest.json，再按清单下载并校验 SHA-256。
           "@ | Set-Content -LiteralPath "package-tk\使用说明.txt" -Encoding utf8
 
           @"
           BiliPDJ v${{ steps.resolve_tag.outputs.version }} Web 便携版
 
           1. 请完整解压 ZIP，不要只拖出 BiliPDJ-Web.exe。
-          2. 双击 BiliPDJ-Web.exe。
-          3. 启动器会自动启动内置后端，等待服务就绪后自动打开浏览器管理页。
-          4. 可在启动器中重新打开管理页/队列看板；点击“停止并退出”会关闭它启动的后端。
-          5. 无需安装 Python。
+          2. 双击 BiliPDJ-Web.exe 启动“后端服务器系统”。
+          3. 后端运行后会自动打开浏览器管理页；可隐藏到系统托盘继续运行。
+          4. 关闭后端服务器后，Web 控制台、队列和第三方客户端均无法继续使用核心功能。
+          5. 更新程序会先读取 update-manifest.json，再按清单提供准确的包名、下载地址和 SHA-256。
           "@ | Set-Content -LiteralPath "package-web\使用说明.txt" -Encoding utf8
 
           $tkZip = "${{ steps.resolve_tag.outputs.tk_zip }}"
@@ -152,10 +154,39 @@ jobs:
           Compress-Archive -Path "package-tk\*" -DestinationPath $tkZip -Force
           Compress-Archive -Path "package-web\*" -DestinationPath $webZip -Force
 
-          foreach ($zip in @($tkZip, $webZip)) {
-            $sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLowerInvariant()
-            "$sha256  $zip" | Set-Content -LiteralPath "$zip.sha256" -Encoding ascii
+          $tkHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $tkZip).Hash.ToLowerInvariant()
+          $webHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $webZip).Hash.ToLowerInvariant()
+          "$tkHash  $tkZip" | Set-Content -LiteralPath "$tkZip.sha256" -Encoding ascii
+          "$webHash  $webZip" | Set-Content -LiteralPath "$webZip.sha256" -Encoding ascii
+
+          $version = "${{ steps.resolve_tag.outputs.version }}"
+          $tagName = "${{ steps.resolve_tag.outputs.tag_name }}"
+          $releaseBase = "https://github.com/ZzzHe2333/bilipdj/releases/download/$tagName"
+          $releasePage = "https://github.com/ZzzHe2333/bilipdj/releases/tag/$tagName"
+          $manifest = [ordered]@{
+            schema = 1
+            version = $version
+            tag_name = $tagName
+            name = "弹幕排队姬 $tagName"
+            published_at = (Get-Date).ToUniversalTime().ToString("o")
+            release_url = $releasePage
+            notes = "完整更新说明请查看 Release 页面。客户端必须先读取本清单，再下载对应安装包。"
+            packages = [ordered]@{
+              "windows-tk-x64" = [ordered]@{
+                filename = $tkZip
+                url = "$releaseBase/$tkZip"
+                sha256 = $tkHash
+                size = (Get-Item -LiteralPath $tkZip).Length
+              }
+              "web-portable-x64" = [ordered]@{
+                filename = $webZip
+                url = "$releaseBase/$webZip"
+                sha256 = $webHash
+                size = (Get-Item -LiteralPath $webZip).Length
+              }
+            }
           }
+          $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath "update-manifest.json" -Encoding utf8
 
       - name: Upload portable artifacts
         uses: actions/upload-artifact@v4
@@ -166,6 +197,7 @@ jobs:
             ${{ steps.resolve_tag.outputs.tk_zip }}.sha256
             ${{ steps.resolve_tag.outputs.web_zip }}
             ${{ steps.resolve_tag.outputs.web_zip }}.sha256
+            update-manifest.json
 
       - name: Create GitHub Release
         if: github.event_name != 'pull_request'
@@ -174,7 +206,7 @@ jobs:
           tag: ${{ steps.resolve_tag.outputs.tag_name }}
           commit: ${{ github.sha }}
           name: 弹幕排队姬 ${{ steps.resolve_tag.outputs.tag_name }}
-          artifacts: ${{ steps.resolve_tag.outputs.tk_zip }},${{ steps.resolve_tag.outputs.tk_zip }}.sha256,${{ steps.resolve_tag.outputs.web_zip }},${{ steps.resolve_tag.outputs.web_zip }}.sha256
+          artifacts: ${{ steps.resolve_tag.outputs.tk_zip }},${{ steps.resolve_tag.outputs.tk_zip }}.sha256,${{ steps.resolve_tag.outputs.web_zip }},${{ steps.resolve_tag.outputs.web_zip }}.sha256,update-manifest.json
           artifactErrorsFailBuild: true
           allowUpdates: true
           replacesArtifacts: true
