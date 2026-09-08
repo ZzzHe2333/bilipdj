@@ -6,250 +6,95 @@
     <title>弹幕排队姬 - 登录配置</title>
     <link rel="stylesheet" href="pdj_design.css">
     <style>
-        :root {
-            color-scheme: dark;
-            --page-bg: #07101e;
-            --panel-bg: rgba(7, 18, 36, 0.94);
-            --cyan: #00e5ff;
-            --muted: #7ec8e3;
-        }
+        :root { color-scheme: dark; --page-bg: #07101e; --panel-bg: rgba(7,18,36,.94); --cyan: #00e5ff; --muted: #7ec8e3; }
         * { box-sizing: border-box; }
-        body {
-            margin: 0;
-            min-height: 100vh;
-            padding: 20px;
-            background: radial-gradient(ellipse at 20% 20%, #0d1e36 0%, #060c18 55%, #030608 100%);
-            color: #cce8ff;
-            font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
-        }
-        .config-page {
-            width: min(920px, 100%);
-            margin: 0 auto;
-            display: grid;
-            gap: 18px;
-        }
+        body { margin: 0; min-height: 100vh; padding: 20px; background: radial-gradient(ellipse at 20% 20%, #0d1e36 0%, #060c18 55%, #030608 100%); color: #cce8ff; font-family: "Microsoft YaHei", "PingFang SC", sans-serif; }
+        .config-page { width: min(920px,100%); margin: 0 auto; display: grid; gap: 18px; }
         .page-title { padding: 4px 2px; }
-        .page-title span {
-            color: var(--cyan);
-            font-size: 12px;
-            font-weight: 800;
-            letter-spacing: .22em;
-        }
-        .page-title h1 {
-            margin: 8px 0 4px;
-            color: #f6fbff;
-            font-size: clamp(26px, 5vw, 40px);
-        }
-        .page-title p {
-            margin: 0;
-            color: rgba(204,232,255,.66);
-        }
-        .config-card {
-            padding: 20px;
-            border: 1px solid rgba(0,229,255,.3);
-            border-left: 3px solid var(--cyan);
-            background: var(--panel-bg);
-            box-shadow: 0 0 22px rgba(0,229,255,.09);
-        }
-        .card-heading {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 16px;
-        }
-        .step {
-            display: grid;
-            place-items: center;
-            width: 38px;
-            height: 38px;
-            border: 1px solid rgba(0,229,255,.4);
-            color: var(--cyan);
-            font-weight: 800;
-        }
-        .card-heading h2 {
-            margin: 0;
-            color: #f4fbff;
-            font-size: 18px;
-        }
-        .card-heading p {
-            margin: 3px 0 0;
-            color: rgba(126,200,227,.7);
-            font-size: 13px;
-        }
-        .field-row {
-            display: grid;
-            grid-template-columns: 150px 1fr;
-            align-items: start;
-            gap: 12px;
-            margin: 12px 0;
-        }
-        .field-row label {
-            padding-top: 8px;
-            color: var(--muted);
-            font-size: 13px;
-            font-weight: 700;
-        }
-        .field-row label small {
-            display: block;
-            margin-top: 3px;
-            color: rgba(126,200,227,.55);
-            font-weight: 400;
-        }
-        input, textarea {
-            width: 100%;
-            padding: 9px 11px;
-            border: 1px solid rgba(0,229,255,.3);
-            background: rgba(0,10,22,.9);
-            color: #dff5ff;
-            font: inherit;
-            outline: none;
-        }
-        input:focus, textarea:focus {
-            border-color: var(--cyan);
-            box-shadow: 0 0 0 2px rgba(0,229,255,.12);
-        }
+        .page-title span { color: var(--cyan); font-size: 12px; font-weight: 800; letter-spacing: .22em; }
+        .page-title h1 { margin: 8px 0 4px; color: #f6fbff; font-size: clamp(26px,5vw,40px); }
+        .page-title p { margin: 0; color: rgba(204,232,255,.66); }
+        .config-card { padding: 20px; border: 1px solid rgba(0,229,255,.3); border-left: 3px solid var(--cyan); background: var(--panel-bg); box-shadow: 0 0 22px rgba(0,229,255,.09); }
+        .card-heading { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+        .step { display: grid; place-items: center; width: 38px; height: 38px; border: 1px solid rgba(0,229,255,.4); color: var(--cyan); font-weight: 800; }
+        .card-heading h2 { margin: 0; color: #f4fbff; font-size: 18px; }
+        .card-heading p { margin: 3px 0 0; color: rgba(126,200,227,.7); font-size: 13px; }
+        .field-row { display: grid; grid-template-columns: 150px 1fr; align-items: start; gap: 12px; margin: 12px 0; }
+        .field-row label { padding-top: 8px; color: var(--muted); font-size: 13px; font-weight: 700; }
+        .field-row label small { display: block; margin-top: 3px; color: rgba(126,200,227,.55); font-weight: 400; }
+        input, textarea, select { width: 100%; padding: 9px 11px; border: 1px solid rgba(0,229,255,.3); background: rgba(0,10,22,.9); color: #dff5ff; font: inherit; outline: none; }
+        input:focus, textarea:focus, select:focus { border-color: var(--cyan); box-shadow: 0 0 0 2px rgba(0,229,255,.12); }
         textarea { min-height: 105px; resize: vertical; }
-        .actions {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-            margin-top: 16px;
-        }
-        .action-button {
-            padding: 9px 16px;
-            border: 1px solid #00b8d9;
-            background: rgba(0,40,60,.9);
-            color: var(--cyan);
-            font: inherit;
-            font-weight: 700;
-            cursor: pointer;
-        }
+        input[type="checkbox"] { width: auto; margin-right: 7px; }
+        .check-row { display: flex; gap: 18px; flex-wrap: wrap; margin: 10px 0 4px 162px; color: rgba(204,232,255,.8); font-size: 13px; }
+        .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+        .action-button { padding: 9px 16px; border: 1px solid #00b8d9; background: rgba(0,40,60,.9); color: var(--cyan); font: inherit; font-weight: 700; cursor: pointer; }
         .action-button:hover:not(:disabled) { background: rgba(0,229,255,.13); color: #fff; }
         .action-button:disabled { opacity: .45; cursor: wait; }
-        .status {
-            margin-top: 14px;
-            color: rgba(204,232,255,.72);
-            font-size: 13px;
-        }
-        @media (max-width: 640px) {
-            body { padding: 12px; }
-            .config-card { padding: 16px; }
-            .field-row { grid-template-columns: 1fr; gap: 6px; }
-            .field-row label { padding-top: 0; }
-        }
+        .status { margin-top: 14px; color: rgba(204,232,255,.72); font-size: 13px; }
+        .hint { margin: 10px 0 0 162px; color: rgba(126,200,227,.62); font-size: 12px; line-height: 1.6; }
+        .backup-list { min-height: 132px; }
+        @media (max-width:640px) { body { padding: 12px; } .config-card { padding: 16px; } .field-row { grid-template-columns: 1fr; gap: 6px; } .field-row label { padding-top: 0; } .check-row, .hint { margin-left: 0; } }
     </style>
 </head>
 <body>
     <main class="config-page">
         <header class="page-title">
-            <span>BILIPDJ · LOGIN</span>
-            <h1>弹幕排队姬登录配置</h1>
-            <p>这里只配置账号连接；滚动和序号设置已移至桌面程序的“透明窗口”页面。</p>
+            <span>BILIPDJ · CONFIG</span>
+            <h1>弹幕排队姬配置</h1>
+            <p>账号连接与 WebDAV 设置备份。队列、黑名单和日志不会上传到 WebDAV。</p>
         </header>
 
         <section class="config-card">
-            <div class="card-heading">
-                <span class="step">01</span>
-                <div><h2>账号连接</h2><p>扫码连接或手动填写 Bilibili 登录凭据</p></div>
-            </div>
-            <div class="field-row">
-                <label for="uid">Bilibili UID<small>扫码后自动识别</small></label>
-                <input id="uid" type="number" inputmode="numeric" placeholder="例如 12345678">
-            </div>
-            <div class="field-row">
-                <label for="cookie">登录凭据<small>至少包含 SESSDATA</small></label>
-                <textarea id="cookie" rows="4" placeholder="可手动粘贴 Cookie，或使用下方扫码自动填写"></textarea>
-            </div>
-            <div class="actions">
-                <button id="qr-btn" class="action-button" type="button">扫码连接</button>
-                <button id="save-btn" class="action-button" type="button">保存账号配置</button>
-            </div>
+            <div class="card-heading"><span class="step">01</span><div><h2>账号连接</h2><p>扫码连接或手动填写 Bilibili 登录凭据</p></div></div>
+            <div class="field-row"><label for="uid">Bilibili UID<small>扫码后自动识别</small></label><input id="uid" type="number" inputmode="numeric" placeholder="例如 12345678"></div>
+            <div class="field-row"><label for="cookie">登录凭据<small>至少包含 SESSDATA</small></label><textarea id="cookie" rows="4" placeholder="可手动粘贴 Cookie，或使用下方扫码自动填写"></textarea></div>
+            <div class="actions"><button id="qr-btn" class="action-button" type="button">扫码连接</button><button id="save-btn" class="action-button" type="button">保存账号配置</button></div>
             <div id="login-status" class="status">正在读取登录配置……</div>
+        </section>
+
+        <section class="config-card">
+            <div class="card-heading"><span class="step">02</span><div><h2>WebDAV 设置备份</h2><p>只备份四个设置文件，不备份队列、黑名单和日志</p></div></div>
+            <div class="field-row"><label for="webdav-url">WebDAV 地址<small>建议使用 HTTPS</small></label><input id="webdav-url" type="url" placeholder="https://dav.example.com/dav"></div>
+            <div class="field-row"><label for="webdav-user">用户名</label><input id="webdav-user" autocomplete="username" placeholder="WebDAV 用户名"></div>
+            <div class="field-row"><label for="webdav-password">密码<small id="webdav-password-note">留空表示保持已保存密码</small></label><input id="webdav-password" type="password" autocomplete="current-password" placeholder="WebDAV 密码"></div>
+            <div class="field-row"><label for="webdav-dir">远程目录</label><input id="webdav-dir" value="BiliPDJ_Backup" placeholder="BiliPDJ_Backup"></div>
+            <div class="field-row"><label for="webdav-keep">保留份数<small>1 - 100</small></label><input id="webdav-keep" type="number" min="1" max="100" value="10"></div>
+            <div class="check-row"><label><input id="webdav-auto-start" type="checkbox">后端启动时自动备份</label><label><input id="webdav-auto-exit" type="checkbox">后端退出时自动备份</label></div>
+            <div class="hint">备份 ZIP 只包含实际存在的 <code>config.yaml</code>、<code>quanxian.yaml</code>、<code>kaiguan.yaml</code>、<code>style.json</code>。WebDAV 密码单独保存在本机，不会写入备份 ZIP，也不会在查询接口中明文返回。</div>
+            <div class="actions"><button id="webdav-save" class="action-button" type="button">保存 WebDAV 设置</button><button id="webdav-test" class="action-button" type="button">测试连接</button><button id="webdav-backup" class="action-button" type="button">立即备份设置</button><button id="webdav-refresh" class="action-button" type="button">刷新备份列表</button><button id="webdav-restore" class="action-button" type="button">恢复选中设置</button></div>
+            <div class="field-row"><label for="webdav-backups">历史备份</label><select id="webdav-backups" class="backup-list" size="6"></select></div>
+            <div id="webdav-status" class="status">正在读取 WebDAV 设置……</div>
         </section>
     </main>
 
     <script>
         (function () {
-            const uidInput = document.getElementById("uid");
-            const cookieInput = document.getElementById("cookie");
-            const saveButton = document.getElementById("save-btn");
-            const qrButton = document.getElementById("qr-btn");
-            const loginStatus = document.getElementById("login-status");
-            let configLoaded = false;
-            let loginBusy = false;
+            const uidInput = document.getElementById("uid"); const cookieInput = document.getElementById("cookie"); const saveButton = document.getElementById("save-btn"); const qrButton = document.getElementById("qr-btn"); const loginStatus = document.getElementById("login-status"); let configLoaded = false; let loginBusy = false;
+            async function loadLoginConfig() { loginStatus.textContent = "正在读取登录配置……"; try { const res = await fetch("/api/config/login", { cache: "no-store" }); if (!res.ok) throw new Error("HTTP " + res.status); const cfg = await res.json(); uidInput.value = cfg.uid ? String(cfg.uid) : ""; cookieInput.value = cfg.cookie || ""; configLoaded = true; loginStatus.textContent = "登录配置已加载。"; } catch (error) { loginStatus.textContent = "读取登录配置失败：" + error; } }
+            async function saveLoginConfig(options) { const opts = options || {}; if (loginBusy) return false; loginBusy = true; saveButton.disabled = true; try { const res = await fetch("/api/config/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ uid: Number(uidInput.value || 0), cookie: (cookieInput.value || "").trim() }) }); if (!res.ok) throw new Error("HTTP " + res.status); const result = await res.json(); const resolvedUid = Number(result && result.uid || 0); if (resolvedUid > 0) uidInput.value = String(resolvedUid); const resolvedName = typeof (result && result.uname) === "string" ? result.uname.trim() : ""; loginStatus.textContent = opts.silent ? "扫码登录态已写入配置。" : "账号配置保存成功。"; if (resolvedName && resolvedUid > 0) loginStatus.textContent += "（" + resolvedName + "/" + resolvedUid + "）"; configLoaded = true; return true; } catch (error) { loginStatus.textContent = "保存失败：" + error; return false; } finally { loginBusy = false; saveButton.disabled = false; } }
+            function openCookieLogin() { const popup = window.open("/cookie-login", "pdj-cookie-login", "width=560,height=760"); if (!popup) { loginStatus.textContent = "弹窗被浏览器拦截，请允许弹窗后重试。"; return; } loginStatus.textContent = configLoaded ? "已打开扫码页面。" : "已打开扫码页面，后台仍在读取配置。"; }
+            window.addEventListener("message", function (event) { if (event.origin !== window.location.origin) return; if (!event.data || event.data.type !== "pdj-cookie-ready") return; if (typeof event.data.cookie !== "string" || !event.data.cookie.trim()) return; cookieInput.value = event.data.cookie.trim(); const loginUid = Number(event.data.uid || 0); if (loginUid > 0) uidInput.value = String(loginUid); loginStatus.textContent = "扫码成功，正在写入登录配置……"; void saveLoginConfig({ silent: true }); });
+            saveButton.addEventListener("click", function () { void saveLoginConfig(); }); qrButton.addEventListener("click", openCookieLogin); void loadLoginConfig();
+        })();
 
-            async function loadLoginConfig() {
-                loginStatus.textContent = "正在读取登录配置……";
-                try {
-                    const res = await fetch("/api/config/login", { cache: "no-store" });
-                    if (!res.ok) throw new Error("HTTP " + res.status);
-                    const cfg = await res.json();
-                    uidInput.value = cfg.uid ? String(cfg.uid) : "";
-                    cookieInput.value = cfg.cookie || "";
-                    configLoaded = true;
-                    loginStatus.textContent = "登录配置已加载。";
-                } catch (error) {
-                    loginStatus.textContent = "读取登录配置失败：" + error;
-                }
-            }
-
-            async function saveLoginConfig(options) {
-                const opts = options || {};
-                if (loginBusy) return false;
-                loginBusy = true;
-                saveButton.disabled = true;
-                try {
-                    const res = await fetch("/api/config/login", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            uid: Number(uidInput.value || 0),
-                            cookie: (cookieInput.value || "").trim()
-                        })
-                    });
-                    if (!res.ok) throw new Error("HTTP " + res.status);
-                    const result = await res.json();
-                    const resolvedUid = Number(result && result.uid || 0);
-                    if (resolvedUid > 0) uidInput.value = String(resolvedUid);
-                    const resolvedName = typeof (result && result.uname) === "string" ? result.uname.trim() : "";
-                    loginStatus.textContent = opts.silent ? "扫码登录态已写入配置。" : "账号配置保存成功。";
-                    if (resolvedName && resolvedUid > 0) {
-                        loginStatus.textContent += "（" + resolvedName + "/" + resolvedUid + "）";
-                    }
-                    configLoaded = true;
-                    return true;
-                } catch (error) {
-                    loginStatus.textContent = "保存失败：" + error;
-                    return false;
-                } finally {
-                    loginBusy = false;
-                    saveButton.disabled = false;
-                }
-            }
-
-            function openCookieLogin() {
-                const popup = window.open("/cookie-login", "pdj-cookie-login", "width=560,height=760");
-                if (!popup) {
-                    loginStatus.textContent = "弹窗被浏览器拦截，请允许弹窗后重试。";
-                    return;
-                }
-                loginStatus.textContent = configLoaded ? "已打开扫码页面。" : "已打开扫码页面，后台仍在读取配置。";
-            }
-
-            window.addEventListener("message", function (event) {
-                if (event.origin !== window.location.origin) return;
-                if (!event.data || event.data.type !== "pdj-cookie-ready") return;
-                if (typeof event.data.cookie !== "string" || !event.data.cookie.trim()) return;
-                cookieInput.value = event.data.cookie.trim();
-                const loginUid = Number(event.data.uid || 0);
-                if (loginUid > 0) uidInput.value = String(loginUid);
-                loginStatus.textContent = "扫码成功，正在写入登录配置……";
-                void saveLoginConfig({ silent: true });
-            });
-
-            saveButton.addEventListener("click", function () { void saveLoginConfig(); });
-            qrButton.addEventListener("click", openCookieLogin);
-            void loadLoginConfig();
+        (function () {
+            const urlInput = document.getElementById("webdav-url"), userInput = document.getElementById("webdav-user"), passwordInput = document.getElementById("webdav-password"), passwordNote = document.getElementById("webdav-password-note"), dirInput = document.getElementById("webdav-dir"), keepInput = document.getElementById("webdav-keep"), autoStart = document.getElementById("webdav-auto-start"), autoExit = document.getElementById("webdav-auto-exit"), backupList = document.getElementById("webdav-backups"), status = document.getElementById("webdav-status");
+            const buttons = ["webdav-save","webdav-test","webdav-backup","webdav-refresh","webdav-restore"].map(id => document.getElementById(id)); let busy = false;
+            function setBusy(value) { busy = value; buttons.forEach(button => { button.disabled = value; }); }
+            async function api(path, options) { const res = await fetch(path, options || { cache: "no-store" }); let result = {}; try { result = await res.json(); } catch (_) {} if (!res.ok || result.status === "error") throw new Error(result.message || ("HTTP " + res.status)); return result; }
+            function collectConfig() { const cfg = { url: (urlInput.value || "").trim(), username: (userInput.value || "").trim(), remote_dir: (dirInput.value || "").trim() || "BiliPDJ_Backup", keep_last: Number(keepInput.value || 10), auto_on_start: autoStart.checked, auto_on_exit: autoExit.checked }; if (passwordInput.value) cfg.password = passwordInput.value; return cfg; }
+            function applyConfig(result) { const cfg = result.config || {}; urlInput.value = cfg.url || ""; userInput.value = cfg.username || ""; dirInput.value = cfg.remote_dir || "BiliPDJ_Backup"; keepInput.value = String(cfg.keep_last || 10); autoStart.checked = Boolean(cfg.auto_on_start); autoExit.checked = Boolean(cfg.auto_on_exit); passwordInput.value = ""; passwordNote.textContent = cfg.password_set ? "已保存密码；留空表示保持不变" : "尚未保存密码"; }
+            async function saveConfig(silent) { const result = await api("/api/backup/webdav/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ config: collectConfig() }) }); applyConfig(result); if (!silent) status.textContent = "WebDAV 设置已保存。"; return result; }
+            async function loadConfig() { try { const result = await api("/api/backup/webdav/config", { cache: "no-store" }); applyConfig(result); status.textContent = "WebDAV 设置已加载。"; } catch (error) { status.textContent = "读取 WebDAV 设置失败：" + error.message; } }
+            async function refreshBackups() { const result = await api("/api/backup/webdav/list", { cache: "no-store" }); backupList.replaceChildren(); (result.backups || []).forEach(item => { const option = document.createElement("option"); option.value = item.name; option.textContent = item.name + "   " + ((Number(item.size || 0) / 1024).toFixed(1)) + " KB"; backupList.appendChild(option); }); status.textContent = "找到 " + backupList.options.length + " 份设置备份。"; }
+            async function runTask(label, task) { if (busy) return; setBusy(true); status.textContent = label; try { await task(); } catch (error) { status.textContent = "操作失败：" + error.message; } finally { setBusy(false); } }
+            document.getElementById("webdav-save").addEventListener("click", function () { void runTask("正在保存 WebDAV 设置……", async () => { await saveConfig(false); }); });
+            document.getElementById("webdav-test").addEventListener("click", function () { void runTask("正在测试 WebDAV 连接……", async () => { await saveConfig(true); const result = await api("/api/backup/webdav/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); passwordInput.value = ""; status.textContent = result.message || "WebDAV 连接成功。"; }); });
+            document.getElementById("webdav-backup").addEventListener("click", function () { void runTask("正在备份设置到 WebDAV……", async () => { await saveConfig(true); const result = await api("/api/backup/webdav/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); status.textContent = "设置备份完成：" + (result.name || ""); await refreshBackups(); }); });
+            document.getElementById("webdav-refresh").addEventListener("click", function () { void runTask("正在读取备份列表……", refreshBackups); });
+            document.getElementById("webdav-restore").addEventListener("click", function () { const name = backupList.value; if (!name) { status.textContent = "请先选择要恢复的备份。"; return; } if (!window.confirm("确定恢复 " + name + " 吗？\n\n只恢复四个设置文件，队列、黑名单和日志不会改变。")) return; void runTask("正在恢复 " + name + "……", async () => { const result = await api("/api/backup/webdav/restore", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }); status.textContent = "设置恢复完成：" + (result.restored || []).join(", "); }); });
+            void loadConfig();
         })();
     </script>
 </body>

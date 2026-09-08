@@ -13,8 +13,6 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _SERVER_MODULE_NAMES = frozenset({"apps.server.server", "core.server", "server", "__main__"})
 
-# These guards predate the Monorepo layout. Teach their discovery helpers about
-# the new canonical module name before the real server module is imported.
 from . import queue_rank_query as _queue_rank_query
 from . import server_runtime_guard as _server_runtime_guard
 from . import style_option_guard as _style_option_guard
@@ -49,11 +47,6 @@ _web_queue_layout.install_web_queue_layout_guard(_style_option_guard)
 
 from . import server as server  # noqa: E402
 
-# The historical build-class wrappers match ``core.server`` internally. The
-# package-level discovery above is sufficient to install the wrappers, but the
-# class-name predicate inside those wrappers cannot see ``apps.server.server``.
-# Patch the newly-created classes explicitly, then unwind the temporary hooks in
-# reverse installation order (WebSocket was layered on top of QueueManager).
 _queue_rank_query.attach_queue_rank_query(server.QueueManager)
 _websocket_performance_guard.patch_websocket_hub(server.WebSocketHub)
 _websocket_performance_guard._restore_build_class_hook()
@@ -61,12 +54,7 @@ _queue_rank_query._restore_build_class_hook()
 
 
 def configure_runtime_paths(module: Any = server) -> Any:
-    """Apply source/frozen runtime paths after the physical code migration.
-
-    User configuration/data paths intentionally remain compatible in this
-    migration phase. Web assets have a single canonical source under
-    ``apps/web/static``.
-    """
+    """Apply source/frozen runtime paths after the physical code migration."""
     frozen = bool(getattr(sys, "frozen", False))
     bundle_root = Path(getattr(sys, "_MEIPASS", REPO_ROOT)).resolve()
     app_dir = Path(sys.executable).resolve().parent if frozen else REPO_ROOT
@@ -105,5 +93,9 @@ def configure_runtime_paths(module: Any = server) -> Any:
 
 
 configure_runtime_paths()
+
+from . import settings_backup as _settings_backup  # noqa: E402
+
+_settings_backup.install_settings_backup(server)
 
 __all__ = ["REPO_ROOT", "configure_runtime_paths", "server"]
