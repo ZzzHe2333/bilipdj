@@ -6,9 +6,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class PortableReleaseV202Tests(unittest.TestCase):
-    def test_version_is_v202(self) -> None:
-        self.assertEqual((ROOT / "VERSION").read_text(encoding="utf-8").strip(), "2.0.2")
+class PortableReleaseV203Tests(unittest.TestCase):
+    def test_version_is_v203(self) -> None:
+        self.assertEqual((ROOT / "VERSION").read_text(encoding="utf-8").strip(), "2.0.3")
 
     def test_tk_portable_forces_backend_autostart_when_frozen(self) -> None:
         main_source = (ROOT / "apps" / "windows" / "main.py").read_text(encoding="utf-8")
