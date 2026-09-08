@@ -29,6 +29,10 @@ scripts/          API 文档生成、安全扫描等仍在使用的维护脚本
 - 不在 Windows / Web 中复制一套 QueueManager 或平台协议业务逻辑。
 - 第三方客户端优先依据 `packages/shared/api-contract.md` 开发。
 
+## 仓库根目录约束
+
+根目录只保留项目级文档、版本/依赖文件、应用目录和共享目录。打包脚本与 PyInstaller `.spec` 不再放在根目录；桌面打包实现统一归入 `apps/windows/`，Web 打包实现归入 `apps/web/`。不要重新引入仅做一层转发的根目录 `.ps1` / `.sh` / `.spec`。
+
 ## 平台
 
 当前真实接入：
@@ -158,7 +162,7 @@ GitHub 远端不跟踪 `tests/`。`.gitignore` 保留 `tests/` 作为本地开�
 
 ## 必须保留的 scripts
 
-当前至少保留：
+当前只保留并维护有明确用途的脚本：
 
 ```text
 scripts/generate_api_docs.py
