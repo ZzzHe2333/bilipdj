@@ -33,6 +33,7 @@ def _collect_network_settings(app: Any) -> dict[str, Any]:
             "proxy_host": app.update_proxy_host_var.get().strip(),
             "proxy_port": app.update_proxy_port_var.get().strip(),
             "use_mirrorchyan": False,
+            "mirrorchyan_cdk": app.update_mirrorchyan_cdk_var.get().strip(),
         }
     )
 
@@ -44,6 +45,7 @@ def load_network_settings(app: Any) -> dict[str, Any]:
     app.update_proxy_host_var.set(str(config["proxy_host"]))
     app.update_proxy_port_var.set(str(config["proxy_port"]))
     app.update_mirrorchyan_var.set(False)
+    app.update_mirrorchyan_cdk_var.set(str(config.get("mirrorchyan_cdk", "") or ""))
     _set_proxy_entry_state(app)
     return config
 
@@ -62,6 +64,14 @@ def save_network_settings(app: Any, *, show_status: bool = True) -> dict[str, An
     return config
 
 
+def _save_mirrorchyan_cdk(app: Any) -> None:
+    config = save_network_settings(app, show_status=False)
+    if config is None:
+        return
+    cdk = str(config.get("mirrorchyan_cdk", "") or "")
+    app.update_proxy_status_var.set("Mirror CDK 已保存；Mirror酱更新功能暂未接入。" if cdk else "Mirror CDK 已清空；Mirror酱更新功能暂未接入。")
+
+
 def _toggle_bypass(app: Any) -> None:
     if app.update_bypass_proxy_var.get():
         app.update_third_party_proxy_var.set(False)
@@ -78,7 +88,7 @@ def _toggle_third_party(app: Any) -> None:
 
 def _toggle_mirrorchyan(app: Any) -> None:
     if app.update_mirrorchyan_var.get():
-        messagebox.showinfo("Mirror酱更新", "暂未接入。", parent=app.root)
+        messagebox.showinfo("Mirror酱更新", "暂未接入。CDK 可以先保存，后续接入时可直接使用。", parent=app.root)
     app.update_mirrorchyan_var.set(False)
     save_network_settings(app, show_status=False)
 
@@ -136,6 +146,7 @@ def build_update_tab(
     app.update_proxy_host_var = tk.StringVar(value="")
     app.update_proxy_port_var = tk.StringVar(value="")
     app.update_mirrorchyan_var = tk.BooleanVar(value=False)
+    app.update_mirrorchyan_cdk_var = tk.StringVar(value="")
     app.update_proxy_status_var = tk.StringVar(value="")
     app.root.bind("<Destroy>", lambda event: update_ui._on_root_destroy(app, event), add="+")  # noqa: SLF001
 
@@ -244,8 +255,19 @@ def build_update_tab(
         variable=app.update_mirrorchyan_var,
         command=lambda: _toggle_mirrorchyan(app),
     ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(10, 2))
+    ttk.Label(network, text="Mirror CDK").grid(row=7, column=0, sticky="w", pady=4)
+    mirror_cdk_entry = ttk.Entry(network, textvariable=app.update_mirrorchyan_cdk_var)
+    mirror_cdk_entry.grid(row=7, column=1, sticky="ew", pady=4)
+    ttk.Button(network, text="保存 CDK", command=lambda: _save_mirrorchyan_cdk(app)).grid(
+        row=7, column=2, sticky="w", padx=(8, 0), pady=4
+    )
+    ttk.Label(
+        network,
+        text="当前仅保存 CDK，Mirror酱更新暂未接入；后续接入后可直接使用已保存的 CDK。",
+        wraplength=760,
+    ).grid(row=8, column=0, columnspan=3, sticky="w", pady=(0, 4))
     ttk.Label(network, textvariable=app.update_proxy_status_var, wraplength=760).grid(
-        row=7, column=0, columnspan=3, sticky="w", pady=(5, 0)
+        row=9, column=0, columnspan=3, sticky="w", pady=(5, 0)
     )
     load_network_settings(app)
 
