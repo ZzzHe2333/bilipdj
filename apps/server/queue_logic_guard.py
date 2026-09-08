@@ -1,0 +1,242 @@
+"""Targeted queue-logic compatibility fixes."""
+from __future__ import annotations
+
+import functools
+import re
+import sys
+import threading
+from contextlib import nullcontext
+from typing import Any
+
+_PATCH_LOCK = threading.RLock()
+_SUPER_QUEUE_PATTERN = re.compile(r"^\s*<([^<>]+)>([^<>]*)\s*$", re.DOTALL)
+_WAITING_MARKERS = re.compile(r"⏳待确认|等待确认")
+
+
+def _queue_identity(item: Any) -> str:
+    text = str(item or "").strip()
+    match = re.match(r"^(?:官|[Gg]|[Bb]|米|[Mm]|[Ss])\|([^ ]+)", text)
+    if match:
+        return match.group(1).strip()
+    match = re.match(r"^<([^>]+)>", text)
+    if match:
+        return match.group(1).strip()
+    return text.split(" ", 1)[0].strip() if text else ""
+
+
+def _config_transaction(queue_manager_cls: type[Any]):
+    module = sys.modules.get(str(getattr(queue_manager_cls, "__module__", "") or ""))
+    factory = getattr(module, "config_io_transaction", None)
+    return factory() if callable(factory) else nullcontext()
+
+
+def _command_may_persist(self: Any, msg: str) -> bool:
+    checker = getattr(self, "_is_command_like", None)
+    if callable(checker):
+        try:
+            return bool(checker(str(msg or "").strip()))
+        except Exception:
+            pass
+    text = str(msg or "").strip()
+    return bool(
+        text.startswith(
+            (
+                "排队",
+                "官服排",
+                "排官服",
+                "B服排",
+                "b服排",
+                "排B服",
+                "排b服",
+                "超级排",
+                "小米排",
+                "排小米",
+                "排米服",
+                "插队",
+                "取消排队",
+                "排队取消",
+                "替换",
+                "修改",
+                "内容洗白",
+                "del",
+                "删除",
+                "完成",
+                "add ",
+                "新增 ",
+                "添加 ",
+                "无影插 ",
+                "拉黑 ",
+                "取消拉黑 ",
+                "添加管理员 ",
+                "取消管理员 ",
+                "设置排队",
+            )
+        )
+        or text
+        in {
+            "暂停排队功能",
+            "关闭自助排队",
+            "恢复排队功能",
+            "恢复自助排队",
+            "开启舰长插队",
+            "关闭舰长插队",
+            "允许房管成为插件管理员",
+            "停止房管成为插件管理员",
+        }
+    )
+
+
+def _gift_only_queue_plan(self: Any, uid: int, uname: str, msg: str) -> list[str] | None:
+    command = str(msg or "").strip()
+    if not (command == "插队" or command.startswith("插队 ")):
+        return None
+    lock = getattr(self, "_lock", None)
+    if lock is None:
+        return None
+    try:
+        numeric_uid = int(uid or 0)
+    except (TypeError, ValueError):
+        return None
+    with lock:
+        credits = getattr(self, "_gift_queue_credits", {})
+        if numeric_uid not in credits:
+            return None
+        if self._find_index(str(uname or "").strip()) >= 0:
+            return None
+        credit = max(0, int(credits.get(numeric_uid, 0) or 0))
+        requested = [
+            value
+            for value in re.split(r"[\s,，、]+", command[2:].strip())
+            if value
+        ] or [str(uname or "").strip()]
+        selected = requested[: min(len(requested), credit)]
+        if str(uname or "").strip() not in selected:
+            return None
+        result = list(getattr(self, "_persons", []))
+        rank = max(0, int(getattr(self, "_gift_queue_insert_rank", 1) or 0))
+        if rank <= 0:
+            for value in selected:
+                cleaned = self._strip_html(value)
+                if cleaned:
+                    result.append(cleaned)
+        else:
+            base_pos = min(len(result), max(0, rank - 1))
+            for offset, value in enumerate(selected):
+                cleaned = self._strip_html(value)
+                if cleaned:
+                    insert_pos = max(0, min(base_pos + offset, len(result)))
+                    result.insert(insert_pos, cleaned)
+        return result
+
+
+def patch_queue_manager(queue_manager_cls: type[Any]) -> bool:
+    """Install sanitizer, duplicate insertion and lock-order fixes."""
+
+    if not isinstance(queue_manager_cls, type):
+        return False
+    with _PATCH_LOCK:
+        if bool(getattr(queue_manager_cls, "_bilipdj_queue_logic_guard_installed", False)):
+            return True
+        original_strip = getattr(queue_manager_cls, "_strip_html", None)
+        if not callable(original_strip):
+            return False
+        original_process = getattr(queue_manager_cls, "_process", None)
+
+        @functools.wraps(original_strip)
+        def strip_preserving_super_marker(text: Any) -> str:
+            raw = str(text or "")
+            match = _SUPER_QUEUE_PATTERN.fullmatch(raw)
+            if match:
+                item_id = _WAITING_MARKERS.sub("", match.group(1)).strip()
+                extra = _WAITING_MARKERS.sub("", match.group(2)).strip()
+                if item_id:
+                    return f"<{item_id}>{extra}" if extra else f"<{item_id}>"
+            return str(original_strip(raw) or "").strip()
+
+        setattr(queue_manager_cls, "_strip_html", staticmethod(strip_preserving_super_marker))
+
+        if callable(original_process):
+            @functools.wraps(original_process)
+            def process_with_guards(
+                self: Any,
+                uid: int,
+                uname: str,
+                msg: str,
+                is_anchor: bool,
+                is_admin: bool,
+                is_guard: bool,
+                guard_level: int,
+            ):
+                transaction = (
+                    _config_transaction(queue_manager_cls)
+                    if _command_may_persist(self, msg)
+                    else nullcontext()
+                )
+                with transaction:
+                    gift_only_plan = _gift_only_queue_plan(self, uid, uname, msg)
+                    result = original_process(
+                        self,
+                        uid,
+                        uname,
+                        msg,
+                        is_anchor,
+                        is_admin,
+                        is_guard,
+                        guard_level,
+                    )
+                    modified = bool(result[0]) if isinstance(result, tuple) and result else False
+                    if not modified or gift_only_plan is None:
+                        return result
+
+                    lock = getattr(self, "_lock", None)
+                    if lock is None:
+                        return result
+                    user_name = str(uname or "").strip()
+                    with lock:
+                        current = list(getattr(self, "_persons", []))
+                        if len(current) != len(gift_only_plan) + 1:
+                            return result
+                        for index, item in enumerate(current):
+                            if _queue_identity(item) != user_name:
+                                continue
+                            candidate = current[:index] + current[index + 1 :]
+                            if candidate != gift_only_plan:
+                                continue
+                            self._remove_queue_item_unlocked(index)
+                            logger = getattr(self, "_logger", None)
+                            if logger is not None:
+                                logger.warning(
+                                    "[队列修复] 已移除礼物插队与舰长插队叠加产生的重复项：%s",
+                                    user_name,
+                                )
+                            break
+                    return result
+
+            setattr(queue_manager_cls, "_process", process_with_guards)
+
+        for method_name in (
+            "add_blacklist_item",
+            "delete_blacklist_item",
+            "clear_blacklist",
+        ):
+            original_method = getattr(queue_manager_cls, method_name, None)
+            if not callable(original_method):
+                continue
+
+            @functools.wraps(original_method)
+            def method_with_config_first(
+                self: Any,
+                *args: Any,
+                __original=original_method,
+                **kwargs: Any,
+            ):
+                with _config_transaction(queue_manager_cls):
+                    return __original(self, *args, **kwargs)
+
+            setattr(queue_manager_cls, method_name, method_with_config_first)
+
+        setattr(queue_manager_cls, "_bilipdj_queue_logic_guard_installed", True)
+        return True
+
+
+__all__ = ["patch_queue_manager"]
