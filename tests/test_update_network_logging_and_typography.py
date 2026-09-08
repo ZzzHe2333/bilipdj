@@ -21,14 +21,18 @@ class UpdateNetworkTests(unittest.TestCase):
     def test_defaults_are_disabled_and_modes_are_mutually_exclusive(self) -> None:
         defaults = update_network.normalize_update_network({})
         self.assertFalse(defaults["bypass_system_proxy"]); self.assertFalse(defaults["use_third_party_proxy"]); self.assertFalse(defaults["use_mirrorchyan"])
-        explicit = update_network.normalize_update_network({"bypass_system_proxy": True, "use_third_party_proxy": True, "proxy_host": "127.0.0.1", "proxy_port": "7890"})
+        self.assertEqual(defaults["mirrorchyan_cdk"], "")
+        explicit = update_network.normalize_update_network({"bypass_system_proxy": True, "use_third_party_proxy": True, "proxy_host": "127.0.0.1", "proxy_port": "7890", "use_mirrorchyan": True, "mirrorchyan_cdk": "  TEST-CDK  "})
         self.assertFalse(explicit["bypass_system_proxy"]); self.assertTrue(explicit["use_third_party_proxy"]); self.assertEqual(explicit["proxy_port"], "7890")
+        self.assertFalse(explicit["use_mirrorchyan"]); self.assertEqual(explicit["mirrorchyan_cdk"], "TEST-CDK")
 
     def test_settings_round_trip_in_preserved_core_cd_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            saved = update_network.save_update_network({"use_third_party_proxy": True, "proxy_host": "127.0.0.1", "proxy_port": "7890"}, root)
+            saved = update_network.save_update_network({"use_third_party_proxy": True, "proxy_host": "127.0.0.1", "proxy_port": "7890", "mirrorchyan_cdk": "abc-123"}, root)
             self.assertEqual(saved, update_network.load_update_network(root))
+            self.assertEqual(saved["mirrorchyan_cdk"], "abc-123")
+            self.assertFalse(saved["use_mirrorchyan"])
             self.assertEqual(update_network.settings_path(root), root / "core" / "cd" / "update_settings.json")
 
     def test_bypass_opener_does_not_use_system_proxy_mapping(self) -> None:
@@ -97,6 +101,7 @@ class SourceWiringTests(unittest.TestCase):
     def test_update_page_contains_requested_controls(self) -> None:
         source = (ROOT / "apps" / "windows" / "update_page.py").read_text(encoding="utf-8")
         self.assertIn('text="绕过系统代理"', source); self.assertIn('text="使用第三方代理"', source); self.assertIn('text="检测连接"', source); self.assertIn('text="使用 Mirror酱更新"', source); self.assertIn("暂未接入", source)
+        self.assertIn('text="Mirror CDK"', source); self.assertIn('text="保存 CDK"', source); self.assertIn("update_mirrorchyan_cdk_var", source)
 
     def test_about_page_no_longer_builds_update_controls(self) -> None:
         source = (ROOT / "apps" / "windows" / "update_page.py").read_text(encoding="utf-8"); about = source.split("def build_about_tab", 1)[1]; self.assertNotIn("检查更新", about); self.assertNotIn("下载并安装", about)
