@@ -14,18 +14,24 @@ BiliPDJ 采用单仓库 Monorepo。Server 是唯一状态源，Windows、Web、O
 
 > 当前正式接入的平台是 **Bilibili** 与 **抖音**。虎牙、快手、斗鱼、微信视频号目前仅保留配置位。
 
-## v2.0.1 客户便携版
+## v2.0.2 客户便携版
 
-v2.0.1 提供两种 Windows x64 客户包，**都自带后端和 Web 资源，不需要安装 Python，也不需要手工启动 Server**。
+v2.0.2 提供两种 Windows x64 客户包，**都自带后端和 Web 资源，不需要安装 Python，也不需要手工启动 Server**。
 
 | 版本 | 发布文件 | 启动方式 | 后端行为 |
 |---|---|---|---|
-| Tk Windows 便携版 | `BiliPDJ-v2.0.1-Windows-Tk-Portable-x64.zip` | 解压后双击 `main.exe` | 桌面前端启动后自动拉起内置后端 |
-| Web 便携版 | `BiliPDJ-v2.0.1-Web-Portable-x64.zip` | 解压后双击 `BiliPDJ-Web.exe` | 启动器自动拉起内置后端，服务就绪后自动打开浏览器管理页 |
+| Tk Windows 便携版 | `BiliPDJ-v2.0.2-Windows-Tk-Portable-x64.zip` | 解压后双击 `main.exe` | 桌面前端启动后自动拉起内置后端 |
+| Web 便携版 | `BiliPDJ-v2.0.2-Web-Portable-x64.zip` | 解压后双击 `BiliPDJ-Web.exe` | 启动器自动拉起内置后端，服务就绪后自动打开浏览器管理页 |
 
 两个 ZIP 都会同时发布 `.sha256` 校验文件。**请完整解压整个 ZIP，不要只复制单个 EXE。**
 
 Web 便携启动器如果发现对应端口已有后端运行，会直接复用现有服务；只有它自己启动的后端才会在“停止并退出”时被终止。
+
+### v2.0.2 设置备份
+
+设置备份支持 **WebDAV / 本地文件夹 / SMB-NAS** 三种目标。备份包只包含实际存在的 `config.yaml`、`quanxian.yaml`、`kaiguan.yaml`、`style.json`，并保留各文件最后修改时间；不会备份队列、黑名单、日志、WebDAV 密码或 NAS 凭据。
+
+Tk 桌面端在“设置”中提供独立可滚动的“数据备份”页；Web 配置页提供同等的备份、历史、恢复和自动备份操作。
 
 ## 当前目录
 
@@ -158,6 +164,7 @@ flowchart LR
 | 权限体系 | `super_admin`、`admin`、`jianzhang`、`member`、`blacklist` |
 | 礼物插队 | 按礼物、电池数、次数、插入名次等条件控制 |
 | 队列存档 | 多槽位存档、切换与恢复 |
+| 设置备份 | WebDAV / 本地文件夹 / SMB-NAS，只备份四个设置文件并保留 mtime |
 | Windows 管理端 | 配置、日志、队列、权限、平台参数、样式、性能、原生扫码登录 |
 | Web / OBS | 浏览器管理/展示、透明弹窗、实时 WebSocket 更新 |
 | 本地数据 | 配置、权限、日志和队列数据保存在本机 |
