@@ -2,7 +2,7 @@
 
 # Bilipdj · 弹幕排队姬
 
-**面向 Bilibili / 抖音直播间的本地化弹幕排队、权限控制、队列存档与 OBS 展示工具。**
+**面向 Bilibili / 抖音 / 虎牙直播间的本地化弹幕排队、权限控制、队列存档与 OBS 展示工具。**
 
 [下载发行版](https://github.com/ZzzHe2333/bilipdj/releases) · [使用教程](./core/GUIDE.md) · [更新日志](./core/UPDATE.md) · [API 契约](./packages/shared/api-contract.md) · [问题反馈](https://github.com/ZzzHe2333/bilipdj/issues)
 
@@ -12,7 +12,7 @@
 
 BiliPDJ 采用单仓库 Monorepo。**Server 是唯一业务状态源**；Windows、Web、OBS 与第三方客户端统一通过 HTTP / WebSocket 使用同一套队列、权限、礼物、平台连接、主题、样式和存档状态。
 
-> 当前正式接入的平台是 **Bilibili** 与 **抖音**。虎牙、快手、斗鱼、微信视频号目前仅保留配置位。
+> 当前正式接入的平台是 **Bilibili**、**抖音** 与 **虎牙**。快手、斗鱼、微信视频号目前仅保留配置位。
 
 ## v2.0.4 客户便携版
 
@@ -33,7 +33,7 @@ v2.0.4 提供两种 Windows x64 客户包，均自带后端和 Web 资源，不�
 - Windows 与 Web 可以相互导入/导出同一种主题 + OBS 样式配置文件；
 - Web 便携启动器明确为“后端服务器系统”，支持系统托盘隐藏/恢复；
 - Windows / Web 手动排队统一为“用户名必填 + 内容可选”；
-- 后端支持 Bilibili + 抖音同时激活，各平台当前最多一个直播间；
+- 后端支持 Bilibili + 抖音 + 虎牙同时激活，各平台当前最多一个直播间；
 - Windows / Web 导航统一为“更新软件 / 关于项目 / 支持我们”；
 - Web 支持跟随系统、白天、夜晚和自定义颜色。
 
@@ -45,7 +45,7 @@ bilipdj/
 │  ├─ server/                 # 后端真实实现、唯一业务状态源
 │  │  ├─ server.py
 │  │  ├─ appearance_guard.py  # Windows/Web 通用主题与 profile API
-│  │  ├─ bilibili_*.py / douyin_*.py
+│  │  ├─ bilibili_*.py / douyin_*.py / huya_*.py
 │  │  └─ main.py
 │  ├─ web/                    # Web 唯一源码目录
 │  │  ├─ static/              # HTML/CSS/JS + Aurora Web 主题层
@@ -203,6 +203,7 @@ docker run --rm -p 9816:9816 bilipdj-server
 flowchart LR
     B[Bilibili] --> S[apps/server]
     D[Douyin] --> S
+    H[Huya] --> S
     S --> Q[Queue / Permission / Gift / Archive]
     S --> A[Appearance / Style]
     Q --> API[HTTP + WebSocket]
