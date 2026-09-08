@@ -6,7 +6,6 @@ import threading
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from . import youtube_protocol
 
@@ -22,83 +21,6 @@ def _append_unique(values: Any, item: str) -> tuple[str, ...]:
     if item not in result:
         result.append(item)
     return tuple(result)
-
-
-def _is_configured(config: Any) -> bool:
-    if not isinstance(config, dict):
-        return False
-    section = config.get("youtube")
-    if not isinstance(section, dict):
-        return False
-    target = str(section.get("room_url") or section.get("room_id") or "").strip()
-    if not target:
-        return False
-    try:
-        youtube_protocol.extract_video_id(target)
-        return True
-    except Exception:
-        return False
-
-
-def _access_payload(server_module: Any) -> dict[str, Any]:
-    try:
-        config = server_module.load_config()
-    except Exception:
-        config = {}
-    configured = _is_configured(config)
-    unlocked = configured or bool(getattr(server_module, "_redtv_session_unlocked", False))
-    return {
-        "status": "ok",
-        "configured": configured,
-        "unlocked": unlocked,
-        "display_name": "红色小电视",
-    }
-
-
-def _install_access_api(server_module: Any) -> None:
-    handler_class = getattr(server_module, "ApiHandler", None)
-    if handler_class is None or bool(getattr(handler_class, "_bilipdj_redtv_access_installed", False)):
-        return
-
-    original_get = handler_class.do_GET
-    original_post = handler_class.do_POST
-
-    def do_GET(self: Any) -> None:  # noqa: N802
-        path = urlparse(self.path).path
-        if path == "/api/redtv/access":
-            if not self._require_loopback():
-                return
-            self._write_json(_access_payload(server_module))
-            return
-        return original_get(self)
-
-    def do_POST(self: Any) -> None:  # noqa: N802
-        path = urlparse(self.path).path
-        if path == "/api/redtv/unlock":
-            if not self._require_loopback():
-                return
-            ok = youtube_protocol.probe_google_access(timeout=4.0)
-            if ok:
-                server_module._redtv_session_unlocked = True
-                payload = _access_payload(server_module)
-                payload["unlocked"] = True
-                self._write_json(payload)
-            else:
-                self._write_json(
-                    {
-                        "status": "error",
-                        "message": "您无权访问",
-                        "configured": False,
-                        "unlocked": False,
-                    },
-                    status=HTTPStatus.FORBIDDEN,
-                )
-            return
-        return original_post(self)
-
-    handler_class.do_GET = do_GET
-    handler_class.do_POST = do_POST
-    handler_class._bilipdj_redtv_access_installed = True
 
 
 def _install_relay_factory(server_module: Any) -> None:
@@ -206,9 +128,7 @@ def install_youtube_runtime_guard(server_module: Any, issue79_module: Any | None
         if isinstance(defaults, dict) and "youtube" not in defaults:
             defaults["youtube"] = copy.deepcopy(section_default if isinstance(section_default, dict) else {})
 
-        server_module._redtv_session_unlocked = False
         _install_relay_factory(server_module)
-        _install_access_api(server_module)
         _patch_issue79(issue79_module)
 
         server_module.youtube_protocol = youtube_protocol
