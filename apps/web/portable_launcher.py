@@ -92,7 +92,7 @@ class WebPortableLauncher:
 
         buttons = ttk.Frame(frame)
         buttons.pack(fill="x", pady=(22, 0))
-        self.config_btn = ttk.Button(buttons, text="打开 Web 管理页", command=self.open_config, state="disabled")
+        self.config_btn = ttk.Button(buttons, text="打开 Web 控制台", command=self.open_config, state="disabled")
         self.config_btn.pack(side="left", padx=(0, 8))
         self.index_btn = ttk.Button(buttons, text="打开队列看板", command=self.open_index, state="disabled")
         self.index_btn.pack(side="left", padx=(0, 8))
@@ -140,7 +140,7 @@ class WebPortableLauncher:
         self.root.after(0, lambda text=error: self._mark_failed(text))
 
     def _mark_ready(self, *, open_browser: bool) -> None:
-        self.status_var.set("后端已启动，Web 前端可以使用。")
+        self.status_var.set("后端已启动，Web 控制台可以使用。")
         self.config_btn.configure(state="normal")
         self.index_btn.configure(state="normal")
         if open_browser:
@@ -152,7 +152,7 @@ class WebPortableLauncher:
         messagebox.showerror("启动失败", error, parent=self.root)
 
     def open_config(self) -> None:
-        webbrowser.open(f"http://127.0.0.1:{self.port}/config")
+        webbrowser.open(f"http://127.0.0.1:{self.port}/control")
 
     def open_index(self) -> None:
         webbrowser.open(f"http://127.0.0.1:{self.port}/index")
