@@ -27,8 +27,11 @@
   }
 
   function extractVideoId(value) {
-    const text = String(value || '').trim();
+    let text = String(value || '').trim();
     if (/^[A-Za-z0-9_-]{11}$/.test(text)) return text;
+    if (!text.includes('://') && (text.includes('youtube.com') || text.includes('youtu.be'))) {
+      text = `https://${text.replace(/^\/+/, '')}`;
+    }
     try {
       const u = new URL(text);
       if (u.hostname.endsWith('youtu.be')) {
