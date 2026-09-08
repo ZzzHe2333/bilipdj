@@ -61,6 +61,7 @@
   const promotions = [];
   let promotionTimer = 0;
   let applyingLogOverlay = false;
+  let aboutVersionObserver = null;
 
   function ensureUnifiedAboutPage() {
     const view = document.getElementById('view-about');
@@ -82,16 +83,20 @@
       <p>${ABOUT_CRIMINAL}</p>
       <div class="toolbar"><a class="button" href="https://github.com/ZzzHe2333/bilipdj" target="_blank" rel="noopener">GitHub 仓库</a></div>`;
 
-    fetch('/api/control/meta', { cache: 'no-store' })
-      .then(response => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
-      .then(payload => {
-        const node = document.getElementById('about-version');
-        if (node) node.textContent = String(payload.version || '未知');
-      })
-      .catch(() => {
-        const node = document.getElementById('about-version');
-        if (node) node.textContent = '未知';
-      });
+    const headerVersion = document.getElementById('version');
+    const syncVersion = () => {
+      const node = document.getElementById('about-version');
+      if (!node) return;
+      const text = String(headerVersion?.textContent || '');
+      const match = text.match(/v([^\s·]+)/i);
+      node.textContent = match ? match[1] : '读取中…';
+    };
+    syncVersion();
+    if (headerVersion) {
+      aboutVersionObserver?.disconnect();
+      aboutVersionObserver = new MutationObserver(syncVersion);
+      aboutVersionObserver.observe(headerVersion, { childList: true, characterData: true, subtree: true });
+    }
   }
 
   function ensureSupportPage() {
