@@ -13,6 +13,11 @@
   function post(path, payload = {}) {
     return json(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   }
+  async function fullConfig() {
+    const payload = await json('/api/config');
+    delete payload.status;
+    return payload;
+  }
   function message(id, text, ok = true) {
     const node = $(id); if (!node) return; node.textContent = text || ''; node.style.color = ok ? '' : '#ff7a8b';
   }
@@ -23,6 +28,10 @@
     return `${v.toFixed(i ? 1 : 0)} ${units[i]}`;
   }
   function esc(text) { return String(text ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function intValue(id, fallback, min = Number.MIN_SAFE_INTEGER) {
+    const value = Number.parseInt($(id).value, 10);
+    return Math.max(min, Number.isFinite(value) ? value : fallback);
+  }
 
   function switchView(name) {
     state.view = name;
@@ -67,9 +76,7 @@
     } catch (error) { $('log-output').textContent = `读取日志失败：${error.message}`; }
   }
 
-  async function refreshQueueAll() {
-    await Promise.all([refreshQueue(), refreshArchive()]);
-  }
+  async function refreshQueueAll() { await Promise.all([refreshQueue(), refreshArchive()]); }
   async function refreshArchive() {
     try {
       const payload = await json('/api/queue/archive');
@@ -99,6 +106,73 @@
     catch (error) { message('queue-status', `操作失败：${error.message}`, false); }
   }
 
+  async function loadPlatform() {
+    try {
+      const cfg = await fullConfig();
+      const bili = cfg.bilibili || cfg.api || {};
+      const douyin = cfg.douyin || {};
+      $('platform-select').value = cfg.platform || 'bilibili';
+      $('platform-bili-room').value = String(bili.roomid || 0);
+      $('platform-bili-uid').value = String(bili.uid || 0);
+      $('platform-douyin-live').value = String(douyin.live_id || '');
+      $('platform-douyin-enabled').checked = Boolean(douyin.enabled);
+      $('platform-douyin-cookie').value = String(douyin.cookie || '');
+      message('platform-status', '平台参数已加载。');
+    } catch (error) { message('platform-status', `加载失败：${error.message}`, false); }
+  }
+  async function savePlatform() {
+    try {
+      const cfg = await fullConfig();
+      cfg.platform = $('platform-select').value;
+      cfg.bilibili = { ...(cfg.bilibili || cfg.api || {}), roomid: intValue('platform-bili-room', 0, 0), uid: intValue('platform-bili-uid', 0, 0) };
+      cfg.douyin = { ...(cfg.douyin || {}), enabled: $('platform-douyin-enabled').checked, live_id: $('platform-douyin-live').value.trim(), cookie: $('platform-douyin-cookie').value.trim() };
+      await post('/api/config', cfg);
+      message('platform-status', '平台参数已保存。');
+      await Promise.all([refreshHeader(), loadRawConfig()]);
+    } catch (error) { message('platform-status', `保存失败：${error.message}`, false); }
+  }
+
+  async function loadGifts() {
+    try {
+      const [cfg, giftState] = await Promise.all([fullConfig(), json('/api/gifts/state')]);
+      const myjs = cfg.myjs || {};
+      const names = Array.isArray(myjs.gift_queue_names) ? myjs.gift_queue_names : (giftState.gift_names || []);
+      $('gift-enabled').checked = Boolean(myjs.gift_queue_enabled ?? giftState.enabled);
+      $('gift-names').value = names.join('\n');
+      $('gift-min-batteries').value = String(myjs.gift_queue_min_batteries ?? giftState.min_batteries ?? 0);
+      $('gift-multiple').checked = Boolean(myjs.gift_queue_allow_multiple ?? giftState.allow_multiple);
+      $('gift-slots').value = String(myjs.gift_queue_slots_per_gift ?? giftState.slots_per_gift ?? 1);
+      $('gift-rank').value = String(myjs.gift_queue_insert_rank ?? giftState.insert_rank ?? 1);
+      $('gift-saved-rank').value = String(myjs.gift_queue_saved_insert_rank ?? 1);
+      $('gift-only').checked = Boolean(myjs.gift_queue_only ?? giftState.gift_only);
+      const display = { ...giftState }; delete display.status;
+      $('gift-state').textContent = JSON.stringify(display, null, 2);
+      message('gift-status', `礼物规则已加载；当前观测到 ${Array.isArray(giftState.observed_catalog) ? giftState.observed_catalog.length : 0} 种直播间礼物。`);
+    } catch (error) { message('gift-status', `加载失败：${error.message}`, false); }
+  }
+  async function saveGifts() {
+    try {
+      const cfg = await fullConfig();
+      const names = $('gift-names').value.split(/[，,\r\n]+/).map(value => value.trim()).filter(Boolean);
+      const myjs = { ...(cfg.myjs || {}) };
+      const giftOnly = $('gift-only').checked;
+      const savedRank = intValue('gift-saved-rank', 1, 1);
+      myjs.gift_queue_enabled = $('gift-enabled').checked;
+      myjs.gift_queue_names = [...new Set(names)];
+      myjs.gift_queue_rule = myjs.gift_queue_rule || 'gift_or_battery';
+      myjs.gift_queue_min_batteries = intValue('gift-min-batteries', 0, 0);
+      myjs.gift_queue_allow_multiple = $('gift-multiple').checked;
+      myjs.gift_queue_slots_per_gift = intValue('gift-slots', 1, 1);
+      myjs.gift_queue_saved_insert_rank = savedRank;
+      myjs.gift_queue_insert_rank = giftOnly ? 0 : intValue('gift-rank', savedRank, 0);
+      myjs.gift_queue_only = giftOnly;
+      cfg.myjs = myjs;
+      await post('/api/config', cfg);
+      message('gift-status', 'B站礼物插队规则已保存。');
+      await Promise.all([loadGifts(), loadRawConfig()]);
+    } catch (error) { message('gift-status', `保存失败：${error.message}`, false); }
+  }
+
   async function loadSwitches() {
     try {
       const payload = await json('/api/kaiguan');
@@ -124,10 +198,10 @@
     catch (error) { message('style-status', `加载失败：${error.message}`, false); }
   }
   async function loadRawConfig() {
-    try { const payload = await json('/api/config'); delete payload.status; $('config-json').value = JSON.stringify(payload, null, 2); message('config-status', '完整配置已加载。'); }
+    try { const payload = await fullConfig(); $('config-json').value = JSON.stringify(payload, null, 2); message('config-status', '完整配置已加载。'); }
     catch (error) { message('config-status', `加载失败：${error.message}`, false); }
   }
-  function loadSettingsBundle() { loadSwitches(); loadBlacklist(); loadStyle(); loadRawConfig(); }
+  function loadSettingsBundle() { loadPlatform(); loadGifts(); loadSwitches(); loadBlacklist(); loadStyle(); loadRawConfig(); }
 
   async function loadPermissions() {
     try {
@@ -186,12 +260,14 @@
   $('queue-clear').addEventListener('click', () => { if (confirm('确认清空当前队列？')) queueAction('/api/queue/clear', {}); });
   $('queue-reload').addEventListener('click', () => queueAction('/api/queue/reload', {}));
   $('queue-switch').addEventListener('click', () => queueAction('/api/queue/switch', { slot: Number($('queue-slot').value || 1) }).then(refreshArchive));
+  $('platform-save').addEventListener('click', savePlatform); $('platform-refresh').addEventListener('click', loadPlatform);
+  $('gift-save').addEventListener('click', saveGifts); $('gift-refresh').addEventListener('click', loadGifts);
   $('switch-save').addEventListener('click', saveSwitches);
   $('blacklist-add').addEventListener('click', async () => { const name = $('blacklist-name').value.trim(); if (!name) return; try { await post('/api/blacklist/add', { name }); $('blacklist-name').value = ''; await loadBlacklist(); } catch (e) { message('blacklist-status', e.message, false); } });
   $('blacklist-clear').addEventListener('click', async () => { if (!confirm('确认清空黑名单？')) return; try { await post('/api/blacklist/clear', {}); await loadBlacklist(); } catch (e) { message('blacklist-status', e.message, false); } });
   $('blacklist-list').addEventListener('click', async event => { const btn = event.target.closest('[data-blacklist-delete]'); if (!btn) return; try { await post('/api/blacklist/delete', { index: Number(btn.dataset.blacklistDelete) }); await loadBlacklist(); } catch (e) { message('blacklist-status', e.message, false); } });
   $('style-save').addEventListener('click', async () => { try { const payload = JSON.parse($('style-json').value); await post('/api/style', payload); message('style-status', '样式保存成功。'); } catch (e) { message('style-status', `保存失败：${e.message}`, false); } });
-  $('config-save').addEventListener('click', async () => { try { const payload = JSON.parse($('config-json').value); await post('/api/config', payload); message('config-status', '完整配置保存成功。'); await refreshHeader(); } catch (e) { message('config-status', `保存失败：${e.message}`, false); } });
+  $('config-save').addEventListener('click', async () => { try { const payload = JSON.parse($('config-json').value); await post('/api/config', payload); message('config-status', '完整配置保存成功。'); await Promise.all([refreshHeader(), loadPlatform(), loadGifts()]); } catch (e) { message('config-status', `保存失败：${e.message}`, false); } });
   $('perm-save').addEventListener('click', savePermissions); $('perf-refresh').addEventListener('click', refreshPerformance); $('update-check').addEventListener('click', () => refreshUpdate(true));
   $('copy-overlay').addEventListener('click', async () => { try { await navigator.clipboard.writeText(`${location.origin}/index`); $('copy-overlay').textContent = '已复制'; setTimeout(() => $('copy-overlay').textContent = '复制 OBS 地址', 1200); } catch (_) { prompt('复制此地址', `${location.origin}/index`); } });
   $('overlay-url').textContent = `${location.origin}/index`;
