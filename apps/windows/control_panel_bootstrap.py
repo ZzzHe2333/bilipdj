@@ -74,6 +74,7 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
                 from .gui_log_sink import patch_control_panel_logging
                 from .portable_autostart import patch_control_panel_portable_autostart
                 from .style_save_transport import install_style_save_transport
+                from .support_us import patch_control_panel_support_us
                 from .webdav_backup_ui import patch_control_panel_webdav_backup
 
                 install_style_save_transport()
@@ -82,6 +83,7 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
                 patch_control_panel_portable_autostart(cls)
                 patch_control_panel_qr_login(cls)
                 patch_control_panel_webdav_backup(cls)
+                patch_control_panel_support_us(cls)
                 patch_control_panel_ui_finish(cls)
                 patch_control_panel_logging(cls)
             finally:
