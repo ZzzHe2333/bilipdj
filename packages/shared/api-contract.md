@@ -48,6 +48,7 @@ Content-Type: application/json
 | WebSocket | `/ws`、`/danmu/sub` | 本机或可信局域网展示客户端 |
 | 队列写操作 | `/api/queue/*` POST | 本机管理客户端 |
 | 配置/登录 | `/api/config`、`/api/config/login`、Bilibili QR | 仅本机 |
+| 主题/样式 | `/api/appearance*`、`/api/style` | 仅本机管理；OBS 可读取 `/api/style` |
 | 权限/黑名单/开关 | `/api/quanxian`、`/api/blacklist/*`、`/api/kaiguan` | 仅本机 |
 | 备份 | `/api/backup/*` | 仅本机 |
 | 控制台日志/性能/更新 | `/api/control/*` | 仅本机 |
@@ -66,8 +67,12 @@ Content-Type: application/json
 | GET | `/api/gifts/state` | B站礼物规则运行状态 |
 | GET | `/api/quanxian` | 权限配置 |
 | GET | `/api/kaiguan` | 功能开关 |
-| GET | `/api/style` | 当前展示样式 |
-| POST | `/api/style` | 保存展示样式 |
+| GET | `/api/style` | 当前 OBS/队列展示样式 |
+| POST | `/api/style` | 保存 OBS/队列展示样式 |
+| GET | `/api/appearance` | 读取 Windows/Web 通用界面主题 |
+| POST | `/api/appearance` | 保存 Windows/Web 通用界面主题 |
+| GET | `/api/appearance/profile` | 导出 Windows/Web/OBS 通用配置 |
+| POST | `/api/appearance/profile` | 导入 Windows/Web/OBS 通用配置 |
 | GET | `/api/platforms/active` | 查询激活平台 |
 | POST | `/api/platforms/active` | 修改激活平台 |
 | GET | `/api/control/update` | 获取 Web 端更新状态/manifest 信息 |
@@ -345,4 +350,113 @@ BiliPDJ Server :9816
 - `core.server` 只是 `apps.server.server` 的兼容导入入口；
 - 新客户端与新代码应使用 `apps.server` 和公开 HTTP / WebSocket 契约；
 - `queue[]`、旧 `entry` 字段继续兼容，但新代码优先结构化 `entries`、`username`、`content`；
-- 前端可以缓存 UI 偏好，但业务状态以 Server 返回为准。
+- 旧 `style.json` 保持为 OBS/队列展示样式，不会被新的界面主题系统废弃；
+- 旧 Web `localStorage` 主题对象可自动迁移到 `appearance.json`；
+- 新主题/样式以 Server 返回为准，Windows/Web 不再维护互不兼容的独立主题文件。
+
+## 14. Windows / Web / OBS 通用主题与样式配置
+
+### 14.1 `appearance.json`
+
+Windows Tk 与 Web 控制台使用同一套 `appearance.json`。Server 是唯一持久化来源。
+
+```json
+{
+  "schema": 1,
+  "design": "aurora",
+  "mode": "dark",
+  "font_family": "Microsoft YaHei UI",
+  "font_size": 10,
+  "radius": 10,
+  "dark": {
+    "background": "#090E1A",
+    "sidebar": "#0D1424",
+    "surface": "#111A2C",
+    "surface_alt": "#18233A",
+    "input": "#0D1424",
+    "border": "#26334D",
+    "text": "#E6EDF7",
+    "muted": "#8A9AB3",
+    "accent": "#7C6CF2",
+    "accent_hover": "#9184FF",
+    "selection": "#7C6CF2",
+    "success": "#32D583",
+    "warning": "#F5B942",
+    "danger": "#F97066"
+  },
+  "light": {
+    "background": "#F4F6FB",
+    "sidebar": "#EAEDF5",
+    "surface": "#FFFFFF",
+    "surface_alt": "#F0EFFF",
+    "input": "#FBFBFE",
+    "border": "#D5D9E7",
+    "text": "#20263A",
+    "muted": "#687089",
+    "accent": "#6757D9",
+    "accent_hover": "#5142BC",
+    "selection": "#6757D9",
+    "success": "#007A40",
+    "warning": "#B57600",
+    "danger": "#D92D20"
+  }
+}
+```
+
+读取：
+
+```http
+GET /api/appearance
+```
+
+保存：
+
+```http
+POST /api/appearance
+Content-Type: application/json
+
+{
+  "appearance": { ... }
+}
+```
+
+### 14.2 通用导入/导出文件
+
+Windows 与 Web 的“导出通用配置”生成同一种 JSON：
+
+```json
+{
+  "schema": 1,
+  "kind": "bilipdj-appearance-profile",
+  "appearance": { ... },
+  "display_style": { ... }
+}
+```
+
+- `appearance`：Windows/Web 控制台共同的界面主题；
+- `display_style`：现有 `style.json`，用于 OBS/队列展示；
+- Windows 导出后可以在 Web 直接导入；
+- Web 导出后可以在 Windows 直接导入；
+- 配置备份 ZIP/WebDAV 也包含 `appearance.json`。
+
+导出：
+
+```http
+GET /api/appearance/profile
+```
+
+导入：
+
+```http
+POST /api/appearance/profile
+Content-Type: application/json
+
+{
+  "schema": 1,
+  "kind": "bilipdj-appearance-profile",
+  "appearance": { ... },
+  "display_style": { ... }
+}
+```
+
+导入接口同时接受旧 `style.json`、直接的 `appearance.json` 和旧 Web 主题对象，便于升级旧版本。
