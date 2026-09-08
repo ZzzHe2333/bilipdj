@@ -106,6 +106,7 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
                 from .huya_control_guard import patch_control_panel_huya
                 from .issue79_features import patch_control_panel_issue79
                 from .portable_autostart import patch_control_panel_portable_autostart
+                from .redtv_control_guard import patch_control_panel_redtv
                 from .style_save_transport import install_style_save_transport
                 from .support_us import patch_control_panel_support_us
                 from .unified_theme import patch_control_panel_unified_theme
@@ -125,6 +126,7 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
                 # theme layer so the theme can style the final widget tree.
                 patch_control_panel_issue79(cls)
                 patch_control_panel_huya(cls)
+                patch_control_panel_redtv(cls)
                 patch_control_panel_unified_theme(cls)
                 _install_final_support_renderer(cls, module)
             finally:
