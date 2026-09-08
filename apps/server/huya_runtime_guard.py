@@ -1,12 +1,10 @@
 """Promote the existing Huya reserved config slot to a live runtime."""
 from __future__ import annotations
 
-import json
 import threading
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from . import huya_protocol
 
@@ -40,67 +38,6 @@ def _install_relay_factory(server_module: Any) -> None:
 
     create_danmu_relay_with_huya._bilipdj_huya_wrapped = True  # type: ignore[attr-defined]
     server_module._create_danmu_relay = create_danmu_relay_with_huya
-
-
-def _install_resolve_endpoint(server_module: Any) -> None:
-    handler = getattr(server_module, "ApiHandler", None)
-    if not isinstance(handler, type):
-        return
-    original_post = getattr(handler, "do_POST", None)
-    if not callable(original_post) or bool(getattr(original_post, "_bilipdj_huya_wrapped", False)):
-        return
-
-    def do_post_with_huya(self: Any) -> None:  # noqa: N802
-        if urlparse(self.path).path != "/api/huya/resolve":
-            return original_post(self)
-        if not self._require_loopback():
-            return
-        try:
-            length = int(self.headers.get("Content-Length", "0") or 0)
-        except (TypeError, ValueError):
-            length = 0
-        raw = self.rfile.read(max(0, length)).decode("utf-8", errors="replace") if length else "{}"
-        try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError:
-            payload = {}
-        if not isinstance(payload, dict):
-            payload = {}
-        target = str(payload.get("room_url", "") or payload.get("target", "") or payload.get("room_id", "") or "").strip()
-        room_id = str(payload.get("room_id", "") or "").strip()
-        anchor_uid = str(payload.get("anchor_id", "") or payload.get("anchor_uid", "") or "").strip()
-        cookie = str(payload.get("cookie", "") or "").strip()
-        if not target and not room_id:
-            self._write_json(
-                {"status": "error", "message": "room_url or room_id is required"},
-                status=HTTPStatus.BAD_REQUEST,
-            )
-            return
-        try:
-            info = huya_protocol.fetch_huya_live_info(
-                target or room_id,
-                room_id=room_id,
-                anchor_uid=anchor_uid,
-                cookie=cookie,
-            )
-        except Exception as exc:  # noqa: BLE001
-            self._write_json({"status": "error", "message": str(exc)}, status=HTTPStatus.BAD_REQUEST)
-            return
-        self._write_json(
-            {
-                "status": "ok",
-                "platform": "huya",
-                "room_url": info.room_url,
-                "room_id": info.room_id,
-                "anchor_id": info.anchor_uid,
-                "anchor_nickname": info.anchor_nickname,
-                "room_title": info.room_title,
-                "live_status": info.live_status,
-            }
-        )
-
-    do_post_with_huya._bilipdj_huya_wrapped = True  # type: ignore[attr-defined]
-    handler.do_POST = do_post_with_huya
 
 
 def _patch_issue79(issue79_module: Any) -> None:
@@ -169,7 +106,6 @@ def install_huya_runtime_guard(server_module: Any, issue79_module: Any | None = 
         all_platforms.extend(getattr(server_module, "RESERVED_RUNTIME_PLATFORMS", ()))
         server_module.ALL_RUNTIME_PLATFORMS = tuple(dict.fromkeys(str(value) for value in all_platforms))
         _install_relay_factory(server_module)
-        _install_resolve_endpoint(server_module)
         _patch_issue79(issue79_module)
         server_module.huya_protocol = huya_protocol
         server_module.HuyaDanmuRelay = huya_protocol.HuyaDanmuRelay
