@@ -8,6 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WINDOWS_ABOUT = ROOT / "apps" / "windows" / "about_page.py"
 WINDOWS_BOOTSTRAP = ROOT / "apps" / "windows" / "control_panel_bootstrap.py"
+WINDOWS_MAIN = ROOT / "apps" / "windows" / "main.py"
 WEB_ABOUT = ROOT / "apps" / "web" / "static" / "support_us.js"
 
 COMMON_COPY = (
@@ -39,16 +40,21 @@ class AboutPageParityTests(unittest.TestCase):
         web = WEB_ABOUT.read_text(encoding="utf-8")
         self.assertIn("APP_VERSION", windows)
         self.assertIn("当前版本号：{APP_VERSION}", windows)
-        self.assertIn("/api/control/meta", web)
-        self.assertIn("payload.version", web)
         self.assertIn('id="about-version"', web)
+        self.assertIn("document.getElementById('version')", web)
+        self.assertIn("MutationObserver(syncVersion)", web)
+        self.assertNotIn("fetch(", web)
+        self.assertNotIn("/api/", web)
         self.assertNotIn("当前版本号：2.0.2", windows)
         self.assertNotIn("当前版本号：2.0.2", web)
 
-    def test_windows_bootstrap_installs_about_after_feature_patch(self) -> None:
-        source = WINDOWS_BOOTSTRAP.read_text(encoding="utf-8")
-        self.assertIn("from .about_page import patch_control_panel_about", source)
-        self.assertLess(source.index("patch_control_panel_features(cls)"), source.index("patch_control_panel_about(cls)"))
+    def test_windows_entry_points_install_about_after_feature_patch(self) -> None:
+        bootstrap = WINDOWS_BOOTSTRAP.read_text(encoding="utf-8")
+        main = WINDOWS_MAIN.read_text(encoding="utf-8")
+        self.assertIn("from .about_page import patch_control_panel_about", bootstrap)
+        self.assertLess(bootstrap.index("patch_control_panel_features(cls)"), bootstrap.index("patch_control_panel_about(cls)"))
+        self.assertIn("from apps.windows.about_page import patch_control_panel_about", main)
+        self.assertIn("patch_control_panel_about(control_panel.ControlPanelApp)", main)
 
     def test_web_extension_has_valid_javascript_when_node_is_available(self) -> None:
         node = shutil.which("node")
