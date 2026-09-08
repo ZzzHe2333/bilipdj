@@ -10,41 +10,48 @@
 
 ---
 
-BiliPDJ 采用 **单仓库 Monorepo**：后端、Web 前端和 Windows 前端拥有独立目录、独立启动/构建入口，同时共享同一个后端状态源。排队、权限、礼物和直播平台连接只在 Server 计算一次，Windows、Web、OBS 均通过本地 HTTP/WebSocket 读取结果。
+BiliPDJ 采用单仓库 Monorepo。后端、Web 前端和 Windows 桌面端已经拥有独立目录和独立构建入口；排队、权限、礼物和平台连接只在 Server 维护一份状态，Windows、Web、OBS 通过 HTTP/WebSocket 使用同一状态源。
 
 > 当前正式接入的平台是 **Bilibili** 与 **抖音**。虎牙、快手、斗鱼、微信视频号目前仅保留配置位。
 
-## Monorepo 结构
+## 当前目录
 
 ```text
 bilipdj/
 ├─ apps/
-│  ├─ server/                 # 独立后端入口 / Docker
-│  │  ├─ main.py
-│  │  ├─ requirements.txt
+│  ├─ server/                 # 后端真实实现
+│  │  ├─ server.py            # HTTP/WebSocket、队列和平台运行时
+│  │  ├─ bilibili_*.py
+│  │  ├─ douyin_*.py
+│  │  ├─ queue_*.py
+│  │  ├─ main.py              # 独立启动入口
 │  │  └─ Dockerfile
-│  ├─ web/                    # Web 前端
-│  │  ├─ static/              # HTML/CSS/JS 源文件
-│  │  └─ build.py             # 独立构建到 dist/
-│  └─ windows/                # Windows 桌面端
+│  ├─ web/                    # Web 唯一源码目录
+│  │  ├─ static/              # HTML/CSS/JS
+│  │  └─ build.py
+│  └─ windows/                # 桌面端真实实现
+│     ├─ control_panel.py
+│     ├─ overlay_host.py
+│     ├─ update_*.py / updater*.py
+│     ├─ assets/
 │     ├─ main.py
 │     ├─ package.ps1
 │     └─ *.spec
-├─ packages/
-│  └─ shared/                 # HTTP/WebSocket 契约与未来共享类型
-├─ core/                      # 现有稳定实现层 / 兼容层
+├─ packages/shared/           # HTTP/WebSocket 契约与共享定义
+├─ core/                      # 旧导入/旧命令兼容层 + 兼容运行数据位置
 ├─ tests/
-├─ scripts/
 └─ .github/workflows/
 ```
 
-### 为什么仍然保留 `core/`
+### `core/` 现在是什么
 
-这次拆分优先建立 **应用边界和独立发布链**，没有为了移动目录而重写已经稳定的大量 Python 代码。当前 `core/` 仍提供成熟的后端和 Tk 桌面实现，`apps/server` 与 `apps/windows` 作为新的正式入口调用它；Web 源码已经独立到 `apps/web/static`。这样现有测试、旧命令和 macOS 发布可以继续工作，后续再把 `core/` 内模块逐步迁移，不需要再次改变对外入口。
+`core/` 不再是 Server 和 Windows 的主要实现目录。已经迁移的同名 Python 文件仅保留轻量兼容转发，因此旧代码中的 `import core.server`、`import core.control_panel` 仍可工作，旧命令 `python core/control_panel.py` 也会跳转到新入口。
 
-## 三个应用如何运行
+为了避免一次迁移同时改变用户数据位置，源码模式下的 `config.yaml`、`quanxian.yaml`、`kaiguan.yaml`、`style.json` 以及 `core/cd/` 暂时继续使用原位置。后续可以单独迁移运行数据，不需要再次调整应用目录。
 
-### Windows 桌面端
+`core/ui/` 已删除；Web 静态资源只有 `apps/web/static/` 一套。
+
+## Windows 桌面端
 
 源码启动：
 
@@ -59,13 +66,13 @@ python -m apps.windows.main
 powershell -ExecutionPolicy Bypass -File .\apps\windows\package.ps1 -InstallDependencies
 ```
 
-旧命令仍兼容：
+兼容旧打包命令：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\package-windows-local.ps1 -InstallDependencies
 ```
 
-产物：
+主要产物：
 
 ```text
 dist\bilipdj\main.exe
@@ -73,9 +80,9 @@ dist\bilipdj\paiduijitm.exe
 dist\bilipdj\updater.exe
 ```
 
-### Web 前端
+## Web 前端
 
-Web UI 目前是原生 HTML/CSS/JavaScript，不需要 Node：
+Web UI 使用原生 HTML/CSS/JavaScript：
 
 ```bash
 python apps/web/build.py
@@ -87,13 +94,13 @@ python apps/web/build.py
 apps/web/dist/
 ```
 
-该目录可以单独交给静态服务器，也可以由 Server 加载：
+Server 默认直接读取 `apps/web/static`，也可以指定构建产物：
 
 ```bash
 python -m apps.server.main --web-dir apps/web/dist
 ```
 
-### Server 后端
+## Server 后端
 
 ```bash
 python -m pip install -r apps/server/requirements.txt
@@ -129,13 +136,13 @@ docker run --rm -p 9816:9816 bilipdj-server
 
 ```mermaid
 flowchart LR
-    B[Bilibili] --> S[Server]
+    B[Bilibili] --> S[apps/server]
     D[Douyin] --> S
     S --> Q[Queue / Permission / Gift / Archive]
     Q --> API[HTTP + WebSocket]
     API --> W[apps/windows]
     API --> WEB[apps/web]
-    API --> OBS[OBS / Overlay]
+    API --> OBS[Overlay / OBS]
 ```
 
 核心原则：**Server 是唯一状态源，前端不重复实现业务规则。**
@@ -153,20 +160,17 @@ flowchart LR
 | Web / OBS | 浏览器展示、透明弹窗、实时 WebSocket 更新 |
 | 本地数据 | 配置、权限、日志和队列数据保存在本机 |
 
-## 配置与安全
+## CI / 构建验证
 
-源码兼容模式下，运行配置仍由 `core/` 实现层管理；打包运行时配置位于可执行文件附近。配置可能包含 Cookie、`SESSDATA`、`bili_jct` 或其他登录凭据，请勿提交到仓库或公开截图。
+- `.github/workflows/quality.yml`：编译 `apps/`、兼容 `core/`、脚本和测试，并运行完整回归测试
+- `.github/workflows/server.yml`：验证真实后端位于 `apps/server`，并检查旧 `core.server` 转发兼容
+- `.github/workflows/web.yml`：独立构建 `apps/web`
+- `.github/workflows/package-windows-x64.yml`：从 `apps/windows` 实际执行 Windows PyInstaller 打包
+- macOS 兼容构建的 spec 也已切到 `apps/*` 实现路径
 
-后端默认监听 `127.0.0.1:9816`。如果改为 `0.0.0.0` 提供局域网访问，应自行限制网络范围，不建议直接暴露到公网。
+## 安全
 
-## CI / 独立构建
-
-- `.github/workflows/package-windows-x64.yml`：Windows 独立打包，入口为 `apps/windows/package.ps1`
-- `.github/workflows/web.yml`：只构建 `apps/web`
-- `.github/workflows/server.yml`：验证 Server 独立入口和 Web 资源绑定
-- 原有质量检查、敏感信息扫描和 macOS 构建继续保留
-
-Windows/Web/Server 可以分别触发对应工作流；Web 修改不需要重新组织后端源码，Server 与 Windows 也拥有明确的独立入口。
+配置可能包含 Cookie、`SESSDATA`、`bili_jct` 或其他登录凭据，请勿提交到仓库或公开截图。后端默认监听 `127.0.0.1:9816`；如改为 `0.0.0.0` 提供局域网访问，应自行限制网络范围，不建议直接暴露到公网。
 
 ## 文档
 
