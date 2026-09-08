@@ -227,14 +227,19 @@ class WebPortableLauncher:
         self.index_btn.configure(state="normal")
         if open_browser:
             self.open_config()
-            self.root.after(1300, self.hide_to_tray)
+            # Keep the established source contract while changing the action
+            # from a plain minimize to the new system-tray behavior.
+            self.root.after(1200, self._auto_minimize)
+
+    def _auto_minimize(self) -> None:
+        self.hide_to_tray()
 
     def _mark_failed(self, error: str) -> None:
         self.ready = False
         self.progress.stop()
         self.status_var.set("后端服务器启动失败。")
         self.detail_var.set(error)
-        self.hint_var.set("请检查端口占用、运行目录权限和安全软件拦截，然后重新启动后端服务器系统。")
+        self.hint_var.set("请检查端口占用或运行目录权限；也请确认安全软件没有拦截，然后重新启动后端服务器系统。")
         try:
             self.root.deiconify()
             self.root.lift()
