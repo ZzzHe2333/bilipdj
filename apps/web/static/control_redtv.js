@@ -4,6 +4,7 @@
   const $ = id => document.getElementById(id);
   const PLATFORM_KEY = 'youtube';
   const DISPLAY_NAME = '红色小电视';
+  const GOOGLE_PROBE_URL = 'https://www.google.com/generate_204';
   let accessState = { configured: false, unlocked: false };
   let deniedThisPage = false;
 
@@ -140,30 +141,45 @@
   }
 
   async function loadSavedConfig() {
-    try {
-      const cfg = await fullConfig();
-      const section = cfg.youtube || {};
-      if ($('redtv-room-url')) {
-        $('redtv-room-url').value = String(section.room_url || section.room_id || '');
-      }
-      if ($('redtv-cookie')) $('redtv-cookie').value = String(section.cookie || '');
-    } catch (_) { /* status endpoint will carry the gate state */ }
+    const cfg = await fullConfig();
+    const section = cfg.youtube || {};
+    const savedTarget = String(section.room_url || section.room_id || '').trim();
+    accessState.configured = Boolean(extractVideoId(savedTarget));
+    if (accessState.configured) {
+      accessState.unlocked = true;
+      deniedThisPage = false;
+    }
+    if ($('redtv-room-url')) $('redtv-room-url').value = savedTarget;
+    if ($('redtv-cookie')) $('redtv-cookie').value = String(section.cookie || '');
+    if (accessState.configured) ensureActiveCheckbox();
+    return cfg;
   }
 
   async function refreshAccess() {
     try {
-      const payload = await api('/api/redtv/access');
-      accessState = {
-        configured: Boolean(payload.configured),
-        unlocked: Boolean(payload.unlocked),
-      };
-      if (accessState.configured) deniedThisPage = false;
       await loadSavedConfig();
-      if (accessState.configured) ensureActiveCheckbox();
     } catch (_) {
-      accessState = { configured: false, unlocked: false };
+      accessState.configured = false;
     }
     renderGate();
+  }
+
+  async function probeGoogle() {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 4000);
+    try {
+      await fetch(`${GOOGLE_PROBE_URL}?_=${Date.now()}`, {
+        method: 'GET',
+        mode: 'no-cors',
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      return true;
+    } catch (_) {
+      return false;
+    } finally {
+      window.clearTimeout(timer);
+    }
   }
 
   async function tryUnlock() {
@@ -172,28 +188,28 @@
       button.disabled = true;
       button.textContent = '检测中…';
     }
-    try {
-      const payload = await post('/api/redtv/unlock');
-      accessState = {
-        configured: Boolean(payload.configured),
-        unlocked: true,
-      };
+    const allowed = await probeGoogle();
+    if (allowed) {
+      accessState.unlocked = true;
       deniedThisPage = false;
-      await loadSavedConfig();
-    } catch (_) {
-      accessState = { configured: false, unlocked: false };
+      try { await loadSavedConfig(); } catch (_) { /* keep session unlock */ }
+    } else {
+      accessState.unlocked = false;
       deniedThisPage = true;
-    } finally {
-      if (button) {
-        button.disabled = false;
-        button.textContent = '尝试解锁';
-      }
-      renderGate();
     }
+    if (button) {
+      button.disabled = false;
+      button.textContent = '尝试解锁';
+    }
+    renderGate();
   }
 
   async function saveConfig() {
     const status = $('redtv-status');
+    if (!accessState.configured && !accessState.unlocked) {
+      if (status) status.textContent = '请先点击“尝试解锁”。';
+      return;
+    }
     const value = String($('redtv-room-url')?.value || '').trim();
     const videoId = extractVideoId(value);
     if (!videoId) {
