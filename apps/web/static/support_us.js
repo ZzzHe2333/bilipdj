@@ -2,7 +2,9 @@
   'use strict';
 
   const SUPPORT_URL = 'https://m.sdyuntuo.cn/ProductEn/Index/01929ef4362a8858';
-  const SUPPORT_COPY = '项目免费开源使用，申请流量卡给开发者回回血。';
+  const SUPPORT_COPY = '项目免费开源使用，申请流量卡可以为项目带来持续支持。';
+  const DONATION_COPY = '如果这个项目帮到了你，也可以自愿扫码赞赏，支持后续维护与更新。';
+  const DONATION_IMAGE = '/WxZSM.png';
   const GUANGGAO_LEVEL = 'GUANGGAO';
   const GUANGGAO_TEXT = '【打扰一下】如果有需要正规大流量电话卡的，可以点击 支持我们-申请流量卡，自助申请哦。你的每张正常申请使用，都能给本项目带来持续的支持！';
   const INITIAL_DELAY_RANGE_MS = [45000, 150000];
@@ -99,10 +101,29 @@
     }
   }
 
+  function ensureSupportStyles() {
+    if (document.getElementById('support-us-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'support-us-styles';
+    style.textContent = `
+      .support-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;align-items:stretch}
+      .support-card{min-width:0;text-align:center;padding:26px 22px;display:flex;flex-direction:column;align-items:center}
+      .support-card h2{margin:0 0 10px}
+      .support-card p{line-height:1.75}
+      .support-qr,.support-donation{width:220px;max-width:min(78vw,100%);height:auto;background:#fff;padding:8px;border-radius:10px;box-sizing:border-box;margin:4px 0 18px}
+      .support-donation{object-fit:contain;aspect-ratio:1/1}
+      .support-url{word-break:break-all}
+      @media (max-width:760px){.support-grid{grid-template-columns:1fr}.support-card{padding:22px 18px}}
+    `;
+    document.head.appendChild(style);
+  }
+
   function ensureSupportPage() {
     const sidebar = document.querySelector('.sidebar');
     const content = document.querySelector('.content');
     if (!sidebar || !content) return;
+
+    ensureSupportStyles();
 
     if (!sidebar.querySelector('[data-view="support"]')) {
       const button = document.createElement('button');
@@ -113,23 +134,34 @@
       sidebar.insertBefore(button, about || null);
     }
 
-    if (!document.getElementById('view-support')) {
-      const section = document.createElement('section');
+    let section = document.getElementById('view-support');
+    if (!section) {
+      section = document.createElement('section');
       section.className = 'view';
       section.id = 'view-support';
-      section.innerHTML = `
-        <div class="page-head"><div><h1>支持我们</h1><p>项目本体免费开源，流量卡申请会给项目带来持续支持。</p></div></div>
-        <div class="card" style="max-width:760px;text-align:center;margin:0 auto;padding:32px 24px;">
-          <h2 style="margin:0 0 12px;">流量卡推广</h2>
-          <p style="margin:0 0 22px;line-height:1.8;">${SUPPORT_COPY}</p>
-          <canvas id="support-qr" width="246" height="246" aria-label="申请流量卡二维码" style="width:246px;max-width:80vw;height:auto;background:#fff;padding:0;border-radius:8px;margin-bottom:20px;"></canvas>
-          <div style="margin-bottom:12px;"><a id="support-apply" class="button" href="${SUPPORT_URL}" target="_blank" rel="noopener noreferrer">申请流量卡</a></div>
-          <p class="hint" style="margin-top:12px;">可点击按钮跳转，也可以使用手机扫描二维码申请。</p>
-          <p class="hint" style="margin-top:8px;word-break:break-all;">${SUPPORT_URL}</p>
-        </div>`;
       const about = document.getElementById('view-about');
       content.insertBefore(section, about || null);
     }
+
+    section.innerHTML = `
+      <div class="page-head"><div><h1>支持我们</h1><p>项目本体永久免费开源。选择适合你的方式支持后续维护。</p></div></div>
+      <div class="support-grid">
+        <article class="card support-card">
+          <h2>申请流量卡</h2>
+          <p>${SUPPORT_COPY}</p>
+          <canvas id="support-qr" class="support-qr" width="246" height="246" aria-label="申请流量卡二维码"></canvas>
+          <div><a id="support-apply" class="button" href="${SUPPORT_URL}" target="_blank" rel="noopener noreferrer">申请流量卡</a></div>
+          <p class="hint" style="margin:14px 0 6px;">点击按钮跳转，或使用手机扫描二维码。</p>
+          <p class="hint support-url" style="margin:0;">${SUPPORT_URL}</p>
+        </article>
+        <article class="card support-card">
+          <h2>赞赏项目</h2>
+          <p>${DONATION_COPY}</p>
+          <img id="support-donation" class="support-donation" src="${DONATION_IMAGE}" alt="微信赞赏码">
+          <p style="margin:0 0 6px;"><strong>微信赞赏码</strong></p>
+          <p class="hint" style="margin:0;">赞赏完全自愿，不影响任何功能使用。</p>
+        </article>
+      </div>`;
   }
 
   function randomDelay([low, high]) {
