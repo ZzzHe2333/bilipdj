@@ -25,6 +25,10 @@ python -m apps.server.main --web-dir apps/web/dist
 
 默认 Web 资源来自唯一源码目录 `apps/web/static/`。
 
+## Bilibili 扫码登录
+
+Server 统一提供 `/api/bili/qr/start` 和 `/api/bili/qr/poll`。Windows 桌面端使用原生 Tk 弹窗调用这两个本地 API；Web/Docker 场景继续由网页扫码页调用同一套 API。扫码成功后的 Cookie、UID/用户名解析、配置持久化和弹幕重连仍由 Server 负责，因此不同前端不会各自维护一套登录协议。
+
 ## Docker
 
 从仓库根目录执行：
