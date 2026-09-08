@@ -20,6 +20,7 @@ from apps.server.main import configure_web_assets  # noqa: E402
 configure_web_assets()
 
 from apps.windows import control_panel  # noqa: E402
+from apps.windows.about_page import patch_control_panel_about  # noqa: E402
 from apps.windows.bilibili_qr_dialog import patch_control_panel_qr_login  # noqa: E402
 
 
@@ -47,11 +48,10 @@ def _configure_control_panel_paths() -> None:
 
 _configure_control_panel_paths()
 
-# Do not rely only on the legacy class-construction hook.  The customer-facing
-# entry point explicitly installs the native Bilibili QR login before any
-# ControlPanelApp instance is created, so the top "登录配置" button can never
-# keep the old browser-bound callback in normal Tk launches.
+# Customer-facing entry points install critical UI patches explicitly instead of
+# relying only on legacy class-construction hooks and import order.
 patch_control_panel_qr_login(control_panel.ControlPanelApp)
+patch_control_panel_about(control_panel.ControlPanelApp)
 
 
 def main() -> None:

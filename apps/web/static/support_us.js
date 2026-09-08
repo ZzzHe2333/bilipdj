@@ -8,6 +8,12 @@
   const INITIAL_DELAY_RANGE_MS = [45000, 150000];
   const REPEAT_DELAY_RANGE_MS = [480000, 1080000];
 
+  const ABOUT_TOOL_NAME = 'Bilibili 直播弹幕排队管理工具';
+  const ABOUT_ARCHITECTURE = '排队逻辑由 Python 后端统一处理，前端仅负责显示。';
+  const ABOUT_FREE_NOTICE = '本软件完全免费，源码公开，Github Action自动打包，无后台无病毒，不损害电脑。若有人向你收费获取此软件（亲手帮安装调试除外），请立刻退款并举报！';
+  const ABOUT_CIVIL = '• 民事责任：侵权方须停止侵权、赔偿损失（含维权合理费用）。';
+  const ABOUT_CRIMINAL = '• 刑事责任：以营利为目的的侵权行为，情节严重时可能被追究刑事责任。';
+
   const QR_MATRIX = [
     "00000000000000000000000000000000000000000",
     "00000000000000000000000000000000000000000",
@@ -55,6 +61,43 @@
   const promotions = [];
   let promotionTimer = 0;
   let applyingLogOverlay = false;
+  let aboutVersionObserver = null;
+
+  function ensureUnifiedAboutPage() {
+    const view = document.getElementById('view-about');
+    const card = view?.querySelector('.card.about');
+    if (!view || !card) return;
+
+    const subtitle = view.querySelector('.page-head p');
+    if (subtitle) subtitle.textContent = '项目与版本信息';
+
+    card.innerHTML = `
+      <h2>弹幕排队姬</h2>
+      <p><strong>当前版本号：</strong><span id="about-version">读取中…</span></p>
+      <p><strong>您的版本是：</strong>网页版</p>
+      <p>${ABOUT_TOOL_NAME}</p>
+      <p>${ABOUT_ARCHITECTURE}</p>
+      <p>${ABOUT_FREE_NOTICE}</p>
+      <p><strong>【侵权/倒卖责任】</strong></p>
+      <p>${ABOUT_CIVIL}</p>
+      <p>${ABOUT_CRIMINAL}</p>
+      <div class="toolbar"><a class="button" href="https://github.com/ZzzHe2333/bilipdj" target="_blank" rel="noopener">GitHub 仓库</a></div>`;
+
+    const headerVersion = document.getElementById('version');
+    const syncVersion = () => {
+      const node = document.getElementById('about-version');
+      if (!node) return;
+      const text = String(headerVersion?.textContent || '');
+      const match = text.match(/v([^\s·]+)/i);
+      node.textContent = match ? match[1] : '读取中…';
+    };
+    syncVersion();
+    if (headerVersion) {
+      aboutVersionObserver?.disconnect();
+      aboutVersionObserver = new MutationObserver(syncVersion);
+      aboutVersionObserver.observe(headerVersion, { childList: true, characterData: true, subtree: true });
+    }
+  }
 
   function ensureSupportPage() {
     const sidebar = document.querySelector('.sidebar');
@@ -157,6 +200,7 @@
     }, randomDelay(range));
   }
 
+  ensureUnifiedAboutPage();
   ensureSupportPage();
 
   const logOutput = document.getElementById('log-output');

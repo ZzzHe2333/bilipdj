@@ -17,7 +17,7 @@ hiddenimports = [
     "apps.server.style_option_guard", "apps.server.web_control_guard", "apps.server.web_queue_layout", "apps.server.websocket_performance_guard",
     "apps.windows.control_panel", "apps.windows.control_panel_bootstrap", "apps.windows.control_panel_guard",
     "apps.windows.control_panel_features", "apps.windows.control_panel_ui_finish", "apps.windows.gui_log_sink",
-    "apps.windows.bilibili_qr_dialog", "apps.windows.portable_autostart", "apps.windows.style_save_transport",
+    "apps.windows.about_page", "apps.windows.bilibili_qr_dialog", "apps.windows.portable_autostart", "apps.windows.style_save_transport",
     "apps.windows.support_us", "apps.windows.webdav_backup_ui",
     "apps.windows.update_client", "apps.windows.update_ui", "apps.windows.update_network", "apps.windows.update_page",
     "apps.windows.overlay_refresh_guard", "apps.windows.overlay_performance_guard", "apps.windows.slider_switches",
