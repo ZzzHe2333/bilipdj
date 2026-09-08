@@ -99,11 +99,13 @@ from . import settings_backup_bugfix_guard as _settings_backup_bugfix_guard  # n
 from . import settings_mtime_guard as _settings_mtime_guard  # noqa: E402
 from . import settings_storage_guard as _settings_storage_guard  # noqa: E402
 from . import web_control_guard as _web_control_guard  # noqa: E402
+from . import issue79_guard as _issue79_guard  # noqa: E402
 
 _settings_backup.install_settings_backup(server)
 _settings_mtime_guard.install_settings_mtime_guard(_settings_backup)
 _settings_storage_guard.install_settings_storage_guard(_settings_backup, server)
 _settings_backup_bugfix_guard.install_settings_backup_bugfix_guard(_settings_backup)
 _web_control_guard.install_web_control_guard(server)
+_issue79_guard.install_issue79_guard(server)
 
 __all__ = ["REPO_ROOT", "configure_runtime_paths", "server"]
