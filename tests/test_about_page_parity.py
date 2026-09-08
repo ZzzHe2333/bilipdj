@@ -45,8 +45,8 @@ class AboutPageParityTests(unittest.TestCase):
         self.assertIn("MutationObserver(syncVersion)", web)
         self.assertNotIn("fetch(", web)
         self.assertNotIn("/api/", web)
-        self.assertNotIn("当前版本号：2.0.2", windows)
-        self.assertNotIn("当前版本号：2.0.2", web)
+        self.assertNotIn("当前版本号：2.0.3", windows)
+        self.assertNotIn("当前版本号：2.0.3", web)
 
     def test_windows_entry_points_install_about_after_feature_patch(self) -> None:
         bootstrap = WINDOWS_BOOTSTRAP.read_text(encoding="utf-8")
