@@ -70,20 +70,13 @@
     fields.style.display = 'contents';
     fields.innerHTML = `
       <label class="wide"><span>虎牙直播间链接</span><input id="platform-huya-url" placeholder="https://www.huya.com/lpl"></label>
-      <label><span>虎牙房间号</span><input id="platform-huya-room" inputmode="numeric" placeholder="可留空自动解析"></label>
-      <label><span>虎牙主播 UID</span><input id="platform-huya-anchor" inputmode="numeric" placeholder="可留空自动解析"></label>
+      <label><span>虎牙房间号</span><input id="platform-huya-room" inputmode="numeric" placeholder="可留空，启动时自动解析"></label>
+      <label><span>虎牙主播 UID</span><input id="platform-huya-anchor" inputmode="numeric" placeholder="可留空，启动时自动解析"></label>
     `;
     grid.appendChild(fields);
 
     const toolbar = pane.querySelector('.toolbar');
     if (toolbar) {
-      const resolveButton = document.createElement('button');
-      resolveButton.id = 'platform-huya-resolve';
-      resolveButton.className = 'button ghost';
-      resolveButton.textContent = '解析虎牙';
-      resolveButton.addEventListener('click', resolveHuya);
-      toolbar.appendChild(resolveButton);
-
       const saveButton = document.createElement('button');
       saveButton.id = 'platform-huya-save';
       saveButton.className = 'button ghost';
@@ -121,34 +114,9 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(cfg),
       });
-      setStatus('虎牙参数已保存；激活虎牙后会自动连接弹幕。');
+      setStatus('虎牙参数已保存；激活虎牙后会自动解析房间信息并连接弹幕。');
     } catch (error) {
       setStatus(`虎牙参数保存失败：${error.message}`, false);
-    }
-  }
-
-  async function resolveHuya() {
-    const roomUrl = String($('platform-huya-url')?.value || '').trim();
-    const roomId = String($('platform-huya-room')?.value || '').trim();
-    const anchorId = String($('platform-huya-anchor')?.value || '').trim();
-    if (!roomUrl && !roomId) {
-      setStatus('请先填写虎牙直播间链接或房间号。', false);
-      return;
-    }
-    setStatus('正在解析虎牙直播间……');
-    try {
-      const payload = await api('/api/huya/resolve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ room_url: roomUrl, room_id: roomId, anchor_id: anchorId }),
-      });
-      if ($('platform-huya-url') && payload.room_url) $('platform-huya-url').value = payload.room_url;
-      if ($('platform-huya-room')) $('platform-huya-room').value = String(payload.room_id || '');
-      if ($('platform-huya-anchor')) $('platform-huya-anchor').value = String(payload.anchor_id || '');
-      const suffix = [payload.anchor_nickname, payload.room_title].filter(Boolean).join('；');
-      setStatus(`虎牙解析成功：房间号 ${payload.room_id}，主播 UID ${payload.anchor_id}${suffix ? `；${suffix}` : ''}`);
-    } catch (error) {
-      setStatus(`虎牙解析失败：${error.message}`, false);
     }
   }
 
