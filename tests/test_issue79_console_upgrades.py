@@ -107,7 +107,7 @@ class Issue79RelayTests(unittest.TestCase):
         self.guard = load_guard()
 
     def test_explicit_active_platforms_are_deduplicated_and_can_be_empty(self) -> None:
-        module = SimpleNamespace(_get_runtime_platform=lambda _cfg: "bilibili")
+        module = SimpleNamespace(_get_runtime_platform=lambda cfg: cfg.get("platform", "bilibili"))
         self.assertEqual(
             self.guard._normalize_active_platforms(module, {"active_platforms": ["bilibili", "douyin", "bilibili"]}),
             ("bilibili", "douyin"),
