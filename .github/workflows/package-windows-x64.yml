@@ -1,10 +1,10 @@
-name: Package Windows x64
+name: Package portable Windows bundles
 
 on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: '手动输入要发布的标签（示例：v1.0.0）'
+        description: '手动输入要发布的标签（示例：v2.0.1）'
         required: true
         type: string
   push:
@@ -14,18 +14,28 @@ on:
       - 'v*'
     paths:
       - 'VERSION'
-  pull_request:
-    paths:
       - 'requirements.txt'
-      - 'core/**'
+      - 'apps/server/**'
       - 'apps/windows/**'
       - 'apps/web/**'
+      - 'RELEASE_NOTES.md'
+      - '.github/workflows/package-windows-x64.yml'
+  pull_request:
+    paths:
+      - 'VERSION'
+      - 'requirements.txt'
+      - 'apps/server/**'
+      - 'apps/windows/**'
+      - 'apps/web/**'
+      - 'tests/**'
+      - 'RELEASE_NOTES.md'
+      - '.github/workflows/package-windows-x64.yml'
 
 permissions:
   contents: write
 
 jobs:
-  build-windows-x64:
+  build-portable-bundles:
     runs-on: windows-2022
 
     steps:
@@ -38,7 +48,7 @@ jobs:
         run: |
           VERSION="$(tr -d '[:space:]' < VERSION)"
           if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+){2,}$ ]]; then
-            echo "VERSION 文件格式不合法：$VERSION（应为 1.0.0 形式）"
+            echo "VERSION 文件格式不合法：$VERSION（应为 2.0.1 形式）"
             exit 1
           fi
 
@@ -54,7 +64,7 @@ jobs:
 
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             if [[ ! "$TAG_NAME" =~ ^v[0-9A-Za-z._-]+$ ]]; then
-              echo "标签格式不合法：$TAG_NAME（需以 v 开头，例如 v1.0.0）"
+              echo "标签格式不合法：$TAG_NAME（需以 v 开头，例如 v2.0.1）"
               exit 1
             fi
             if [ "$TAG_NAME" != "v$VERSION" ]; then
@@ -63,40 +73,99 @@ jobs:
             fi
           fi
 
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
-          echo "zip_name=bilibili-danmuji-windows-x64-$TAG_NAME.zip" >> "$GITHUB_OUTPUT"
+          echo "tk_zip=BiliPDJ-v$VERSION-Windows-Tk-Portable-x64.zip" >> "$GITHUB_OUTPUT"
+          echo "web_zip=BiliPDJ-v$VERSION-Web-Portable-x64.zip" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Build Windows executable (x64)
+      - name: Build Tk Windows portable
         shell: pwsh
         run: |
           python scripts\scan_secrets.py
           .\apps\windows\package.ps1 -InstallDependencies
 
-      - name: Create build zip and checksum
+      - name: Build Web portable
         shell: pwsh
         run: |
-          if (Test-Path package) { Remove-Item -LiteralPath package -Recurse -Force }
-          New-Item -ItemType Directory -Path package -Force | Out-Null
-          Copy-Item -Recurse "dist\bilipdj\*" package\
-          if (Test-Path README.md)        { Copy-Item README.md package\ }
-          if (Test-Path RELEASE_NOTES.md) { Copy-Item RELEASE_NOTES.md package\ }
-          $zipName = "${{ steps.resolve_tag.outputs.zip_name }}"
-          Compress-Archive -Path package\* -DestinationPath $zipName -Force
-          $sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $zipName).Hash.ToLowerInvariant()
-          "$sha256  $zipName" | Set-Content -LiteralPath "$zipName.sha256" -Encoding ascii
+          .\apps\web\package-portable.ps1
 
-      - name: Upload artifact
+      - name: Validate portable outputs
+        shell: pwsh
+        run: |
+          $required = @(
+            "dist\bilipdj\main.exe",
+            "dist\bilipdj\paiduijitm.exe",
+            "dist\bilipdj\updater.exe",
+            "dist\web-portable\bilipdj-web\BiliPDJ-Web.exe"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) { throw "Portable output missing: $path" }
+          }
+          $tkConfig = Get-ChildItem "dist\bilipdj" -Recurse -Filter "config.html" | Select-Object -First 1
+          $webConfig = Get-ChildItem "dist\web-portable\bilipdj-web" -Recurse -Filter "config.html" | Select-Object -First 1
+          if (-not $tkConfig) { throw "Tk portable bundle does not contain Web assets" }
+          if (-not $webConfig) { throw "Web portable bundle does not contain Web assets" }
+
+      - name: Create portable zips and checksums
+        shell: pwsh
+        run: |
+          foreach ($path in @("package-tk", "package-web")) {
+            if (Test-Path $path) { Remove-Item -LiteralPath $path -Recurse -Force }
+            New-Item -ItemType Directory -Path $path -Force | Out-Null
+          }
+
+          Copy-Item -Recurse "dist\bilipdj\*" "package-tk\"
+          Copy-Item -Recurse "dist\web-portable\bilipdj-web\*" "package-web\"
+          foreach ($file in @("VERSION", "README.md", "RELEASE_NOTES.md")) {
+            if (Test-Path $file) {
+              Copy-Item $file "package-tk\" -Force
+              Copy-Item $file "package-web\" -Force
+            }
+          }
+
+          @"
+          BiliPDJ v${{ steps.resolve_tag.outputs.version }} Windows Tk 便携版
+
+          1. 请完整解压 ZIP，不要只拖出 main.exe。
+          2. 双击 main.exe 启动桌面前端。
+          3. 便携版会自动启动内置后端，无需安装 Python、无需另开命令行。
+          4. 关闭桌面程序时，它启动的后端会一并关闭。
+          "@ | Set-Content -LiteralPath "package-tk\使用说明.txt" -Encoding utf8
+
+          @"
+          BiliPDJ v${{ steps.resolve_tag.outputs.version }} Web 便携版
+
+          1. 请完整解压 ZIP，不要只拖出 BiliPDJ-Web.exe。
+          2. 双击 BiliPDJ-Web.exe。
+          3. 启动器会自动启动内置后端，等待服务就绪后自动打开浏览器管理页。
+          4. 可在启动器中重新打开管理页/队列看板；点击“停止并退出”会关闭它启动的后端。
+          5. 无需安装 Python。
+          "@ | Set-Content -LiteralPath "package-web\使用说明.txt" -Encoding utf8
+
+          $tkZip = "${{ steps.resolve_tag.outputs.tk_zip }}"
+          $webZip = "${{ steps.resolve_tag.outputs.web_zip }}"
+          Compress-Archive -Path "package-tk\*" -DestinationPath $tkZip -Force
+          Compress-Archive -Path "package-web\*" -DestinationPath $webZip -Force
+
+          foreach ($zip in @($tkZip, $webZip)) {
+            $sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLowerInvariant()
+            "$sha256  $zip" | Set-Content -LiteralPath "$zip.sha256" -Encoding ascii
+          }
+
+      - name: Upload portable artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: bilibili-danmuji-windows-x64-${{ steps.resolve_tag.outputs.tag_name }}
+          name: BiliPDJ-portable-bundles-${{ steps.resolve_tag.outputs.tag_name }}
           path: |
-            ${{ steps.resolve_tag.outputs.zip_name }}
-            ${{ steps.resolve_tag.outputs.zip_name }}.sha256
+            ${{ steps.resolve_tag.outputs.tk_zip }}
+            ${{ steps.resolve_tag.outputs.tk_zip }}.sha256
+            ${{ steps.resolve_tag.outputs.web_zip }}
+            ${{ steps.resolve_tag.outputs.web_zip }}.sha256
 
       - name: Create GitHub Release
         if: github.event_name != 'pull_request'
@@ -105,7 +174,7 @@ jobs:
           tag: ${{ steps.resolve_tag.outputs.tag_name }}
           commit: ${{ github.sha }}
           name: 弹幕排队姬 ${{ steps.resolve_tag.outputs.tag_name }}
-          artifacts: ${{ steps.resolve_tag.outputs.zip_name }},${{ steps.resolve_tag.outputs.zip_name }}.sha256
+          artifacts: ${{ steps.resolve_tag.outputs.tk_zip }},${{ steps.resolve_tag.outputs.tk_zip }}.sha256,${{ steps.resolve_tag.outputs.web_zip }},${{ steps.resolve_tag.outputs.web_zip }}.sha256
           artifactErrorsFailBuild: true
           allowUpdates: true
           replacesArtifacts: true

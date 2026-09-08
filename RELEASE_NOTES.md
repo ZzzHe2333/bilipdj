@@ -1,42 +1,52 @@
-# 弹幕排队姬 v1.0.11
+# 弹幕排队姬 v2.0.1
 
-v1.0.11 是针对 v1.0.10 本地管理请求日志异常的热修复版本。
+v2.0.1 是面向普通用户的便携发行版本，重点把桌面端和 Web 端都做成“解压即用、前端启动即自动带起后端”的完整软件包。
 
-## 修复内容
+## 本次提供的发行包
 
-### 本机客户端提前断开时不再打印错误堆栈
+### Windows Tk 便携版
 
-桌面控制台、浏览器配置页或透明窗口在刷新、关闭窗口、快速重复保存时，可能在后端写回 JSON 前主动取消本机 HTTP 请求。Windows 会将该情况报告为：
+文件：`BiliPDJ-v2.0.1-Windows-Tk-Portable-x64.zip`
 
-```text
-ConnectionAbortedError: [WinError 10053]
-```
+适合希望使用原生桌面控制台的用户。完整解压后双击 `main.exe`：
 
-该异常只表示客户端已经不再需要响应，不代表队列、配置保存或后端服务崩溃。旧版本未处理该网络状态，因此 `ThreadingHTTPServer` 会把完整 traceback 输出到 Log 框。
+- 自动启动内置后端；
+- 不需要安装 Python；
+- 自带 Bilibili / 抖音后端、Web 静态资源、OBS 透明窗口和更新组件；
+- Bilibili 扫码登录直接使用原生桌面二维码弹窗；
+- 关闭桌面程序时，它启动的后端会一并停止。
 
-v1.0.11 现在会：
+### Web 便携版
 
-- 静默处理 `WinError 10053`、`WinError 10054`、BrokenPipe、ConnectionReset 和 ConnectionAborted；
-- 将当前 HTTP 连接标记为关闭，不影响后续新请求；
-- 保留其他未知 `OSError` 的正常抛出，避免掩盖真实程序错误；
-- 增加回归测试，验证客户端断开被忽略，而非网络类异常仍会报告。
+文件：`BiliPDJ-v2.0.1-Web-Portable-x64.zip`
 
-## 影响说明
+适合希望主要通过浏览器操作的用户。完整解压后双击 `BiliPDJ-Web.exe`：
 
-- 已经完成的 POST 操作不会回滚；客户端断开只发生在服务器返回结果阶段。
-- 队列、配置、黑名单和样式数据不会因为该异常丢失。
-- 修复后 Log 框不再出现对应的 `Exception occurred during processing of request` 堆栈。
+- 启动器先检查本机后端；
+- 若后端未运行，自动启动软件内置的后端子进程；
+- 等待 `/health` 就绪后自动打开本地 Web 管理页；
+- 可从启动器再次打开管理页或队列看板；
+- 点击“停止并退出”只关闭本启动器自己拉起的后端；
+- 不需要安装 Python，也不需要手工运行 Server 命令。
+
+## 共同特性
+
+两个发行包都内置同一套 `apps/server` 后端和 `apps/web/static` Web 资源，Server 仍是唯一状态源；队列、权限、礼物、平台连接和存档不会在前端重复实现。
+
+## 校验
+
+Release 同时提供：
+
+- `BiliPDJ-v2.0.1-Windows-Tk-Portable-x64.zip.sha256`
+- `BiliPDJ-v2.0.1-Web-Portable-x64.zip.sha256`
+
+可使用 SHA256 校验下载文件完整性。
 
 ## 升级说明
 
-Windows v1.0.10 用户可在程序“关于”页检查并自动安装 v1.0.11。
-
-手动下载文件：
-
-- `bilibili-danmuji-windows-x64-v1.0.11.zip`
-- `bilibili-danmuji-windows-x64-v1.0.11.zip.sha256`
+v1.x 用户建议先备份当前运行目录中的配置、Cookie、队列存档和日志，再解压 v2.0.1 到新的目录中运行。不要只复制单个 EXE，便携版需要保留 ZIP 解压后的完整目录结构。
 
 ---
 
-版本号：`v1.0.11`  
-发布日期：`2026-07-30`
+版本号：`v2.0.1`  
+发布日期：`2026-09-08`

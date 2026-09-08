@@ -1,8 +1,20 @@
 # BiliPDJ Windows
 
-`apps/windows/` 现在保存桌面端的真实实现，包括 Tk 控制台、Overlay、更新器、图标资源和 PyInstaller 配置。
+`apps/windows/` 保存桌面端真实实现，包括 Tk 控制台、Overlay、更新器、原生 Bilibili 扫码弹窗、图标资源和 PyInstaller 配置。
 
 旧的 `core.control_panel`、`core.overlay_host`、`core.update_*` 等路径仍保留兼容转发，但不再承载主要实现。
+
+## v2.0.1 Tk Windows 便携版
+
+正式客户包：
+
+```text
+BiliPDJ-v2.0.1-Windows-Tk-Portable-x64.zip
+```
+
+完整解压后直接运行 `main.exe`。冻结/便携模式会自动启用内置后端自动启动，因此用户无需安装 Python、无需另外运行 Server 命令。包内同时包含 Server、Web 静态资源、Overlay 和 Updater。
+
+源码开发模式仍保留原来的 `auto_start_backend` 配置行为，不强制自动启动。
 
 ## 源码启动
 

@@ -10,9 +10,22 @@
 
 ---
 
-BiliPDJ 采用单仓库 Monorepo。后端、Web 前端和 Windows 桌面端已经拥有独立目录和独立构建入口；排队、权限、礼物和平台连接只在 Server 维护一份状态，Windows、Web、OBS 通过 HTTP/WebSocket 使用同一状态源。
+BiliPDJ 采用单仓库 Monorepo。Server 是唯一状态源，Windows、Web、OBS 通过 HTTP/WebSocket 共用同一套队列、权限、礼物、平台连接和存档状态。
 
 > 当前正式接入的平台是 **Bilibili** 与 **抖音**。虎牙、快手、斗鱼、微信视频号目前仅保留配置位。
+
+## v2.0.1 客户便携版
+
+v2.0.1 提供两种 Windows x64 客户包，**都自带后端和 Web 资源，不需要安装 Python，也不需要手工启动 Server**。
+
+| 版本 | 发布文件 | 启动方式 | 后端行为 |
+|---|---|---|---|
+| Tk Windows 便携版 | `BiliPDJ-v2.0.1-Windows-Tk-Portable-x64.zip` | 解压后双击 `main.exe` | 桌面前端启动后自动拉起内置后端 |
+| Web 便携版 | `BiliPDJ-v2.0.1-Web-Portable-x64.zip` | 解压后双击 `BiliPDJ-Web.exe` | 启动器自动拉起内置后端，服务就绪后自动打开浏览器管理页 |
+
+两个 ZIP 都会同时发布 `.sha256` 校验文件。**请完整解压整个 ZIP，不要只复制单个 EXE。**
+
+Web 便携启动器如果发现对应端口已有后端运行，会直接复用现有服务；只有它自己启动的后端才会在“停止并退出”时被终止。
 
 ## 当前目录
 
@@ -20,24 +33,22 @@ BiliPDJ 采用单仓库 Monorepo。后端、Web 前端和 Windows 桌面端已�
 bilipdj/
 ├─ apps/
 │  ├─ server/                 # 后端真实实现
-│  │  ├─ server.py            # HTTP/WebSocket、队列和平台运行时
-│  │  ├─ bilibili_*.py
-│  │  ├─ douyin_*.py
-│  │  ├─ queue_*.py
-│  │  ├─ main.py              # 独立启动入口
-│  │  └─ Dockerfile
+│  │  ├─ server.py
+│  │  ├─ bilibili_*.py / douyin_*.py
+│  │  └─ main.py
 │  ├─ web/                    # Web 唯一源码目录
 │  │  ├─ static/              # HTML/CSS/JS
-│  │  └─ build.py
-│  └─ windows/                # 桌面端真实实现
+│  │  ├─ portable_launcher.py # Web 便携启动器
+│  │  ├─ web_portable.spec
+│  │  └─ package-portable.ps1
+│  └─ windows/                # Tk 桌面端真实实现
 │     ├─ control_panel.py
+│     ├─ portable_autostart.py
 │     ├─ overlay_host.py
 │     ├─ update_*.py / updater*.py
-│     ├─ assets/
 │     ├─ main.py
-│     ├─ package.ps1
 │     └─ *.spec
-├─ packages/shared/           # HTTP/WebSocket 契约与共享定义
+├─ packages/shared/
 ├─ core/                      # 旧导入/旧命令兼容层 + 兼容运行数据位置
 ├─ tests/
 └─ .github/workflows/
@@ -45,11 +56,9 @@ bilipdj/
 
 ### `core/` 现在是什么
 
-`core/` 不再是 Server 和 Windows 的主要实现目录。已经迁移的同名 Python 文件仅保留轻量兼容转发，因此旧代码中的 `import core.server`、`import core.control_panel` 仍可工作，旧命令 `python core/control_panel.py` 也会跳转到新入口。
+`core/` 不再是 Server 和 Windows 的主要实现目录。已经迁移的同名 Python 文件仅保留轻量兼容转发，因此旧代码中的 `import core.server`、`import core.control_panel` 仍可工作。
 
-为了避免一次迁移同时改变用户数据位置，源码模式下的 `config.yaml`、`quanxian.yaml`、`kaiguan.yaml`、`style.json` 以及 `core/cd/` 暂时继续使用原位置。后续可以单独迁移运行数据，不需要再次调整应用目录。
-
-`core/ui/` 已删除；Web 静态资源只有 `apps/web/static/` 一套。
+源码模式下的 `config.yaml`、`quanxian.yaml`、`kaiguan.yaml`、`style.json` 以及 `core/cd/` 暂时继续使用原位置。`core/ui/` 已删除；Web 静态资源只有 `apps/web/static/` 一套。
 
 ## Windows 桌面端
 
@@ -60,16 +69,10 @@ python -m pip install -r requirements.txt
 python -m apps.windows.main
 ```
 
-独立打包：
+本地打包：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\apps\windows\package.ps1 -InstallDependencies
-```
-
-兼容旧打包命令：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\package-windows-local.ps1 -InstallDependencies
 ```
 
 主要产物：
@@ -82,22 +85,22 @@ dist\bilipdj\updater.exe
 
 ## Web 前端
 
-Web UI 使用原生 HTML/CSS/JavaScript：
+静态 Web 构建：
 
 ```bash
 python apps/web/build.py
 ```
 
-产物：
+Windows Web 便携版构建：
 
-```text
-apps/web/dist/
+```powershell
+powershell -ExecutionPolicy Bypass -File .\apps\web\package-portable.ps1 -InstallDependencies
 ```
 
-Server 默认直接读取 `apps/web/static`，也可以指定构建产物：
+主要便携产物：
 
-```bash
-python -m apps.server.main --web-dir apps/web/dist
+```text
+dist\web-portable\bilipdj-web\BiliPDJ-Web.exe
 ```
 
 ## Server 后端
@@ -130,7 +133,6 @@ docker run --rm -p 9816:9816 bilipdj-server
 | `GET /api/runtime-status` | 运行状态 |
 | `GET /api/queue/state` | 队列状态 |
 | `ws://127.0.0.1:9816/ws` | WebSocket |
-| `ws://127.0.0.1:9816/danmu/sub` | WebSocket 别名 |
 
 ## 架构
 
@@ -156,17 +158,16 @@ flowchart LR
 | 权限体系 | `super_admin`、`admin`、`jianzhang`、`member`、`blacklist` |
 | 礼物插队 | 按礼物、电池数、次数、插入名次等条件控制 |
 | 队列存档 | 多槽位存档、切换与恢复 |
-| Windows 管理端 | 配置、日志、队列、权限、平台参数、样式、性能 |
-| Web / OBS | 浏览器展示、透明弹窗、实时 WebSocket 更新 |
+| Windows 管理端 | 配置、日志、队列、权限、平台参数、样式、性能、原生扫码登录 |
+| Web / OBS | 浏览器管理/展示、透明弹窗、实时 WebSocket 更新 |
 | 本地数据 | 配置、权限、日志和队列数据保存在本机 |
 
 ## CI / 构建验证
 
-- `.github/workflows/quality.yml`：编译 `apps/`、兼容 `core/`、脚本和测试，并运行完整回归测试
-- `.github/workflows/server.yml`：验证真实后端位于 `apps/server`，并检查旧 `core.server` 转发兼容
-- `.github/workflows/web.yml`：独立构建 `apps/web`
-- `.github/workflows/package-windows-x64.yml`：从 `apps/windows` 实际执行 Windows PyInstaller 打包
-- macOS 兼容构建的 spec 也已切到 `apps/*` 实现路径
+- `.github/workflows/quality.yml`：完整回归测试
+- `.github/workflows/server.yml`：验证 Server 入口和兼容层
+- `.github/workflows/web.yml`：独立构建 Web 静态资源
+- `.github/workflows/package-windows-x64.yml`：同时实际构建 Tk Windows Portable 与 Web Portable，并生成 ZIP/SHA256/Release
 
 ## 安全
 
