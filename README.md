@@ -10,7 +10,7 @@
 
 ---
 
-BiliPDJ 采用单仓库 Monorepo。**Server 是唯一业务状态源**；Windows、Web、OBS 与第三方客户端统一通过 HTTP / WebSocket 使用同一套队列、权限、礼物、平台连接、样式和存档状态。
+BiliPDJ 采用单仓库 Monorepo。**Server 是唯一业务状态源**；Windows、Web、OBS 与第三方客户端统一通过 HTTP / WebSocket 使用同一套队列、权限、礼物、平台连接、主题、样式和存档状态。
 
 > 当前正式接入的平台是 **Bilibili** 与 **抖音**。虎牙、快手、斗鱼、微信视频号目前仅保留配置位。
 
@@ -25,15 +25,17 @@ v2.0.4 提供两种 Windows x64 客户包，均自带后端和 Web 资源，不�
 
 发行版同时提供 `.sha256` 与 `update-manifest.json`。客户端更新时先读取 manifest，由清单确定准确包名、下载地址、大小与 SHA-256，再下载校验，不再根据版本号猜文件名。
 
-### v2.0.4 重点
+### 当前主要能力
 
-- Windows / Web 更新逻辑统一改为 `update-manifest.json`；
-- Web 样式页改为可视化设置并实时预览，保留高级 JSON；
+- Windows / Web 更新逻辑统一使用 `update-manifest.json`；
+- Web 样式页支持可视化设置与实时预览，保留高级 JSON；
+- Windows / Web 使用同一套 **BiliPDJ Aurora** 主题配置；
+- Windows 与 Web 可以相互导入/导出同一种主题 + OBS 样式配置文件；
 - Web 便携启动器明确为“后端服务器系统”，支持系统托盘隐藏/恢复；
 - Windows / Web 手动排队统一为“用户名必填 + 内容可选”；
 - 后端支持 Bilibili + 抖音同时激活，各平台当前最多一个直播间；
 - Windows / Web 导航统一为“更新软件 / 关于项目 / 支持我们”；
-- Web 支持跟随系统、白天、夜晚与自定义主题颜色。
+- Web 支持跟随系统、白天、夜晚和自定义颜色。
 
 ## 当前目录
 
@@ -42,21 +44,24 @@ bilipdj/
 ├─ apps/
 │  ├─ server/                 # 后端真实实现、唯一业务状态源
 │  │  ├─ server.py
+│  │  ├─ appearance_guard.py  # Windows/Web 通用主题与 profile API
 │  │  ├─ bilibili_*.py / douyin_*.py
 │  │  └─ main.py
 │  ├─ web/                    # Web 唯一源码目录
-│  │  ├─ static/              # HTML/CSS/JS
+│  │  ├─ static/              # HTML/CSS/JS + Aurora Web 主题层
 │  │  ├─ portable_launcher.py # Web 后端服务器系统启动器
 │  │  ├─ web_portable.spec
 │  │  └─ package-portable.ps1
 │  └─ windows/                # Tk 桌面前端真实实现
 │     ├─ control_panel.py
+│     ├─ unified_theme.py     # Aurora Windows 主题映射与跨端导入/导出
 │     ├─ overlay_host.py
 │     ├─ update_*.py / updater*.py
 │     ├─ main.py
 │     └─ *.spec
 ├─ packages/shared/           # 前端/第三方客户端共享契约
 ├─ core/                      # 旧兼容层、兼容运行数据 + 项目文档中心
+│  └─ appearance.json         # 源码模式默认通用主题配置
 ├─ scripts/                   # 必要构建、API 文档与安全检查脚本
 └─ .github/workflows/
 ```
@@ -67,7 +72,7 @@ bilipdj/
 
 项目的使用教程、更新日志、发行说明、贡献者说明和 AI 上下文也统一放在 `core/`，入口见 [core/README.md](./core/README.md)。
 
-源码模式下的 `config.yaml`、`quanxian.yaml`、`kaiguan.yaml`、`style.json` 与 `core/cd/` 暂时继续使用兼容位置。Web 静态资源只有 `apps/web/static/` 一套。
+源码模式下的 `config.yaml`、`quanxian.yaml`、`kaiguan.yaml`、`style.json`、`appearance.json` 与 `core/cd/` 使用兼容运行位置。Web 静态资源只有 `apps/web/static/` 一套。
 
 ## Windows 桌面端
 
@@ -112,6 +117,51 @@ powershell -ExecutionPolicy Bypass -File .\apps\web\package-portable.ps1 -Instal
 dist\web-portable\bilipdj-web\BiliPDJ-Web.exe
 ```
 
+## Windows / Web 通用主题与配置
+
+Windows Tk 与 Web 控制台共用 Server 管理的：
+
+```text
+appearance.json
+```
+
+它保存统一的 Aurora Design Tokens：白天/夜晚模式、品牌色、背景、侧栏、卡片、输入框、边框、文字、状态色、字体和字号等。
+
+OBS / 队列展示仍使用原来的：
+
+```text
+style.json
+```
+
+两者职责分开，避免破坏旧 OBS 样式，但用户导入/导出时会组合成同一种文件：
+
+```json
+{
+  "schema": 1,
+  "kind": "bilipdj-appearance-profile",
+  "appearance": { "...": "Windows / Web 主题" },
+  "display_style": { "...": "OBS / 队列样式" }
+}
+```
+
+因此：
+
+```text
+Windows 导出 → Web 可直接导入
+Web 导出     → Windows 可直接导入
+```
+
+对应接口：
+
+```text
+GET  /api/appearance
+POST /api/appearance
+GET  /api/appearance/profile
+POST /api/appearance/profile
+```
+
+旧 Web localStorage 主题与旧 `style.json` 仍提供迁移兼容。设置 ZIP / WebDAV 备份也会包含 `appearance.json`。
+
 ## Server 后端
 
 ```bash
@@ -144,6 +194,7 @@ docker run --rm -p 9816:9816 bilipdj-server
 | `GET /api/runtime-status` | 运行状态 |
 | `GET /api/queue/state` | 队列状态 |
 | `GET /api/platforms/active` | 多平台激活状态 |
+| `GET /api/appearance` | Windows/Web 通用主题 |
 | `ws://127.0.0.1:9816/ws` | WebSocket 实时事件 |
 
 ## 架构
@@ -153,14 +204,16 @@ flowchart LR
     B[Bilibili] --> S[apps/server]
     D[Douyin] --> S
     S --> Q[Queue / Permission / Gift / Archive]
+    S --> A[Appearance / Style]
     Q --> API[HTTP + WebSocket]
+    A --> API
     API --> W[apps/windows]
     API --> WEB[apps/web]
     API --> OBS[Overlay / OBS]
     API --> C[Third-party client]
 ```
 
-核心原则：**前端只负责交互、展示与调用 API，不复制 Server 的排队业务规则。**
+核心原则：**前端只负责交互、展示与调用 API，不复制 Server 的排队业务规则或持久化另一套主题状态。**
 
 ## CI / 构建验证
 
@@ -171,7 +224,7 @@ flowchart LR
 
 ### 本地测试目录
 
-仓库远端不再跟踪 `tests/`，`.gitignore` 会保留该目录为本地开发测试空间。已有本地测试文件可以继续使用，但不会被普通提交重新带回 GitHub。正式合并前以源码 smoke check、Server/Web 验证和实际 Windows Portable 构建作为远端验收链路。
+仓库远端不再跟踪 `tests/`，`.gitignore` 会保留该目录作为本地开发测试空间。已有本地测试文件可以继续使用，但不会被普通提交重新带回 GitHub。正式合并前以源码 smoke check、Server/Web 验证和实际 Windows Portable 构建作为远端验收链路。
 
 ## API 与第三方客户端
 
