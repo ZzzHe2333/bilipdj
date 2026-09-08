@@ -67,6 +67,7 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
             if os.path.basename(str(getattr(module, "__file__", ""))) != "control_panel.py":
                 return cls
             try:
+                from .bilibili_qr_dialog import patch_control_panel_qr_login
                 from .control_panel_guard import patch_control_panel_class
                 from .control_panel_features import patch_control_panel_features
                 from .control_panel_ui_finish import patch_control_panel_ui_finish
@@ -76,6 +77,7 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
                 install_style_save_transport()
                 patch_control_panel_class(cls)
                 patch_control_panel_features(cls)
+                patch_control_panel_qr_login(cls)
                 patch_control_panel_ui_finish(cls)
                 patch_control_panel_logging(cls)
             finally:

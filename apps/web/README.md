@@ -18,6 +18,10 @@ apps/web/static/
 python -m apps.server.main
 ```
 
+## 扫码登录边界
+
+Web 端继续保留 `config.html` 与 `cookie_login.html`，供纯 Web、Server 和 Docker 部署使用。Windows 桌面端已改为原生 Tk 二维码弹窗，不再为了扫码跳转浏览器；两种界面都复用 Server 的 `/api/bili/qr/start` 与 `/api/bili/qr/poll`，登录状态由后端统一持久化。
+
 ## 独立构建
 
 ```bash
