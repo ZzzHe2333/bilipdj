@@ -6,8 +6,7 @@ import time
 import unittest
 from pathlib import Path
 
-from core.websocket_performance_guard import patch_websocket_hub
-
+from apps.server.websocket_performance_guard import patch_websocket_hub
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -62,24 +61,19 @@ class RealtimePerformanceTests(unittest.TestCase):
         hub = _FakeHub()
         conn = _SlowConnection()
         hub.register(conn)
-
         first = json.dumps({"type": "QUEUE_UPDATE", "queue": ["A"]})
         second = json.dumps({"type": "QUEUE_UPDATE", "queue": ["B"]})
         latest = json.dumps({"type": "QUEUE_UPDATE", "queue": ["C"]})
-
         started_at = time.monotonic()
         hub.broadcast_text(None, first)
         self.assertLess(time.monotonic() - started_at, 0.1)
         self.assertTrue(conn.started.wait(0.5))
-
         hub.broadcast_text(None, second)
         hub.broadcast_text(None, latest)
         conn.release.set()
-
         deadline = time.monotonic() + 1.0
         while len(conn.sent) < 2 and time.monotonic() < deadline:
             time.sleep(0.01)
-
         self.assertGreaterEqual(len(conn.sent), 2)
         self.assertEqual(conn.sent[0], first)
         self.assertEqual(conn.sent[-1], latest)
@@ -87,12 +81,13 @@ class RealtimePerformanceTests(unittest.TestCase):
         hub.unregister(conn)
 
     def test_obs_performance_layer_is_loaded(self) -> None:
-        index = (ROOT / "core" / "ui" / "index.html").read_text(encoding="utf-8")
-        script = (ROOT / "core" / "ui" / "performance.js").read_text(encoding="utf-8")
+        web = ROOT / "apps" / "web" / "static"
+        index = (web / "index.html").read_text(encoding="utf-8")
+        script = (web / "performance.js").read_text(encoding="utf-8")
         self.assertIn('<script src="performance.js"></script>', index)
         self.assertIn("incrementalQueueRender: true", script)
         self.assertIn("scrollFpsLimit: 30", script)
-        self.assertIn("latest_queue_update", (ROOT / "core" / "websocket_performance_guard.py").read_text(encoding="utf-8"))
+        self.assertIn("latest_queue_update", (ROOT / "apps" / "server" / "websocket_performance_guard.py").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

@@ -4,8 +4,7 @@ import json
 import unittest
 from pathlib import Path
 
-from core.overlay_host import DEFAULT_STYLE, _display_queue_text
-
+from apps.windows.overlay_host import DEFAULT_STYLE, _display_queue_text
 
 REPO_DIR = Path(__file__).resolve().parents[1]
 
@@ -23,10 +22,10 @@ class QueueDisplayOptionsTests(unittest.TestCase):
         self.assertEqual(_display_queue_text(3, "玩家甲", True), "03  玩家甲")
 
     def test_display_controls_are_only_in_desktop_overlay_settings(self) -> None:
-        script = (REPO_DIR / "core" / "ui" / "myjs.js").read_text(encoding="utf-8")
-        login_page = (REPO_DIR / "core" / "ui" / "config.html").read_text(encoding="utf-8")
-        desktop_guard = (REPO_DIR / "core" / "control_panel_guard.py").read_text(encoding="utf-8")
-
+        web = REPO_DIR / "apps" / "web" / "static"
+        script = (web / "myjs.js").read_text(encoding="utf-8")
+        login_page = (web / "config.html").read_text(encoding="utf-8")
+        desktop_guard = (REPO_DIR / "apps" / "windows" / "control_panel_guard.py").read_text(encoding="utf-8")
         self.assertIn("PDJ_AutoScrollStep", script)
         self.assertIn("pdjDisplayOptions.show_sequence", script)
         self.assertNotIn('id="auto-scroll-switch"', login_page)
