@@ -45,6 +45,10 @@ HTTP_ENDPOINTS = [
     ep("POST", "/api/kaiguan", "保存功能开关", body='{"paidui":true,"guanfu_paidui":true}', response='{"status":"ok"}'),
     ep("GET", "/api/style", "读取队列显示样式", response='{"status":"ok","text_color":"#ffffff",...}'),
     ep("POST", "/api/style", "保存队列显示样式", body='{"text_color":"#ffffff","queue_font_size":50}', response='{"status":"ok"}'),
+    ep("GET", "/api/appearance", "读取 Windows/Web 通用界面主题", response='{"status":"ok","exists":true,"appearance":{"schema":1,"design":"aurora","mode":"dark","dark":{...},"light":{...}}}', notes="由 Server 的 appearance.json 统一管理。Windows/Web 应读取同一份配置，不再各自维护独立主题文件。"),
+    ep("POST", "/api/appearance", "保存 Windows/Web 通用界面主题", body='{"appearance":{"schema":1,"mode":"dark","font_family":"Microsoft YaHei UI","font_size":10,"radius":10,"dark":{...},"light":{...}}}', response='{"status":"ok","appearance":{...}}', notes="保存后 Windows/Web 可在下次刷新或轮询时同步。"),
+    ep("GET", "/api/appearance/profile", "导出 Windows/Web/OBS 通用配置", response='{"schema":1,"kind":"bilipdj-appearance-profile","appearance":{...},"display_style":{...}}', notes="同一 JSON 文件可在 Windows 或 Web 端导出，再直接在另一端导入。display_style 对应现有 OBS/style.json。"),
+    ep("POST", "/api/appearance/profile", "导入 Windows/Web/OBS 通用配置", body='{"schema":1,"kind":"bilipdj-appearance-profile","appearance":{...},"display_style":{...}}', response='{"status":"ok","kind":"bilipdj-appearance-profile","appearance":{...},"display_style":{...}}', notes="兼容完整 profile、直接 appearance.json、旧 Web localStorage 主题对象和旧 style.json。"),
     ep("GET", "/api/bili/qr/start", "创建 Bilibili 扫码二维码", response='{"data":{"qrcode_key":"...","qr_image_base64":"...","url":"..."}}'),
     ep("POST", "/api/bili/qr/poll", "轮询 Bilibili 扫码状态", body='{"qrcode_key":"..."}', response='{"data":{"code":0,"cookie":"...","uid":123}}', notes="code=86101 未扫码；86090 已扫码待确认；86038 失效；0 成功。"),
     ep("GET", "/api/backup/settings/config", "读取统一设置备份配置", response='{"status":"ok","config":{"backend":"webdav|local|smb",...}}'),
@@ -144,7 +148,17 @@ def render_ws() -> str:
 
 
 def render_readme() -> str:
-    return """# BiliPDJ 后端开放接口说明\n\n本目录由 `python scripts/generate_api_docs.py` 自动生成，并被仓库根 `.gitignore` 的 `/api/` 规则排除。\n\n- `http.md`：HTTP/JSON 接口、参数、curl 示例和返回说明。\n- `websocket.md`：WebSocket 入口与常见消息。\n\n安全规则：管理配置、登录 Cookie、备份、权限、开关、队列修改、控制台日志/性能等接口只允许本机访问。只读队列/运行状态/WebSocket 是否可从 LAN 访问取决于 Server 的监听配置和运行时安全保护。\n\n接口发生变化后重新运行生成器；测试会检查 Server 源码中的开放路由是否存在未登记项。\n"""
+    return """# BiliPDJ 后端开放接口说明
+
+本目录由 `python scripts/generate_api_docs.py` 自动生成，并被仓库根 `.gitignore` 的 `/api/` 规则排除。
+
+- `http.md`：HTTP/JSON 接口、参数、curl 示例和返回说明。
+- `websocket.md`：WebSocket 入口与常见消息。
+
+安全规则：管理配置、登录 Cookie、备份、权限、开关、队列修改、主题/配置导入导出、控制台日志/性能等接口只允许本机访问。只读队列/运行状态/WebSocket 是否可从 LAN 访问取决于 Server 的监听配置和运行时安全保护。
+
+接口发生变化后重新运行生成器；测试会检查 Server 源码中的开放路由是否存在未登记项。
+"""
 
 
 def generate(repo_root: Path, output: Path | None = None) -> Path:
