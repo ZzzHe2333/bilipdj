@@ -22,8 +22,8 @@ def load_module(name: str, path: Path):
     return module
 
 
-update_client = load_module("update_client_under_test", ROOT / "core" / "update_client.py")
-updater = load_module("updater_under_test", ROOT / "core" / "updater.py")
+update_client = load_module("update_client_under_test", ROOT / "apps" / "windows" / "update_client.py")
+updater = load_module("updater_under_test", ROOT / "apps" / "windows" / "updater.py")
 
 
 class FakeRunningProcess:
