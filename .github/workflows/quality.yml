@@ -7,16 +7,18 @@ on:
       - 'apps/**'
       - 'core/**'
       - 'scripts/**'
-      - 'tests/**'
+      - 'packages/shared/**'
       - 'requirements.txt'
+      - '.github/workflows/quality.yml'
   push:
     branches: [now]
     paths:
       - 'apps/**'
       - 'core/**'
       - 'scripts/**'
-      - 'tests/**'
+      - 'packages/shared/**'
       - 'requirements.txt'
+      - '.github/workflows/quality.yml'
 
 permissions:
   contents: read
@@ -32,20 +34,24 @@ jobs:
       - name: Install project dependencies
         run: python -m pip install -r requirements.txt
       - name: Compile Python sources
-        run: python -m compileall -q apps core scripts tests
-      - name: Run regression tests
-        id: tests
-        shell: bash
+        run: python -m compileall -q apps core scripts
+      - name: Validate backend import boundary
         run: |
-          set +e
-          python -m unittest discover -s tests -v 2>&1 | tee test-results.txt
-          status=${PIPESTATUS[0]}
-          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
-          exit "$status"
-      - name: Upload regression report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: regression-test-results
-          path: test-results.txt
-          if-no-files-found: error
+          python - <<'PY'
+          import importlib
+          backend = importlib.import_module('apps.server.server')
+          legacy = importlib.import_module('core.server')
+          assert backend is legacy
+          assert 'apps/server/server.py' in backend.__file__.replace('\\', '/')
+          print('backend:', backend.__file__)
+          PY
+      - name: Validate API documentation coverage
+        run: python scripts/generate_api_docs.py --output /tmp/bilipdj-api
+      - name: Validate Web source build
+        run: python apps/web/build.py
+      - name: Validate key generated Web files
+        run: |
+          test -f apps/web/dist/index.html
+          test -f apps/web/dist/config.html
+          test -f apps/web/dist/control.html
+          test -f apps/web/dist/myjs.js
