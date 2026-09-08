@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+# Customer-facing frozen builds are portable bundles: launching the Tk frontend
+# must always bring up its embedded backend automatically. Source/developer runs
+# keep the existing configurable auto-start behavior.
+if getattr(sys, "frozen", False):
+    os.environ.setdefault("BILIPDJ_PORTABLE_AUTO_BACKEND", "1")
 
 from apps.server import server as backend  # noqa: E402
 from apps.server.main import configure_web_assets  # noqa: E402

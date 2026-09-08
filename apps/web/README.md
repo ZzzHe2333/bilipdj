@@ -2,6 +2,31 @@
 
 Web 管理/展示端的唯一源码目录。项目 Web UI 使用原生 HTML/CSS/JavaScript，不依赖 Node。
 
+## v2.0.1 Web 便携版
+
+正式客户包：
+
+```text
+BiliPDJ-v2.0.1-Web-Portable-x64.zip
+```
+
+完整解压后直接运行 `BiliPDJ-Web.exe`。启动器会：
+
+1. 读取便携目录中的 Server 配置并确定端口；
+2. 检查本机对应后端是否已运行；
+3. 未运行时自动以自身 `--backend` 模式启动内置 Server；
+4. 等待 `/health` 就绪；
+5. 自动打开 `http://127.0.0.1:<port>/config`；
+6. 退出启动器时关闭它自己启动的后端。
+
+该包已经通过 PyInstaller 内置 `apps/server` 和 `apps/web/static`，用户无需安装 Python。
+
+本地构建 Web 便携版：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\apps\web\package-portable.ps1 -InstallDependencies
+```
+
 ## 开发
 
 源文件位于：
@@ -18,11 +43,7 @@ apps/web/static/
 python -m apps.server.main
 ```
 
-## 扫码登录边界
-
-Web 端继续保留 `config.html` 与 `cookie_login.html`，供纯 Web、Server 和 Docker 部署使用。Windows 桌面端已改为原生 Tk 二维码弹窗，不再为了扫码跳转浏览器；两种界面都复用 Server 的 `/api/bili/qr/start` 与 `/api/bili/qr/poll`，登录状态由后端统一持久化。
-
-## 独立构建
+## 独立静态构建
 
 ```bash
 python apps/web/build.py
