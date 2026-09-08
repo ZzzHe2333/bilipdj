@@ -32,13 +32,12 @@ class UpdateNetworkTests(unittest.TestCase):
             self.assertEqual(update_network.settings_path(root), root / "core" / "cd" / "update_settings.json")
 
     def test_bypass_opener_does_not_use_system_proxy_mapping(self) -> None:
-        with mock.patch.object(
-            update_network.urllib.request,
-            "ProxyHandler",
-            wraps=update_network.urllib.request.ProxyHandler,
-        ) as proxy_handler:
+        with mock.patch.object(update_network.urllib.request, "build_opener") as build_opener:
             update_network.build_opener({"bypass_system_proxy": True})
-        proxy_handler.assert_called_once_with({})
+        build_opener.assert_called_once()
+        handler = build_opener.call_args.args[0]
+        self.assertIsInstance(handler, update_network.urllib.request.ProxyHandler)
+        self.assertEqual(handler.proxies, {})
 
 
 class CategorizedLogTests(unittest.TestCase):
