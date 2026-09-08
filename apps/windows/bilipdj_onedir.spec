@@ -14,7 +14,7 @@ hiddenimports = [
     "apps.server.douyin_protocol", "apps.server.douyin_live_pb2", "apps.server.log_manager",
     "apps.server.queue_logic_guard", "apps.server.queue_rank_query", "apps.server.server_runtime_guard",
     "apps.server.settings_backup", "apps.server.settings_backup_bugfix_guard", "apps.server.settings_mtime_guard", "apps.server.settings_storage_guard",
-    "apps.server.style_option_guard", "apps.server.web_queue_layout", "apps.server.websocket_performance_guard",
+    "apps.server.style_option_guard", "apps.server.web_control_guard", "apps.server.web_queue_layout", "apps.server.websocket_performance_guard",
     "apps.windows.control_panel", "apps.windows.control_panel_bootstrap", "apps.windows.control_panel_guard",
     "apps.windows.control_panel_features", "apps.windows.control_panel_ui_finish", "apps.windows.gui_log_sink",
     "apps.windows.bilibili_qr_dialog", "apps.windows.portable_autostart", "apps.windows.style_save_transport",
