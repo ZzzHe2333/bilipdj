@@ -47,13 +47,49 @@
       </section>
 
       <section class="view" id="view-settings">
-        <div class="page-head"><div><h1>设置</h1><p>账号扫码、备份、开关、黑名单和样式统一放在这里。</p></div></div>
-        <div class="subtabs"><button class="subtab active" data-settings="account">账号与备份</button><button class="subtab" data-settings="switches">功能开关</button><button class="subtab" data-settings="blacklist">黑名单</button><button class="subtab" data-settings="style">样式</button><button class="subtab" data-settings="raw">完整配置</button></div>
+        <div class="page-head"><div><h1>设置</h1><p>平台参数、账号扫码、礼物插队、备份、开关、黑名单和样式统一放在这里。</p></div></div>
+        <div class="subtabs">
+          <button class="subtab active" data-settings="account">账号与备份</button>
+          <button class="subtab" data-settings="platform">平台参数</button>
+          <button class="subtab" data-settings="gifts">B站礼物</button>
+          <button class="subtab" data-settings="switches">功能开关</button>
+          <button class="subtab" data-settings="blacklist">黑名单</button>
+          <button class="subtab" data-settings="style">样式</button>
+          <button class="subtab" data-settings="raw">完整配置</button>
+        </div>
         <div class="settings-pane active" id="settings-account"><iframe class="config-frame" src="/config" title="账号与备份"></iframe></div>
+        <div class="settings-pane" id="settings-platform">
+          <div class="card form-grid">
+            <label><span>当前平台</span><select id="platform-select"><option value="bilibili">Bilibili</option><option value="douyin">抖音</option><option value="huya">虎牙（预留）</option><option value="kuaishou">快手（预留）</option><option value="douyu">斗鱼（预留）</option><option value="weixin_videohao">微信视频号（预留）</option></select></label>
+            <label><span>B站直播间号</span><input id="platform-bili-room" inputmode="numeric" placeholder="3049445"></label>
+            <label><span>B站登录 UID</span><input id="platform-bili-uid" inputmode="numeric" placeholder="扫码后会自动写入"></label>
+            <label><span>抖音 Live ID</span><input id="platform-douyin-live" placeholder="直播间 Live ID"></label>
+            <label><span>抖音启用</span><input id="platform-douyin-enabled" type="checkbox"></label>
+            <label class="wide"><span>抖音 Cookie</span><textarea id="platform-douyin-cookie" rows="4" placeholder="需要时填写抖音 Cookie"></textarea></label>
+          </div>
+          <div class="toolbar"><button id="platform-save" class="button">保存平台参数</button><button id="platform-refresh" class="button ghost">刷新</button></div><div id="platform-status" class="status"></div>
+        </div>
+        <div class="settings-pane" id="settings-gifts">
+          <div class="card">
+            <div class="form-grid">
+              <label><span>启用 B站礼物插队</span><input id="gift-enabled" type="checkbox"></label>
+              <label><span>最低电池数</span><input id="gift-min-batteries" type="number" min="0" value="0"></label>
+              <label><span>每次可排人数</span><input id="gift-slots" type="number" min="1" value="1"></label>
+              <label><span>插入名次</span><input id="gift-rank" type="number" min="0" value="1"></label>
+              <label><span>恢复名次</span><input id="gift-saved-rank" type="number" min="1" value="1"></label>
+              <label><span>允许多次送礼累加</span><input id="gift-multiple" type="checkbox"></label>
+              <label><span>仅允许礼物排队</span><input id="gift-only" type="checkbox"></label>
+              <label class="wide"><span>指定礼物名称</span><textarea id="gift-names" rows="4" placeholder="每行或逗号分隔，例如：辣条"></textarea></label>
+            </div>
+            <div class="toolbar"><button id="gift-save" class="button">保存礼物规则</button><button id="gift-refresh" class="button ghost">刷新状态</button></div>
+            <div id="gift-status" class="status"></div>
+            <details class="details"><summary>当前礼物运行状态 / 礼物目录</summary><pre id="gift-state" class="json-output"></pre></details>
+          </div>
+        </div>
         <div class="settings-pane" id="settings-switches"><div class="card"><div id="switch-grid" class="switch-grid"></div><div class="toolbar"><button id="switch-save" class="button">保存开关</button></div><div id="switch-status" class="status"></div></div></div>
         <div class="settings-pane" id="settings-blacklist"><div class="card"><div class="queue-add"><input id="blacklist-name" placeholder="用户名"><button id="blacklist-add" class="button">加入黑名单</button><button id="blacklist-clear" class="button danger">清空</button></div><ul id="blacklist-list" class="list"></ul><div id="blacklist-status" class="status"></div></div></div>
         <div class="settings-pane" id="settings-style"><div class="card"><p class="hint">完整编辑 style.json 对应配置。保存后队列看板会立即刷新。</p><textarea id="style-json" class="code-editor"></textarea><button id="style-save" class="button">保存样式</button><div id="style-status" class="status"></div></div></div>
-        <div class="settings-pane" id="settings-raw"><div class="card"><p class="hint">高级配置编辑器。包含平台参数和后端设置，保存前请确认 JSON 格式。</p><textarea id="config-json" class="code-editor tall"></textarea><button id="config-save" class="button">保存完整配置</button><div id="config-status" class="status"></div></div></div>
+        <div class="settings-pane" id="settings-raw"><div class="card"><p class="hint">高级配置编辑器。包含 Server、平台和其他高级设置，保存前请确认 JSON 格式。</p><textarea id="config-json" class="code-editor tall"></textarea><button id="config-save" class="button">保存完整配置</button><div id="config-status" class="status"></div></div></div>
       </section>
 
       <section class="view" id="view-overlay">
@@ -85,7 +121,7 @@
 
       <section class="view" id="view-about">
         <div class="page-head"><div><h1>关于</h1><p>弹幕排队姬 Web 控制台</p></div></div>
-        <div class="card about"><h2>弹幕排队姬</h2><p>面向 Bilibili / 抖音直播间的弹幕排队管理工具。后端是唯一业务状态源，Web 与 Windows 客户端只负责管理和展示。</p><p>本软件免费、源码公开。若有人单独售卖软件本体，请谨慎核实来源。</p><div class="toolbar"><a class="button" href="https://github.com/ZzzHe2333/bilipdj" target="_blank" rel="noopener">GitHub 仓库</a><a class="button ghost" href="/config" target="_blank">原配置页</a></div></div>
+        <div class="card about"><h2>弹幕排队姬</h2><p>面向 Bilibili / 抖音直播间的弹幕排队管理工具。后端是唯一业务状态源，Web 与 Windows 客户端只负责管理和展示。</p><p>Web 控制台依赖正在运行的后端，因此服务启动/停止由 Web Portable 启动器负责；浏览器页负责与 Windows Tk 对齐的日常管理功能。</p><p>本软件免费、源码公开。若有人单独售卖软件本体，请谨慎核实来源。</p><div class="toolbar"><a class="button" href="https://github.com/ZzzHe2333/bilipdj" target="_blank" rel="noopener">GitHub 仓库</a><a class="button ghost" href="/config" target="_blank">原配置页</a></div></div>
       </section>
     </main>
   </div>
