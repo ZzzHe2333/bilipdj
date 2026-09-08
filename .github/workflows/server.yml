@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
   push:
     branches: [now]
-    paths: ['apps/server/**', 'apps/web/**', 'core/**', 'scripts/redtv_issue121_guard.py', 'requirements.txt']
+    paths: ['apps/server/**', 'apps/web/**', 'core/**', 'scripts/redtv_issue121_guard.py', 'scripts/issue123_regression_guard.py', 'requirements.txt']
   pull_request:
-    paths: ['apps/server/**', 'apps/web/**', 'core/**', 'scripts/redtv_issue121_guard.py', 'requirements.txt']
+    paths: ['apps/server/**', 'apps/web/**', 'core/**', 'scripts/redtv_issue121_guard.py', 'scripts/issue123_regression_guard.py', 'requirements.txt']
 
 jobs:
   validate-server:
@@ -17,9 +17,11 @@ jobs:
         with:
           python-version: '3.11'
       - run: python -m pip install -r requirements.txt
-      - run: python -m compileall -q apps/server core scripts/redtv_issue121_guard.py
+      - run: python -m compileall -q apps/server core scripts/redtv_issue121_guard.py scripts/issue123_regression_guard.py
       - name: Red TV issue 121 regression guard
         run: python scripts/redtv_issue121_guard.py
+      - name: Issue 123 regression guard
+        run: python scripts/issue123_regression_guard.py
       - name: Validate migrated backend entry point
         run: |
           python - <<'PY'
