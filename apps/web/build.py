@@ -14,7 +14,15 @@ def build() -> Path:
     if DIST_DIR.exists():
         shutil.rmtree(DIST_DIR)
     shutil.copytree(SOURCE_DIR, DIST_DIR)
-    required = ("index.html", "config.html", "myjs.js", "moren.css")
+    required = (
+        "index.html",
+        "config.html",
+        "myjs.js",
+        "moren.css",
+        "control.html",
+        "control.js",
+        "support_us.js",
+    )
     missing = [name for name in required if not (DIST_DIR / name).is_file()]
     if missing:
         raise RuntimeError(f"Web build is incomplete; missing: {', '.join(missing)}")
