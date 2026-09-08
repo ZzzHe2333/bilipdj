@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,6 +17,8 @@ class WebControlPanelTests(unittest.TestCase):
         html = (STATIC / "control.html").read_text(encoding="utf-8")
         for label in ("运行日志", "当前排队", "设置", "透明窗口 / OBS", "权限", "性能", "更新软件", "关于"):
             self.assertIn(label, html)
+        for settings_label in ("账号与备份", "平台参数", "B站礼物", "功能开关", "黑名单", "样式", "完整配置"):
+            self.assertIn(settings_label, html)
         self.assertIn('src="/config"', html)
         self.assertIn('src="/index"', html)
 
@@ -33,10 +37,32 @@ class WebControlPanelTests(unittest.TestCase):
             "/api/quanxian",
             "/api/kaiguan",
             "/api/blacklist/state",
+            "/api/gifts/state",
             "/api/style",
             "/api/config",
         ):
             self.assertIn(route, source)
+        for field in (
+            "gift_queue_enabled",
+            "gift_queue_names",
+            "gift_queue_min_batteries",
+            "gift_queue_slots_per_gift",
+            "gift_queue_insert_rank",
+            "gift_queue_only",
+        ):
+            self.assertIn(field, source)
+
+    def test_control_javascript_has_valid_syntax_when_node_is_available(self) -> None:
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node is unavailable")
+        completed = subprocess.run(
+            [node, "--check", str(STATIC / "control.js")],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr or completed.stdout)
 
     def test_control_backend_is_local_only_and_root_maps_to_control(self) -> None:
         source = (ROOT / "apps" / "server" / "web_control_guard.py").read_text(encoding="utf-8")
