@@ -87,6 +87,7 @@ def configure_runtime_paths(module: Any = server) -> Any:
     module.QUANXIAN_PATH = yaml_dir / "quanxian.yaml"
     module.KAIGUAN_PATH = yaml_dir / "kaiguan.yaml"
     module.STYLE_PATH = yaml_dir / "style.json"
+    module.APPEARANCE_PATH = yaml_dir / "appearance.json"
     module.LIVE_STYLE_CSS_PATH = ui_dir / "moren.css"
     module._CONFIG_LOCK_PATH = yaml_dir / ".config.lock"
     return module
@@ -100,6 +101,7 @@ from . import settings_mtime_guard as _settings_mtime_guard  # noqa: E402
 from . import settings_storage_guard as _settings_storage_guard  # noqa: E402
 from . import web_control_guard as _web_control_guard  # noqa: E402
 from . import issue79_guard as _issue79_guard  # noqa: E402
+from . import appearance_guard as _appearance_guard  # noqa: E402
 
 _settings_backup.install_settings_backup(server)
 _settings_mtime_guard.install_settings_mtime_guard(_settings_backup)
@@ -107,5 +109,6 @@ _settings_storage_guard.install_settings_storage_guard(_settings_backup, server)
 _settings_backup_bugfix_guard.install_settings_backup_bugfix_guard(_settings_backup)
 _web_control_guard.install_web_control_guard(server)
 _issue79_guard.install_issue79_guard(server)
+_appearance_guard.install_appearance_guard(server)
 
 __all__ = ["REPO_ROOT", "configure_runtime_paths", "server"]
