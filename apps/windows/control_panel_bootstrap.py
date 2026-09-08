@@ -103,6 +103,7 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
                 from .control_panel_features import patch_control_panel_features
                 from .control_panel_ui_finish import patch_control_panel_ui_finish
                 from .gui_log_sink import patch_control_panel_logging
+                from .huya_control_guard import patch_control_panel_huya
                 from .issue79_features import patch_control_panel_issue79
                 from .portable_autostart import patch_control_panel_portable_autostart
                 from .style_save_transport import install_style_save_transport
@@ -123,6 +124,7 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
                 # Navigation/queue normalization stays before the final shared
                 # theme layer so the theme can style the final widget tree.
                 patch_control_panel_issue79(cls)
+                patch_control_panel_huya(cls)
                 patch_control_panel_unified_theme(cls)
                 _install_final_support_renderer(cls, module)
             finally:

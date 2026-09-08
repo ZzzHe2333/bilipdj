@@ -101,6 +101,7 @@ from . import settings_mtime_guard as _settings_mtime_guard  # noqa: E402
 from . import settings_storage_guard as _settings_storage_guard  # noqa: E402
 from . import web_control_guard as _web_control_guard  # noqa: E402
 from . import issue79_guard as _issue79_guard  # noqa: E402
+from . import huya_runtime_guard as _huya_runtime_guard  # noqa: E402
 from . import appearance_guard as _appearance_guard  # noqa: E402
 
 # appearance.json is a first-class cross-client setting and participates in the
@@ -123,6 +124,7 @@ _settings_mtime_guard.install_settings_mtime_guard(_settings_backup)
 _settings_storage_guard.install_settings_storage_guard(_settings_backup, server)
 _settings_backup_bugfix_guard.install_settings_backup_bugfix_guard(_settings_backup)
 _web_control_guard.install_web_control_guard(server)
+_huya_runtime_guard.install_huya_runtime_guard(server, _issue79_guard)
 _issue79_guard.install_issue79_guard(server)
 _appearance_guard.install_appearance_guard(server)
 
