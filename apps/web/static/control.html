@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>弹幕排队姬 Web 控制台</title>
+  <link rel="stylesheet" href="control.css">
+</head>
+<body>
+<div class="app-shell">
+  <header class="topbar">
+    <div class="brand"><strong>弹幕排队姬</strong><span id="version">Web 控制台</span></div>
+    <div class="health"><span id="health-dot" class="dot"></span><span id="health-text">正在连接后端…</span></div>
+    <div class="top-actions"><a class="button ghost" href="/index" target="_blank">队列看板</a><button id="refresh-all" class="button">刷新状态</button></div>
+  </header>
+  <div class="layout">
+    <nav class="sidebar" aria-label="控制台导航">
+      <button class="nav active" data-view="logs">运行日志</button>
+      <button class="nav" data-view="queue">当前排队</button>
+      <button class="nav" data-view="settings">设置</button>
+      <button class="nav" data-view="overlay">透明窗口 / OBS</button>
+      <button class="nav" data-view="permissions">权限</button>
+      <button class="nav" data-view="performance">性能</button>
+      <button class="nav" data-view="update">更新软件</button>
+      <button class="nav" data-view="about">关于</button>
+    </nav>
+    <main class="content">
+      <section class="view active" id="view-logs">
+        <div class="page-head"><div><h1>运行日志</h1><p>读取后端最近日志，不修改日志文件。</p></div></div>
+        <div class="toolbar">
+          <select id="log-kind"><option value="all">全部</option><option value="common">普通</option><option value="error">错误</option><option value="update">更新</option></select>
+          <input id="log-search" placeholder="筛选关键字">
+          <label class="check"><input id="log-auto" type="checkbox" checked> 自动刷新</label>
+          <button id="log-refresh" class="button">刷新</button>
+          <button id="log-clear" class="button ghost">清空显示</button>
+        </div>
+        <pre id="log-output" class="log-output">正在读取日志…</pre>
+      </section>
+
+      <section class="view" id="view-queue">
+        <div class="page-head"><div><h1>当前排队</h1><p>队列数据和操作仍由 Server 统一处理。</p></div><div class="toolbar compact"><select id="queue-slot"></select><button id="queue-switch" class="button">切换槽位</button><button id="queue-reload" class="button ghost">从存档重载</button></div></div>
+        <div class="card">
+          <div class="queue-add"><input id="queue-entry" placeholder="新增排队内容"><input id="queue-after" type="number" min="0" value="0" title="插入在第几项之后，0=队首"><button id="queue-insert" class="button">插入</button><button id="queue-clear" class="button danger">清空队列</button></div>
+          <div class="table-wrap"><table><thead><tr><th>#</th><th>内容</th><th>最近操作</th><th>操作</th></tr></thead><tbody id="queue-body"></tbody></table></div>
+          <div id="queue-status" class="status"></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-settings">
+        <div class="page-head"><div><h1>设置</h1><p>账号扫码、备份、开关、黑名单和样式统一放在这里。</p></div></div>
+        <div class="subtabs"><button class="subtab active" data-settings="account">账号与备份</button><button class="subtab" data-settings="switches">功能开关</button><button class="subtab" data-settings="blacklist">黑名单</button><button class="subtab" data-settings="style">样式</button><button class="subtab" data-settings="raw">完整配置</button></div>
+        <div class="settings-pane active" id="settings-account"><iframe class="config-frame" src="/config" title="账号与备份"></iframe></div>
+        <div class="settings-pane" id="settings-switches"><div class="card"><div id="switch-grid" class="switch-grid"></div><div class="toolbar"><button id="switch-save" class="button">保存开关</button></div><div id="switch-status" class="status"></div></div></div>
+        <div class="settings-pane" id="settings-blacklist"><div class="card"><div class="queue-add"><input id="blacklist-name" placeholder="用户名"><button id="blacklist-add" class="button">加入黑名单</button><button id="blacklist-clear" class="button danger">清空</button></div><ul id="blacklist-list" class="list"></ul><div id="blacklist-status" class="status"></div></div></div>
+        <div class="settings-pane" id="settings-style"><div class="card"><p class="hint">完整编辑 style.json 对应配置。保存后队列看板会立即刷新。</p><textarea id="style-json" class="code-editor"></textarea><button id="style-save" class="button">保存样式</button><div id="style-status" class="status"></div></div></div>
+        <div class="settings-pane" id="settings-raw"><div class="card"><p class="hint">高级配置编辑器。包含平台参数和后端设置，保存前请确认 JSON 格式。</p><textarea id="config-json" class="code-editor tall"></textarea><button id="config-save" class="button">保存完整配置</button><div id="config-status" class="status"></div></div></div>
+      </section>
+
+      <section class="view" id="view-overlay">
+        <div class="page-head"><div><h1>透明窗口 / OBS</h1><p>Web 端使用浏览器源实现透明队列展示。</p></div><div class="toolbar compact"><button id="copy-overlay" class="button">复制 OBS 地址</button><a class="button ghost" href="/index" target="_blank">新窗口打开</a></div></div>
+        <div class="card"><div class="url-box" id="overlay-url"></div><p class="hint">OBS → 浏览器源 → URL 填上方地址。背景透明度、字体、描边等由“设置 → 样式”控制。</p><div class="preview"><iframe src="/index" title="OBS 队列预览"></iframe></div></div>
+      </section>
+
+      <section class="view" id="view-permissions">
+        <div class="page-head"><div><h1>权限</h1><p>每行一个用户名；保存后后端立即重新加载。</p></div></div>
+        <div class="permission-grid">
+          <label class="card"><strong>超级管理员</strong><textarea id="perm-super_admin"></textarea></label>
+          <label class="card"><strong>管理员</strong><textarea id="perm-admin"></textarea></label>
+          <label class="card"><strong>舰长</strong><textarea id="perm-jianzhang"></textarea></label>
+          <label class="card"><strong>成员</strong><textarea id="perm-member"></textarea></label>
+        </div>
+        <button id="perm-save" class="button">保存权限</button><div id="perm-status" class="status"></div>
+      </section>
+
+      <section class="view" id="view-performance">
+        <div class="page-head"><div><h1>性能</h1><p>系统、进程、连接和弹幕 Relay 状态。</p></div><button id="perf-refresh" class="button">刷新</button></div>
+        <div id="perf-cards" class="metric-grid"></div>
+        <div class="card"><h2>运行状态</h2><pre id="perf-detail" class="json-output"></pre></div>
+      </section>
+
+      <section class="view" id="view-update">
+        <div class="page-head"><div><h1>更新软件</h1><p>Web 控制台可检查 GitHub 最新版本；Web Portable 更新采用下载新包替换方式。</p></div></div>
+        <div class="card"><div class="metric-grid"><div class="metric"><span>当前版本</span><strong id="update-current">-</strong></div><div class="metric"><span>最新版本</span><strong id="update-latest">-</strong></div></div><div class="toolbar"><button id="update-check" class="button">检查更新</button><a id="update-open" class="button ghost disabled" target="_blank" rel="noopener">打开 Release</a></div><div id="update-status" class="status"></div><pre id="update-notes" class="notes"></pre></div>
+      </section>
+
+      <section class="view" id="view-about">
+        <div class="page-head"><div><h1>关于</h1><p>弹幕排队姬 Web 控制台</p></div></div>
+        <div class="card about"><h2>弹幕排队姬</h2><p>面向 Bilibili / 抖音直播间的弹幕排队管理工具。后端是唯一业务状态源，Web 与 Windows 客户端只负责管理和展示。</p><p>本软件免费、源码公开。若有人单独售卖软件本体，请谨慎核实来源。</p><div class="toolbar"><a class="button" href="https://github.com/ZzzHe2333/bilipdj" target="_blank" rel="noopener">GitHub 仓库</a><a class="button ghost" href="/config" target="_blank">原配置页</a></div></div>
+      </section>
+    </main>
+  </div>
+</div>
+<script src="control.js"></script>
+</body>
+</html>
