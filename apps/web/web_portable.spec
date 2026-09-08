@@ -6,6 +6,7 @@ project_root = spec_dir.parents[1]
 
 datas = [
     (str(project_root / "VERSION"), "."),
+    (str(project_root / "core" / "appearance.json"), "."),
     (str(project_root / "apps" / "web" / "static"), "apps/web/static"),
 ]
 
@@ -16,7 +17,7 @@ hiddenimports = [
     "apps.server.queue_logic_guard", "apps.server.queue_rank_query", "apps.server.server_runtime_guard",
     "apps.server.settings_backup", "apps.server.settings_backup_bugfix_guard", "apps.server.settings_mtime_guard", "apps.server.settings_storage_guard",
     "apps.server.style_option_guard", "apps.server.web_control_guard", "apps.server.web_queue_layout", "apps.server.websocket_performance_guard",
-    "apps.server.issue79_guard",
+    "apps.server.issue79_guard", "apps.server.appearance_guard",
     "qrcode", "qrcode.main", "qrcode.constants", "qrcode.util", "qrcode.image.base",
     "qrcode.image.pil", "qrcode.image.pure", "PIL", "PIL.Image", "PIL.ImageDraw", "PIL.PngImagePlugin",
     "pystray", "pystray._win32",

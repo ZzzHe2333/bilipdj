@@ -17,7 +17,7 @@ apps/server/      Python 后端，唯一业务状态源
 apps/windows/     Tk 桌面前端、Overlay、Updater 与桌面打包配置
 apps/web/         Web 前端唯一源码与 Web Portable 启动器
 packages/shared/  HTTP / WebSocket 共享契约
-core/             旧导入兼容层 + 兼容运行数据位置
+core/             旧导入兼容层 + 兼容运行数据位置 + 项目文档
 scripts/          API 文档生成、安全扫描等仍在使用的维护脚本
 ```
 
@@ -25,13 +25,66 @@ scripts/          API 文档生成、安全扫描等仍在使用的维护脚本
 
 - 排队、权限、礼物、平台 Relay、存档和业务状态由 `apps/server/` 统一处理。
 - Windows Tk 只负责 UI、用户交互、Overlay 和调用后端 API。
-- Web 只负责浏览器 UI、主题、展示和调用后端 API。
+- Web 只负责浏览器 UI、展示和调用后端 API。
 - 不在 Windows / Web 中复制一套 QueueManager 或平台协议业务逻辑。
 - 第三方客户端优先依据 `packages/shared/api-contract.md` 开发。
 
+## 统一主题 / Design System
+
+Windows 与 Web 不再维护两套互不兼容的主题配置。
+
+唯一持久化主题文件：
+
+```text
+core/appearance.json        # 源码模式
+appearance.json             # Portable 运行目录
+```
+
+Server 统一管理：
+
+```text
+GET  /api/appearance
+POST /api/appearance
+GET  /api/appearance/profile
+POST /api/appearance/profile
+```
+
+统一主题名为 **BiliPDJ Aurora**，主要 Design Tokens 包括：
+
+```text
+mode
+font_family
+font_size
+radius
+light.background / sidebar / surface / surface_alt / input / border
+light.text / muted / accent / accent_hover / selection / success / warning / danger
+dark.background / sidebar / surface / surface_alt / input / border
+dark.text / muted / accent / accent_hover / selection / success / warning / danger
+```
+
+规则：
+
+- Windows `ttk.Style` 从同一份 appearance 配置映射颜色和字体；
+- Web CSS Variables 从同一份 appearance 配置生成；
+- `style.json` **继续单独负责 OBS / 队列展示**，不要把它删除或强行合并进 appearance；
+- 对用户导入/导出时，使用统一 profile 将两者打包到一个 JSON：
+
+```json
+{
+  "schema": 1,
+  "kind": "bilipdj-appearance-profile",
+  "appearance": {},
+  "display_style": {}
+}
+```
+
+该 profile 必须保持 Windows → Web 和 Web → Windows 双向兼容。
+
+不要重新把 Web 主题改回只存 `localStorage`；localStorage 仅允许作为旧版本迁移/启动兼容缓存，Server 才是最终状态源。
+
 ## 仓库根目录约束
 
-根目录只保留项目级文档、版本/依赖文件、应用目录和共享目录。打包脚本与 PyInstaller `.spec` 不再放在根目录；桌面打包实现统一归入 `apps/windows/`，Web 打包实现归入 `apps/web/`。不要重新引入仅做一层转发的根目录 `.ps1` / `.sh` / `.spec`。
+根目录只保留项目级版本/依赖文件、应用目录和共享目录。打包脚本与 PyInstaller `.spec` 不再放在根目录；桌面打包实现统一归入 `apps/windows/`，Web 打包实现归入 `apps/web/`。不要重新引入仅做一层转发的根目录 `.ps1` / `.sh` / `.spec`。
 
 ## 平台
 
@@ -144,6 +197,10 @@ GET  /api/platforms/active
 POST /api/platforms/active
 GET  /api/style
 POST /api/style
+GET  /api/appearance
+POST /api/appearance
+GET  /api/appearance/profile
+POST /api/appearance/profile
 WS   /ws
 WS   /danmu/sub
 ```

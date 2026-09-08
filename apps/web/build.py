@@ -22,6 +22,8 @@ def build() -> Path:
         "control.html",
         "control.js",
         "support_us.js",
+        "unified_theme.css",
+        "unified_theme.js",
         "WxZSM.png",
     )
     missing = [name for name in required if not (DIST_DIR / name).is_file()]
