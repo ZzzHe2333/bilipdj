@@ -6,9 +6,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class PortableReleaseV203Tests(unittest.TestCase):
-    def test_version_is_v203(self) -> None:
-        self.assertEqual((ROOT / "VERSION").read_text(encoding="utf-8").strip(), "2.0.3")
+class PortableReleaseV204Tests(unittest.TestCase):
+    def test_version_is_v204(self) -> None:
+        self.assertEqual((ROOT / "VERSION").read_text(encoding="utf-8").strip(), "2.0.4")
 
     def test_tk_portable_forces_backend_autostart_when_frozen(self) -> None:
         main_source = (ROOT / "apps" / "windows" / "main.py").read_text(encoding="utf-8")
@@ -28,26 +28,34 @@ class PortableReleaseV203Tests(unittest.TestCase):
         self.assertIn("/health", source)
         self.assertIn("webbrowser.open", source)
         self.assertIn("process.terminate()", source)
+        self.assertIn("后端服务器系统", source)
+        self.assertIn("隐藏到右下角", source)
 
-    def test_web_portable_spec_bundles_server_and_web_assets(self) -> None:
+    def test_web_portable_spec_bundles_server_web_assets_and_tray(self) -> None:
         source = (ROOT / "apps" / "web" / "web_portable.spec").read_text(encoding="utf-8")
         self.assertIn('"apps.server.server"', source)
+        self.assertIn('"apps.server.issue79_guard"', source)
         self.assertIn('"apps/web/static"', source)
+        self.assertIn('"pystray"', source)
         self.assertIn('name="BiliPDJ-Web"', source)
         self.assertIn('name="bilipdj-web"', source)
 
-    def test_windows_spec_bundles_portable_autostart(self) -> None:
+    def test_windows_spec_bundles_issue79_features(self) -> None:
         source = (ROOT / "apps" / "windows" / "bilipdj_onedir.spec").read_text(encoding="utf-8")
         self.assertIn('"apps.windows.portable_autostart"', source)
+        self.assertIn('"apps.windows.issue79_features"', source)
+        self.assertIn('"apps.server.issue79_guard"', source)
         self.assertIn('"apps.server.server"', source)
         self.assertIn('"apps/web/static"', source)
 
-    def test_release_workflow_emits_both_customer_bundles(self) -> None:
+    def test_release_workflow_emits_bundles_checksums_and_manifest(self) -> None:
         source = (ROOT / ".github" / "workflows" / "package-windows-x64.yml").read_text(encoding="utf-8")
         self.assertIn("BiliPDJ-v$VERSION-Windows-Tk-Portable-x64.zip", source)
         self.assertIn("BiliPDJ-v$VERSION-Web-Portable-x64.zip", source)
         self.assertIn("apps\\windows\\package.ps1", source)
         self.assertIn("apps\\web\\package-portable.ps1", source)
+        self.assertIn("update-manifest.json", source)
+        self.assertIn("sha256", source)
         self.assertIn("Create GitHub Release", source)
 
 

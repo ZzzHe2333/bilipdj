@@ -73,6 +73,7 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
                 from .control_panel_features import patch_control_panel_features
                 from .control_panel_ui_finish import patch_control_panel_ui_finish
                 from .gui_log_sink import patch_control_panel_logging
+                from .issue79_features import patch_control_panel_issue79
                 from .portable_autostart import patch_control_panel_portable_autostart
                 from .style_save_transport import install_style_save_transport
                 from .support_us import patch_control_panel_support_us
@@ -88,6 +89,10 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
                 patch_control_panel_support_us(cls)
                 patch_control_panel_ui_finish(cls)
                 patch_control_panel_logging(cls)
+                # This patch intentionally runs last: it fixes the final nav/page
+                # ordering after support/about/update patches and adds the active
+                # platform page plus the two-field manual queue dialog.
+                patch_control_panel_issue79(cls)
             finally:
                 _restore_hook()
             return cls

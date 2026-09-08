@@ -21,6 +21,8 @@ HTTP_ENDPOINTS = [
     ep("GET", "/api/config", "读取完整运行配置", response="完整配置 JSON，包含平台、权限、开关、样式等。"),
     ep("POST", "/api/config", "保存完整运行配置", body='{"platform":"bilibili","bilibili":{"roomid":3049445,"uid":123,"cookie":"..."}}', response='{"status":"ok",...}', notes="高级接口；建议先 GET 后按原结构修改。"),
     ep("GET", "/api/runtime-status", "读取后端/弹幕连接状态", response="平台、房间、连接状态、最近事件时间等。", local=False),
+    ep("GET", "/api/platforms/active", "读取已激活弹幕平台", response='{"status":"ok","supported":["bilibili","douyin"],"active":["bilibili","douyin"],"one_room_per_platform":true,"runtime":{...}}', notes="当前每个平台最多监听一个直播间。"),
+    ep("POST", "/api/platforms/active", "保存已激活弹幕平台并重连", body='{"active":["bilibili","douyin"]}', response='{"status":"ok","active":["bilibili","douyin"],"runtime":{...}}', notes="多个平台共享同一个后端队列；同一平台多个直播间暂不支持。"),
     ep("GET", "/api/danmu/identity/latest", "读取最近一条弹幕身份事件", response='{"status":"ok","event":{...}}'),
     ep("GET", "/api/gifts/state", "读取 B站礼物/插队状态", response='{"status":"ok",...}'),
     ep("GET", "/api/queue/state", "读取当前队列", response='{"queue":[...],"entries":[...],"size":1}', local=False),
@@ -29,7 +31,7 @@ HTTP_ENDPOINTS = [
     ep("POST", "/api/queue/switch", "切换活动存档槽", body='{"slot":2}', response='{"status":"ok","slot":2,"queue":[...]}'),
     ep("POST", "/api/queue/delete", "删除队列项", body='{"index":1}', response='{"status":"ok","queue":[...]}', notes="index 为界面中的 1 起始序号。"),
     ep("POST", "/api/queue/move", "上移/下移队列项", body='{"index":2,"direction":"up"}', response='{"status":"ok","queue":[...]}', notes="direction: up / down。"),
-    ep("POST", "/api/queue/insert", "插入队列项", body='{"after":0,"entry":"[官|用户]排队内容"}', response='{"status":"ok","queue":[...]}', notes="after=0 表示队首。"),
+    ep("POST", "/api/queue/insert", "插入队列项", body='{"after":0,"username":"用户名","content":"排队内容"}', response='{"status":"ok","queue":[...],"entries":[...]}', notes="username 必填，content 可留空；旧客户端仍可发送 entry 字段。after=0 表示队首。"),
     ep("POST", "/api/queue/update", "修改队列项内容", body='{"index":1,"content":"新内容"}', response='{"status":"ok","queue":[...]}'),
     ep("POST", "/api/queue/clear", "清空当前队列", body="{}", response='{"status":"ok","queue":[]}'),
     ep("POST", "/api/queue/log", "写入兼容队列操作日志", body='{"action":"...","content":"..."}', response='{"status":"ok"}', notes="兼容接口；新客户端通常不需要直接调用。"),
@@ -57,10 +59,10 @@ HTTP_ENDPOINTS = [
     ep("POST", "/api/backup/webdav/test", "测试旧版 WebDAV（兼容）", body="{}", response='{"status":"ok"}'),
     ep("POST", "/api/backup/webdav/run", "执行旧版 WebDAV 设置备份（兼容）", body="{}", response='{"status":"ok",...}'),
     ep("POST", "/api/backup/webdav/restore", "恢复旧版 WebDAV 设置备份（兼容）", body='{"name":"BiliPDJ-settings-....zip"}', response='{"status":"ok",...}'),
-    ep("GET", "/api/control/meta", "Web 控制台元信息", response='{"status":"ok","version":"2.0.2","platform":"bilibili","port":9816}'),
+    ep("GET", "/api/control/meta", "Web 控制台元信息", response='{"status":"ok","version":"2.0.4","platform":"bilibili","port":9816}'),
     ep("GET", "/api/control/logs?kind=all&limit=400", "Web 控制台日志读取", response='{"status":"ok","files":[...],"lines":[...]}', notes="kind: all/common/error/update；limit 20-2000。"),
     ep("GET", "/api/control/performance", "Web 控制台性能数据", response="系统 CPU/内存/磁盘、进程、队列、WebSocket 与 Relay 状态。"),
-    ep("GET", "/api/control/update", "检查 GitHub 最新 Release", response="当前版本、最新版本、Release URL 与发行说明。"),
+    ep("GET", "/api/control/update", "读取更新清单", response="当前版本、最新版本、Release URL，以及 Web 便携包 filename/url/sha256/size。", notes="客户端应先读取 manifest/本接口，再下载并校验 SHA-256，不要猜测资产文件名。"),
 ]
 
 WS_ENDPOINTS = [

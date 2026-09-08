@@ -59,12 +59,15 @@ class WebServiceManagerTests(unittest.TestCase):
         self.assertIn("SW_HIDE", source)
         self.assertIn("_hidden_backend_process_options()", source)
 
-    def test_launcher_auto_minimizes_after_browser_is_opened(self) -> None:
+    def test_launcher_auto_hides_after_browser_is_opened(self) -> None:
         source = WEB_LAUNCHER.read_text(encoding="utf-8")
         self.assertIn("self.root.after(1200, self._auto_minimize)", source)
         self.assertIn("self.root.iconify()", source)
+        self.assertIn("self.root.withdraw()", source)
+        self.assertIn("pystray", source)
         self.assertIn("打开 Web 控制台", source)
-        self.assertIn("停止并退出", source)
+        self.assertIn("停止后端并退出", source)
+        self.assertIn("隐藏到右下角", source)
 
     def test_failed_backend_restores_manager_and_shows_error(self) -> None:
         source = WEB_LAUNCHER.read_text(encoding="utf-8")

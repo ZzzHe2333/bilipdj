@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "version": "2.0.3",
+  "tag_name": "v2.0.3",
+  "name": "弹幕排队姬 v2.0.3",
+  "published_at": "2026-09-08T08:00:49Z",
+  "release_url": "https://github.com/ZzzHe2333/bilipdj/releases/tag/v2.0.3",
+  "notes": "更新客户端应先读取本清单，再按客户端类型取得准确的文件名、下载地址和 SHA-256。Release 中的 update-manifest.json 为首选来源，本文件作为兼容回退。",
+  "packages": {
+    "windows-tk-x64": {
+      "filename": "BiliPDJ-v2.0.3-Windows-Tk-Portable-x64.zip",
+      "url": "https://github.com/ZzzHe2333/bilipdj/releases/download/v2.0.3/BiliPDJ-v2.0.3-Windows-Tk-Portable-x64.zip",
+      "sha256": "4dcb79bba30a5ffc43882d6677e735616b41a8270f053e3da7db5ab89c64a753",
+      "size": 76565349
+    },
+    "web-portable-x64": {
+      "filename": "BiliPDJ-v2.0.3-Web-Portable-x64.zip",
+      "url": "https://github.com/ZzzHe2333/bilipdj/releases/download/v2.0.3/BiliPDJ-v2.0.3-Web-Portable-x64.zip",
+      "sha256": "5663635e99844fcababfb7d609c50995f8854674d3646e820c4d7b587fd3c4f2",
+      "size": 21453786
+    }
+  }
+}

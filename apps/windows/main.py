@@ -22,6 +22,7 @@ configure_web_assets()
 from apps.windows import control_panel  # noqa: E402
 from apps.windows.about_page import patch_control_panel_about  # noqa: E402
 from apps.windows.bilibili_qr_dialog import patch_control_panel_qr_login  # noqa: E402
+from apps.windows.issue79_features import patch_control_panel_issue79  # noqa: E402
 
 
 def _configure_control_panel_paths() -> None:
@@ -52,6 +53,7 @@ _configure_control_panel_paths()
 # relying only on legacy class-construction hooks and import order.
 patch_control_panel_qr_login(control_panel.ControlPanelApp)
 patch_control_panel_about(control_panel.ControlPanelApp)
+patch_control_panel_issue79(control_panel.ControlPanelApp)
 
 
 def main() -> None:
