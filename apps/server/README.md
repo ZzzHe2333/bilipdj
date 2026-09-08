@@ -16,8 +16,6 @@ https://www.huya.com/lpl
 
 后端启动虎牙 relay 时会自动解析真实房间号和主播 UID；也可以在平台参数中手动填写 `room_id` 与 `anchor_id` 作为兜底。公开直播间弹幕通过虎牙 WebSocket/TARS 通道接收，第一阶段只把普通文本弹幕送入统一排队逻辑，商城系统消息会在进入 `QueueManager` 前过滤。
 
-Web 控制台还提供 `/api/huya/resolve` 的本机解析入口，用于预先检查链接、房间号和主播 UID。
-
 ## 本地启动
 
 ```bash
