@@ -103,6 +103,21 @@ from . import web_control_guard as _web_control_guard  # noqa: E402
 from . import issue79_guard as _issue79_guard  # noqa: E402
 from . import appearance_guard as _appearance_guard  # noqa: E402
 
+# appearance.json is a first-class cross-client setting and participates in the
+# same ZIP/WebDAV backup format as config.yaml/style.json.
+if "appearance.json" not in _settings_backup.SETTINGS_FILES:
+    _settings_backup.SETTINGS_FILES = tuple(_settings_backup.SETTINGS_FILES) + ("appearance.json",)
+_original_settings_paths = _settings_backup.SettingsBackupService.settings_paths
+
+
+def _settings_paths_with_appearance(self: Any) -> dict[str, Path]:
+    paths = dict(_original_settings_paths(self))
+    paths["appearance.json"] = Path(getattr(self.server, "APPEARANCE_PATH", Path(getattr(self.server, "_YAML_DIR")) / "appearance.json"))
+    return paths
+
+
+_settings_backup.SettingsBackupService.settings_paths = _settings_paths_with_appearance
+
 _settings_backup.install_settings_backup(server)
 _settings_mtime_guard.install_settings_mtime_guard(_settings_backup)
 _settings_storage_guard.install_settings_storage_guard(_settings_backup, server)
