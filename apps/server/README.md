@@ -1,6 +1,8 @@
 # BiliPDJ Server
 
-独立后端入口。直播平台接入、队列状态、权限、礼物、存档、HTTP API 和 WebSocket 仍由现有 `core/` 实现层提供；本目录负责把后端作为独立应用启动，并默认加载 `apps/web/static`。
+`apps/server/` 现在保存后端的真实实现：Bilibili/抖音协议、队列逻辑、权限/礼物相关运行时、HTTP API、WebSocket、日志和安全/性能 guard 都从这里加载。
+
+`core.server` 等旧导入仍可用，但只作为兼容转发层。
 
 ## 本地启动
 
@@ -15,11 +17,13 @@ python -m apps.server.main
 python -m apps.server.main --host 0.0.0.0 --port 9816
 ```
 
-指定已经构建好的 Web 目录：
+指定 Web 目录：
 
 ```bash
 python -m apps.server.main --web-dir apps/web/dist
 ```
+
+默认 Web 资源来自唯一源码目录 `apps/web/static/`。
 
 ## Docker
 
@@ -30,4 +34,6 @@ docker build -f apps/server/Dockerfile -t bilipdj-server .
 docker run --rm -p 9816:9816 bilipdj-server
 ```
 
-> 当前阶段保留 `core/` 作为兼容实现层，以保证旧发行版、测试和 macOS 打包不被破坏。后续可以逐模块把纯后端代码继续迁入本目录，而不用再调整 Web/Windows 的目录边界。
+## 兼容说明
+
+本阶段只迁移实现代码，没有同时改变用户运行数据位置。源码模式下配置和队列数据仍兼容原来的 `core/` 路径；后续迁移数据目录不会影响 `apps.server` 的公开入口。

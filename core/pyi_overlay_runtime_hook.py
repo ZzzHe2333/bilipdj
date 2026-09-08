@@ -1,3 +1,1 @@
-from core.overlay_bootstrap import install_overlay_class_hook
-
-install_overlay_class_hook()
+from apps.windows.pyi_overlay_runtime_hook import *  # noqa: F401,F403

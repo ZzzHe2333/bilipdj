@@ -6,13 +6,12 @@ import argparse
 import json
 import sys
 import urllib.error
-import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from core import bilibili_protocol, douyin_protocol  # noqa: E402
+from apps.server import bilibili_protocol, douyin_protocol  # noqa: E402
 
 
 def _result(name: str, status: str, detail: str, **extra: object) -> dict[str, object]:

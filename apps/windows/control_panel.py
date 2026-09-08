@@ -1,0 +1,4731 @@
+from __future__ import annotations
+
+import importlib
+import importlib.util
+import json
+import os
+import queue
+import re
+import subprocess
+import sys
+import threading
+import time
+import tkinter as tk
+import urllib.error
+import urllib.request
+import webbrowser
+from pathlib import Path
+from tkinter import filedialog, messagebox, ttk
+from typing import Any
+
+if sys.platform == "win32":
+    import ctypes
+else:
+    ctypes = None
+
+try:
+    from PIL import Image, ImageColor, ImageDraw, ImageFont, ImageTk
+
+    PIL_AVAILABLE = True
+except Exception:  # noqa: BLE001
+    Image = ImageColor = ImageDraw = ImageFont = ImageTk = None
+    PIL_AVAILABLE = False
+
+REPO_DIR = Path(__file__).resolve().parents[1]
+CORE_DIR = Path(__file__).resolve().parent  # bilipdj/core/
+if str(REPO_DIR) not in sys.path:
+    sys.path.insert(0, str(REPO_DIR))
+
+# 打包提示：显式导入 core.server，确保 PyInstaller 能追踪到其依赖（如 http.server）。
+import core.server as _backend_server_hint  # noqa: F401
+from core import update_ui
+
+BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", REPO_DIR))
+APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else REPO_DIR
+_YAML_DIR = APP_DIR if getattr(sys, "frozen", False) else CORE_DIR
+BUNDLE_CORE_DIR = BUNDLE_DIR / "core"
+RUNTIME_CORE_DIR = APP_DIR / "core" if getattr(sys, "frozen", False) else CORE_DIR
+
+
+def _prefer_existing_path(*paths: Path) -> Path:
+    fallback: Path | None = None
+    seen: set[str] = set()
+    for path in paths:
+        if fallback is None:
+            fallback = path
+        key = os.path.normcase(str(path))
+        if key in seen:
+            continue
+        seen.add(key)
+        if path.exists():
+            return path
+    if fallback is None:
+        raise FileNotFoundError("No candidate paths were provided")
+    return fallback
+
+
+CONFIG_PATH = _YAML_DIR / "config.yaml"
+QUANXIAN_PATH = _YAML_DIR / "quanxian.yaml"
+KAIGUAN_PATH = _YAML_DIR / "kaiguan.yaml"
+SERVER_PATH = _prefer_existing_path(
+    RUNTIME_CORE_DIR / "server.py",
+    BUNDLE_CORE_DIR / "server.py",
+    CORE_DIR / "server.py",
+)
+OVERLAY_HOST_SCRIPT = _prefer_existing_path(
+    RUNTIME_CORE_DIR / "overlay_host.py",
+    BUNDLE_CORE_DIR / "overlay_host.py",
+    CORE_DIR / "overlay_host.py",
+)
+OVERLAY_HOST_EXE_NAME = "paiduijitm.exe"
+APP_NAME = "弹幕排队姬"
+APP_VERSION = "1.0.8"
+LOG_LEVEL_OPTIONS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+_LEVEL_ORDER = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 4}
+_LOG_LEVEL_RE = re.compile(r"\[(DEBUG|INFO|WARNING|ERROR|CRITICAL)\]")
+# 匹配后端日志完整时间戳前缀：2026-04-09 12:34:56,789 [INFO] name:
+_LOG_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2} (\d{2}:\d{2}:\d{2}),\d+ \[(DEBUG|INFO|WARNING|ERROR|CRITICAL)\] [^:]+: (.*)")
+# 匹配面板显示格式 "HH:MM:SS 内容"
+_PANEL_TS_RE = re.compile(r"^(\d{2}:\d{2}:\d{2}) (.*)", re.DOTALL)
+# 匹配日志中的 URL（用于可点击链接）
+_URL_RE = re.compile(r"https?://[^\s,，）)\]>\"']+")
+# 匹配日志行前缀括号标签 "[GUI]" "[INFO]" 等
+_BRACKET_TAG_RE = re.compile(r"^\[([A-Z_a-z0-9/\s]+)\] ?")
+MAX_QUEUE_ARCHIVE_SLOTS = 10
+LEFT_NAV_TAB_WIDTH = 16
+OVERLAY_REFRESH_MS = 1200
+OVERLAY_TRANSPARENT_COLOR = "#010101"
+OVERLAY_RESIZE_MARGIN = 8
+OVERLAY_MIN_WIDTH = 320
+OVERLAY_MIN_HEIGHT = 180
+DEFAULT_OVERLAY_SETTINGS = {
+    "width": 400,
+    "height": 400,
+    "scale": 50,
+}
+RESERVED_PLATFORM_KEYS = ("huya", "kuaishou", "douyu", "weixin_videohao")
+PLATFORM_LABEL_TO_VALUE = {
+    "B站": "bilibili",
+    "抖音": "douyin",
+    "虎牙(预留)": "huya",
+    "快手(预留)": "kuaishou",
+    "斗鱼(预留)": "douyu",
+    "微信视频号(预留)": "weixin_videohao",
+}
+PLATFORM_VALUE_TO_LABEL = {value: key for key, value in PLATFORM_LABEL_TO_VALUE.items()}
+PLATFORM_LABELS = tuple(PLATFORM_LABEL_TO_VALUE.keys())
+RESERVED_PLATFORM_UI_META = {
+    "huya": {
+        "title": "虎牙参数(预留)",
+        "hint": "当前仅预留配置位，保存后不会接入弹幕。",
+    },
+    "kuaishou": {
+        "title": "快手参数(预留)",
+        "hint": "可以先保存房间、Cookie 或其他参数，后续接入时直接使用。",
+    },
+    "douyu": {
+        "title": "斗鱼参数(预留)",
+        "hint": "斗鱼暂未接入，目前仅做配置占位和存档。",
+    },
+    "weixin_videohao": {
+        "title": "微信视频号参数(预留)",
+        "hint": "视频号暂未接入，可先预留房间链接、房间号和验证信息。",
+    },
+}
+RESERVED_PLATFORM_FIELD_DEFS = (
+    ("room_id", "房间号 / Live ID"),
+    ("room_url", "直播间链接"),
+    ("anchor_id", "主播 ID"),
+    ("cookie", "Cookie"),
+    ("auth_token", "Auth Token"),
+    ("notes", "备注"),
+    ("extra", "extra(JSON)"),
+)
+KAIGUAN_LABELS = [
+    ("paidui",           "排队总开关"),
+    ("guanfu_paidui",    "官服排队"),
+    ("bfu_paidui",       "B服排队"),
+    ("chaoji_paidui",    "超级排队"),
+    ("mifu_paidui",      "米服排队"),
+    ("quxiao_paidui",    "取消排队"),
+    ("xiugai_paidui",    "修改排队内容"),
+    ("jianzhang_chadui", "舰长插队"),
+    ("fangguan_op",      "允许房管执行管理命令"),
+]
+DEFAULT_KAIGUAN_GUI = {k: True if i < 7 else False for i, (k, _) in enumerate(KAIGUAN_LABELS)}
+SENSITIVE_LOG_PATTERNS = [
+    re.compile(r"(?i)\b(cookie|auth_token|SESSDATA|bili_jct|buvid3|DedeUserID(?:__ckMd5)?)\s*[:=]\s*([^\s,;]+)"),
+]
+_BACKEND_SERVER_MODULE: Any | None = None
+
+
+def sanitize_log_message(message: str) -> str:
+    sanitized = str(message)
+    for pattern in SENSITIVE_LOG_PATTERNS:
+        sanitized = pattern.sub(lambda match: f"{match.group(1)}=<hidden>", sanitized)
+    return sanitized
+
+
+def _pad_display_text(text: str, width: int) -> str:
+    display_width = 0
+    for ch in str(text):
+        display_width += 1 if ord(ch) < 128 else 2
+    return str(text) + (" " * max(0, width - display_width))
+
+
+
+def load_backend_server_module() -> Any:
+    global _BACKEND_SERVER_MODULE
+    if _BACKEND_SERVER_MODULE is not None:
+        return _BACKEND_SERVER_MODULE
+
+    module_names = (
+        "bilipdj.core.server",
+        "core.server",
+        "backend.server",
+    )
+    for module_name in module_names:
+        try:
+            _BACKEND_SERVER_MODULE = importlib.import_module(module_name)
+            return _BACKEND_SERVER_MODULE
+        except ModuleNotFoundError:
+            continue
+
+    spec = importlib.util.spec_from_file_location("pdj_backend_server", SERVER_PATH)
+    if spec is None or spec.loader is None:
+        raise ModuleNotFoundError(f"Unable to load backend server module from {SERVER_PATH}")
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    _BACKEND_SERVER_MODULE = module
+    return module
+
+
+def parse_scalar(value: str):
+    value = value.strip()
+    if value == "":
+        return ""
+    lowered = value.lower()
+    if lowered in {"true", "false"}:
+        return lowered == "true"
+    if lowered in {"null", "none"}:
+        return None
+    if (value.startswith('"') and value.endswith('"')) or (
+        value.startswith("'") and value.endswith("'")
+    ):
+        return value[1:-1]
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        return value
+
+
+def _coerce_int_field(value: Any, default: int, field_name: str) -> int:
+    text = str(value).strip() if value is not None else ""
+    if not text:
+        return default
+    try:
+        return int(text)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} 必须是整数") from exc
+
+
+def _coerce_float_field(value: Any, default: float, field_name: str) -> float:
+    text = str(value).strip() if value is not None else ""
+    if not text:
+        return default
+    try:
+        return float(text)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} 必须是数字") from exc
+
+
+def next_meaningful_line(lines: list[str], start_index: int):
+    for idx in range(start_index, len(lines)):
+        stripped = lines[idx].strip()
+        if stripped and not stripped.startswith("#"):
+            return idx, lines[idx]
+    return None
+
+
+def load_simple_yaml(path: Path) -> dict:
+    if not path.exists():
+        return {}
+
+    root: dict = {}
+    stack: list[tuple[int, dict | list]] = [(-1, root)]
+    lines = path.read_text(encoding="utf-8").splitlines()
+
+    for index, raw_line in enumerate(lines):
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        indent = len(line) - len(line.lstrip(" "))
+        while stack and indent <= stack[-1][0]:
+            stack.pop()
+
+        current = stack[-1][1] if stack else root
+        if stripped.startswith("- "):
+            if not isinstance(current, list):
+                continue
+            item_value = stripped[2:].strip()
+            if item_value == "":
+                child = {}
+                current.append(child)
+                stack.append((indent, child))
+            else:
+                current.append(parse_scalar(item_value))
+            continue
+
+        if ":" not in stripped or not isinstance(current, dict):
+            continue
+
+        key, value = stripped.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+
+        if value == "":
+            next_line = next_meaningful_line(lines, index + 1)
+            if next_line is not None:
+                next_raw = next_line[1]
+                next_indent = len(next_raw) - len(next_raw.lstrip(" "))
+                next_stripped = next_raw.strip()
+                child = [] if next_indent > indent and next_stripped.startswith("- ") else {}
+            else:
+                child = {}
+            current[key] = child
+            stack.append((indent, child))
+        else:
+            current[key] = parse_scalar(value)
+
+    return root
+
+
+def merge_config(defaults: dict, custom: dict) -> dict:
+    merged = dict(defaults)
+    for key, value in custom.items():
+        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+            merged[key] = merge_config(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def yaml_quote_string(value) -> str:
+    text = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{text}"'
+
+
+def save_config(path: Path, config: dict) -> None:
+    server = config.get("server", {})
+    raw_host = str(server.get("host", "127.0.0.1") or "127.0.0.1").strip()
+    lan_listen = bool(server.get("lan_listen", raw_host in {"0.0.0.0", "::", "[::]"}))
+    listen_host = "0.0.0.0" if lan_listen else "127.0.0.1"
+    bilibili = config.get("bilibili", config.get("api", {}))
+    ui_cfg = config.get("ui", {})
+    overlay_cfg = ui_cfg.get("overlay_window", {}) if isinstance(ui_cfg, dict) else {}
+    logging_cfg = config.get("logging", {})
+    queue_archive = config.get("queue_archive", {})
+    slots = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(queue_archive.get("slots", 3))))
+    active_slot = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(queue_archive.get("active_slot", 1))))
+    escaped_cookie = str(bilibili.get("cookie", "")).replace('"', '\\"')
+    try:
+        overlay_width = max(OVERLAY_MIN_WIDTH, int(overlay_cfg.get("width", DEFAULT_OVERLAY_SETTINGS["width"])))
+    except (TypeError, ValueError):
+        overlay_width = DEFAULT_OVERLAY_SETTINGS["width"]
+    try:
+        overlay_height = max(OVERLAY_MIN_HEIGHT, int(overlay_cfg.get("height", DEFAULT_OVERLAY_SETTINGS["height"])))
+    except (TypeError, ValueError):
+        overlay_height = DEFAULT_OVERLAY_SETTINGS["height"]
+    try:
+        overlay_scale = max(40, min(250, int(overlay_cfg.get("scale", DEFAULT_OVERLAY_SETTINGS["scale"]))))
+    except (TypeError, ValueError):
+        overlay_scale = DEFAULT_OVERLAY_SETTINGS["scale"]
+
+    content = f"""# 弹幕排队姬 全局配置
+server:
+  host: {listen_host}
+  port: {int(server.get('port', 9816))}
+  lan_listen: {'true' if lan_listen else 'false'}
+
+bilibili:
+  roomid: {int(bilibili.get('roomid', 0))}
+  uid: {int(bilibili.get('uid', 0))}
+  cookie: \"{escaped_cookie}\"
+
+# 前端 myjs.js 可覆盖配置（如需扩展可继续加键值）
+myjs:
+
+ui:
+  auto_start_backend: {'true' if bool(ui_cfg.get('auto_start_backend', False)) else 'false'}
+  language: {yaml_quote_string(ui_cfg.get('language', '中文'))}
+  overlay_window:
+    width: {overlay_width}
+    height: {overlay_height}
+    scale: {overlay_scale}
+
+logging:
+  # 支持 DEBUG / INFO / WARNING / ERROR / CRITICAL
+  level: {str(logging_cfg.get('level', 'INFO')).upper()}
+  # 每次启动默认清理多少天前日志
+  retention_days: {int(logging_cfg.get('retention_days', 15))}
+
+queue_archive:
+  enabled: {'true' if bool(queue_archive.get('enabled', True)) else 'false'}
+  # 存档位（1~10）
+  slots: {slots}
+  active_slot: {active_slot}
+"""
+    path.write_text(content, encoding="utf-8")
+
+
+class ControlPanelApp:
+    # --- 主题配色 ---
+    _THEME_DARK: dict[str, str] = {
+        "bg": "#090E1A", "bg2": "#0D1424", "surface": "#111A2C",
+        "accent": "#7C6CF2", "accent_dim": "#9184FF",
+        "fg": "#E6EDF7", "fg2": "#8A9AB3",
+        "border": "#26334D", "disabled": "#56647A",
+        "btn_bg": "#18233A", "btn_active": "#22304D",
+        "input_bg": "#0D1424",
+        "select_bg": "#7C6CF2", "select_fg": "#FFFFFF",
+        "status_ok": "#32D583", "warn": "#F5B942", "error": "#F97066",
+        "ts": "#64748B", "info": "#60A5FA", "danmu": "#A78BFA", "event": "#22C55E", "ev": "#D8E0EC",
+    }
+    _THEME_LIGHT: dict[str, str] = {
+        "bg": "#f4f6fb", "bg2": "#eaedf5", "surface": "#ffffff",
+        "accent": "#6757d9", "accent_dim": "#5142bc",
+        "fg": "#20263a", "fg2": "#687089",
+        "border": "#d5d9e7",
+        "btn_bg": "#f0efff", "btn_active": "#e1defe",
+        "input_bg": "#fbfbfe",
+        "select_bg": "#6757d9", "select_fg": "#ffffff",
+        "status_ok": "#007a40", "warn": "#cc1100",
+        "error": "#d92d20", "disabled": "#98a2b3",
+        "ts": "#667085", "info": "#1570ef", "danmu": "#7f56d9", "event": "#039855", "ev": "#344054",
+    }
+
+    def __init__(self, root: tk.Tk) -> None:
+        self.root = root
+        self.root.title(f"{APP_NAME} 控制台 v{APP_VERSION}")
+        self._apply_root_icon()
+        self.server_proc: subprocess.Popen[str] | None = None
+        self.overlay_proc: subprocess.Popen[str] | None = None
+        self.log_queue: queue.Queue[str] = queue.Queue()
+        self.log_pump_running = False
+        self.stdout_thread: threading.Thread | None = None
+        self.stderr_thread: threading.Thread | None = None
+        self._backend_starting = False
+        self._startup_animation_step = 0
+        self._startup_animation_job: str | None = None
+        self._startup_result_queue: queue.Queue[tuple[bool, str, list[str]]] = queue.Queue()
+        self._start_button: ttk.Button | None = None
+        self._stop_button: ttk.Button | None = None
+        self._startup_indicator: ttk.Frame | None = None
+        self._startup_progress: ttk.Progressbar | None = None
+
+        self.status_var = tk.StringVar(value="服务未启动")
+        self.startup_status_var = tk.StringVar(value="")
+        self.host_var = tk.StringVar(value="127.0.0.1")
+        self.lan_listen_var = tk.BooleanVar(value=False)
+        self.port_var = tk.StringVar(value="9816")
+        self.roomid_var = tk.StringVar(value="3049445")
+        self.uid_var = tk.StringVar(value="0")
+        self.cookie_var = tk.StringVar(value="")
+        self.bilibili_room_url_var = tk.StringVar(value="")
+        self.gift_queue_enabled_var = tk.BooleanVar(value=False)
+        self.gift_queue_names_var = tk.StringVar(value="辣条")
+        self.gift_battery_min_var = tk.StringVar(value="0")
+        self.gift_allow_multiple_var = tk.BooleanVar(value=False)
+        self.gift_slots_per_gift_var = tk.StringVar(value="1")
+        self.gift_insert_rank_var = tk.StringVar(value="1")
+        self.gift_saved_insert_rank_var = tk.StringVar(value="1")
+        self.gift_only_var = tk.BooleanVar(value=False)
+        self.gift_condition_hint_var = tk.StringVar(value="")
+        self.gift_listbox: tk.Listbox | None = None
+        self.log_level_var = tk.StringVar(value="INFO")
+        self.retention_days_var = tk.StringVar(value="7")
+        self.queue_enabled_var = tk.BooleanVar(value=True)
+        self.daily_queue_unlimited_var = tk.BooleanVar(value=True)
+        self.daily_queue_limit_var = tk.StringVar(value="1")
+        self.daily_queue_reset_hour_var = tk.StringVar(value="04")
+        self.daily_queue_reset_minute_var = tk.StringVar(value="00")
+        self._daily_queue_limit_spinbox: ttk.Spinbox | None = None
+        self.queue_slot_var = tk.StringVar(value="1")
+        self.queue_slot_choice_var = tk.IntVar(value=1)
+        self.platform_config_slot_var = tk.StringVar(value="1")
+        self.platform_config_slot_choice_var = tk.IntVar(value=1)
+        self.auto_start_var = tk.BooleanVar(value=False)
+        self.language_var = tk.StringVar(value="中文")
+        self.platform_var = tk.StringVar(value=PLATFORM_VALUE_TO_LABEL["bilibili"])
+        self.douyin_enabled_var = tk.BooleanVar(value=False)
+        self.douyin_live_id_var = tk.StringVar(value="")
+        self.douyin_cookie_var = tk.StringVar(value="")
+        self.douyin_signature_var = tk.StringVar(value="")
+        self.douyin_cursor_var = tk.StringVar(value="")
+        self.douyin_internal_ext_var = tk.StringVar(value="")
+        self.douyin_ws_auto_reconnect_var = tk.BooleanVar(value=True)
+        self.douyin_ws_heartbeat_var = tk.StringVar(value="5.0")
+        self.douyin_ws_reconnect_delay_var = tk.StringVar(value="2.0")
+        self.douyin_room_id_var = tk.StringVar(value="")
+        self.douyin_user_id_var = tk.StringVar(value="")
+        self.douyin_user_unique_id_var = tk.StringVar(value="")
+        self.douyin_anchor_id_var = tk.StringVar(value="")
+        self.douyin_sec_uid_var = tk.StringVar(value="")
+        self.douyin_ttwid_var = tk.StringVar(value="")
+        self.douyin_extra_query_var = tk.StringVar(value="{}")
+        self.reserved_platform_vars: dict[str, dict[str, tk.Variable]] = {
+            platform_key: {
+                "enabled": tk.BooleanVar(value=False),
+                "room_id": tk.StringVar(value=""),
+                "room_url": tk.StringVar(value=""),
+                "anchor_id": tk.StringVar(value=""),
+                "cookie": tk.StringVar(value=""),
+                "auth_token": tk.StringVar(value=""),
+                "notes": tk.StringVar(value=""),
+                "extra": tk.StringVar(value="{}"),
+            }
+            for platform_key in RESERVED_PLATFORM_KEYS
+        }
+        self.overlay_width_var = tk.StringVar(value=str(DEFAULT_OVERLAY_SETTINGS["width"]))
+        self.overlay_height_var = tk.StringVar(value=str(DEFAULT_OVERLAY_SETTINGS["height"]))
+        self.overlay_scale_var = tk.StringVar(value=str(DEFAULT_OVERLAY_SETTINGS["scale"]))
+        self.ws_light_var = tk.StringVar(value="🔴")
+        self.ws_text_var = tk.StringVar(value="直播间链接状态：未连接")
+        self.header_status_var = tk.StringVar(value="服务未启动 · 房间 3049445")
+        self._bilibili_fetch_status_var = tk.StringVar(value="填写房间号与 Cookie 后可一键获取监听配置")
+
+        # --- 主题状态 ---
+        self._dark_mode: bool = True
+        self._all_text_widgets: list[tk.Text] = []
+        self._status_label: ttk.Label | None = None
+        self._brand_label: ttk.Label | None = None
+        self._ws_light_label: ttk.Label | None = None
+        self._theme_btn: ttk.Button | None = None
+        self._header_dot_label: ttk.Label | None = None
+        self._nav_frame: tk.Frame | None = None
+        self._nav_items: list[tuple[tk.Frame, tk.Button, tk.Frame]] = []
+        self._content_pages: list[ttk.Frame] = []
+        self._active_page = 0
+        self._settings_hint_label: ttk.Label | None = None
+        self._settings_canvas: tk.Canvas | None = None
+        self._settings_canvases: list[tk.Canvas] = []
+        self._platform_hint_label: ttk.Label | None = None
+        self.ui_font_size_var = tk.StringVar(value="10")
+        self.log_search_var = tk.StringVar(value="")
+        self.log_errors_only_var = tk.BooleanVar(value=False)
+        self.log_danmu_only_var = tk.BooleanVar(value=False)
+        self.log_auto_scroll_var = tk.BooleanVar(value=True)
+        self.log_wrap_var = tk.BooleanVar(value=True)
+        self._log_records: list[tuple[str, str, str]] = []
+
+        # --- 抖音参数获取 ---
+        self.douyin_fetch_url_var = tk.StringVar(value="")
+        self._douyin_fetch_status_var = tk.StringVar(value="")
+
+        self._queue_refresh_busy: bool = False
+        self._blacklist_refresh_busy: bool = False
+        self._clear_click_time: float = 0.0
+        self._blacklist_clear_click_time: float = 0.0
+        self._prev_slot: int = self.queue_slot_choice_var.get()
+        self._prev_platform_config_slot: int = self.platform_config_slot_choice_var.get()
+        self._overlay_window: tk.Toplevel | None = None
+        self._overlay_canvas: tk.Canvas | None = None
+        self._overlay_photo: Any | None = None
+        self._overlay_items: list[str] = []
+        self._overlay_style: dict[str, Any] = {}
+        self._overlay_refresh_running = False
+        self._overlay_topmost = True
+        self._overlay_drag_origin: tuple[int, int] | None = None
+        self._overlay_window_origin: tuple[int, int] | None = None
+        self._overlay_resize_mode = ""
+        self._overlay_resize_origin: tuple[int, int] | None = None
+        self._overlay_resize_geometry: tuple[int, int, int, int] | None = None
+        self._overlay_last_size: tuple[int, int] = (0, 0)
+        self._overlay_font_cache: dict[tuple[str, int], Any] = {}
+        self._overlay_font_path = self._detect_overlay_font_path()
+
+        self._build_ui()
+        for var in (self.status_var, self.ws_text_var, self.roomid_var):
+            var.trace_add("write", lambda *_: self._refresh_header_status())
+        self.ui_font_size_var.trace_add("write", lambda *_: self._apply_ui_font_size())
+        self.load_from_file()
+        self._append_log("[GUI] 初始化完成 — 后端尚未启动，请点击「启动后端」")
+        if self.auto_start_var.get():
+            self.root.after(200, self.start_server)
+        self.root.after(1000, self.refresh_runtime_status)
+        self.root.after(1600, lambda: update_ui.auto_check(self))
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    # ------------------------------------------------------------------
+    # 主题
+    # ------------------------------------------------------------------
+
+    def _apply_theme(self, dark: bool = True) -> None:
+        self._dark_mode = dark
+        t = self._THEME_DARK if dark else self._THEME_LIGHT
+
+        style = ttk.Style(self.root)
+        style.theme_use("clam")
+
+        # 基础容器
+        style.configure("TFrame", background=t["bg"])
+        style.configure("TLabelframe", background=t["bg"], bordercolor=t["border"], relief="flat")
+        style.configure("TLabelframe.Label", background=t["bg"], foreground=t["accent"])
+
+        # 标签
+        style.configure("TLabel", background=t["bg"], foreground=t["fg"])
+
+        # 按钮
+        style.configure(
+            "TButton",
+            background=t["btn_bg"], foreground=t["accent"],
+            bordercolor=t["border"], darkcolor=t["border"], lightcolor=t["border"],
+            focuscolor=t["btn_bg"], relief="flat", padding=(12, 8),
+        )
+        style.map(
+            "TButton",
+            background=[("active", t["btn_active"]), ("pressed", t["select_bg"]), ("disabled", t["bg2"])],
+            foreground=[("active", t["fg"]), ("pressed", t["select_fg"]), ("disabled", t["fg2"])],
+        )
+        style.configure("Primary.TButton", background=t["accent"], foreground="#ffffff", borderwidth=0, padding=(16, 9))
+        style.map("Primary.TButton", background=[("active", t["accent_dim"]), ("pressed", t["accent_dim"])])
+        style.configure("Danger.TButton", background=t["bg2"], foreground=t["error"], bordercolor=t["error"], borderwidth=1, padding=(16, 8))
+        style.map("Danger.TButton", background=[("active", t["btn_active"])], foreground=[("active", t["error"])])
+        style.configure("Icon.TButton", background=t["btn_bg"], foreground=t["fg"], borderwidth=0, padding=(9, 7))
+        style.configure("Nav.TButton", background=t["bg2"], foreground=t["fg2"], borderwidth=0, relief="flat", anchor="w", padding=(13, 11))
+        style.map("Nav.TButton", background=[("active", t["btn_active"])], foreground=[("active", t["fg"])])
+        style.configure("NavSelected.TButton", background=t["btn_active"], foreground=t["fg"], borderwidth=0, relief="flat", anchor="w", padding=(13, 11))
+        style.map("NavSelected.TButton", background=[("active", t["btn_active"])])
+        style.configure("Card.TFrame", background=t["surface"], bordercolor=t["border"], borderwidth=1, relief="solid")
+        style.configure("Card.TLabel", background=t["surface"], foreground=t["fg"])
+        style.configure("Muted.Card.TLabel", background=t["surface"], foreground=t["fg2"])
+        style.configure("Toolbar.TFrame", background=t["surface"])
+
+        # 输入框
+        style.configure(
+            "TEntry",
+            fieldbackground=t["input_bg"], foreground=t["fg"], padding=(8, 7),
+            insertcolor=t["accent"], bordercolor=t["border"],
+            focuscolor=t["border"], selectbackground=t["select_bg"], selectforeground=t["select_fg"],
+        )
+        style.map("TEntry", bordercolor=[("focus", t["accent"])])
+
+        # 下拉框
+        style.configure(
+            "TCombobox",
+            fieldbackground=t["input_bg"], background=t["btn_bg"],
+            foreground=t["fg"], selectbackground=t["select_bg"],
+            selectforeground=t["select_fg"], bordercolor=t["border"],
+            arrowcolor=t["accent"], insertcolor=t["accent"],
+        )
+        style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", t["input_bg"])],
+            foreground=[("readonly", t["fg"])],
+            bordercolor=[("focus", t["accent"])],
+        )
+        # Combobox 展开列表（tk.Listbox 内部，不走 ttk.Style）
+        self.root.option_add("*TCombobox*Listbox.background", t["input_bg"])
+        self.root.option_add("*TCombobox*Listbox.foreground", t["fg"])
+        self.root.option_add("*TCombobox*Listbox.selectBackground", t["select_bg"])
+        self.root.option_add("*TCombobox*Listbox.selectForeground", t["select_fg"])
+
+        # 复选框 / 单选框
+        for widget_type in ("TCheckbutton", "TRadiobutton"):
+            style.configure(
+                widget_type,
+                background=t["bg"], foreground=t["fg"],
+                focuscolor=t["bg"], indicatorcolor=t["input_bg"],
+                indicatorrelief="flat",
+            )
+            style.map(
+                widget_type,
+                background=[("active", t["bg2"])],
+                indicatorcolor=[("selected", t["accent"]), ("active", t["accent_dim"])],
+            )
+
+        # 兼容旧页面中仍存在的 Notebook
+        style.configure(
+            "TNotebook",
+            background=t["bg"], borderwidth=0, tabmargins=(0, 0, 8, 0), tabposition="wn",
+        )
+        style.configure(
+            "TNotebook.Tab",
+            background=t["bg2"], foreground=t["fg2"],
+            padding=(18, 13), focuscolor=t["bg2"],
+            borderwidth=0,
+            width=LEFT_NAV_TAB_WIDTH,
+        )
+        style.map(
+            "TNotebook.Tab",
+            background=[("selected", t["surface"]), ("active", t["btn_active"])],
+            foreground=[("selected", t["accent"]), ("active", t["fg"])],
+        )
+        style.configure("Settings.TNotebook", background=t["surface"], borderwidth=0, tabposition="n", tabmargins=(0, 0, 0, 10))
+        style.configure("Settings.TNotebook.Tab", background=t["surface"], foreground=t["fg2"], borderwidth=0, padding=(18, 10))
+        style.map("Settings.TNotebook.Tab", background=[("selected", t["btn_active"]), ("active", t["btn_bg"])], foreground=[("selected", t["accent"]), ("active", t["fg"])])
+
+        # Treeview
+        style.configure(
+            "Treeview",
+            background=t["surface"], foreground=t["fg"],
+            fieldbackground=t["surface"], bordercolor=t["border"],
+            rowheight=32,
+        )
+        style.configure(
+            "Treeview.Heading",
+            background=t["bg2"], foreground=t["accent"],
+            bordercolor=t["border"], relief="flat",
+        )
+        style.map(
+            "Treeview",
+            background=[("selected", t["select_bg"])],
+            foreground=[("selected", t["select_fg"])],
+        )
+        style.map("Treeview.Heading", background=[("active", t["btn_active"])])
+
+        # 滚动条
+        style.configure(
+            "TScrollbar",
+            background=t["bg2"], troughcolor=t["bg"],
+            bordercolor=t["border"], arrowcolor=t["fg2"],
+            darkcolor=t["bg2"], lightcolor=t["bg2"],
+            relief="flat",
+        )
+        style.map("TScrollbar", background=[("active", t["accent_dim"])])
+
+        # 分隔线
+        style.configure("TSeparator", background=t["border"])
+
+        # 根窗口背景
+        self.root.configure(bg=t["bg"])
+
+        # tk.Text 控件（不走 ttk.Style，需手动设置）
+        for w in self._all_text_widgets:
+            try:
+                w.configure(
+                    background=t["surface"], foreground=t["fg"],
+                    insertbackground=t["accent"],
+                    selectbackground=t["select_bg"], selectforeground=t["select_fg"],
+                )
+            except tk.TclError:
+                pass
+
+        # 日志文字标签
+        if hasattr(self, "log_text"):
+            _mono = ("Consolas", 9) if sys.platform == "win32" else ("Menlo", 10) if sys.platform == "darwin" else ("Monospace", 10)
+            self.log_text.tag_configure("ts", foreground=t["ts"], font=_mono)
+            self.log_text.tag_configure("sep", foreground=t["border"])
+            self.log_text.tag_configure("level_info", foreground=t["info"], font=(*_mono[:1], _mono[1], "bold"))
+            self.log_text.tag_configure("level_danmu", foreground=t["danmu"], font=(*_mono[:1], _mono[1], "bold"))
+            self.log_text.tag_configure("level_event", foreground=t["event"], font=(*_mono[:1], _mono[1], "bold"))
+            self.log_text.tag_configure("level_warning", foreground=t["warn"], font=(*_mono[:1], _mono[1], "bold"))
+            self.log_text.tag_configure("level_error", foreground=t["error"], font=(*_mono[:1], _mono[1], "bold"))
+            self.log_text.tag_configure("bracket", foreground=t["accent_dim"], font=(*_mono[:1], _mono[1], "bold"))
+            self.log_text.tag_configure("ev", foreground=t["ev"])
+            self.log_text.tag_configure("warn", foreground=t["warn"])
+            self.log_text.tag_configure("link", foreground=t["accent"], underline=True)
+            self.log_text.tag_raise("link")  # link 优先级高于 ev/warn
+
+        # 硬编码颜色的标签引用
+        if self._brand_label is not None:
+            self._brand_label.configure(foreground=t["accent"])
+        if self._status_label is not None:
+            self._status_label.configure(foreground=t["status_ok"])
+        if self._ws_light_label is not None:
+            self._ws_light_label.configure(foreground=t["status_ok"])
+        if self._header_dot_label is not None:
+            running = self._backend_is_running()
+            self._header_dot_label.configure(foreground=t["status_ok"] if running else t["error"])
+        if self._nav_frame is not None:
+            self._nav_frame.configure(bg=t["bg2"])
+        for row, button, indicator in self._nav_items:
+            row.configure(bg=t["bg2"])
+            selected = self._nav_items.index((row, button, indicator)) == self._active_page
+            indicator.configure(bg=t["accent"] if selected else t["bg2"])
+            button.configure(bg=t["btn_active"] if selected else t["bg2"], fg=t["fg"] if selected else t["fg2"], activebackground=t["btn_active"], activeforeground=t["fg"], font=("Microsoft YaHei UI", 11, "bold" if selected else "normal"))
+        if self._settings_hint_label is not None:
+            self._settings_hint_label.configure(foreground=t["fg2"])
+        if self._platform_hint_label is not None:
+            self._platform_hint_label.configure(foreground=t["fg2"])
+        for canvas in self._settings_canvases:
+            canvas.configure(background=t["bg"])
+
+        # 主题切换按钮文字
+        if self._theme_btn is not None:
+            self._theme_btn.configure(text="☀" if dark else "☾")
+
+        self._apply_ui_font_size()
+
+    def _apply_ui_font_size(self) -> None:
+        try:
+            size = max(8, min(20, int(self.ui_font_size_var.get().strip() or 10)))
+        except ValueError:
+            size = 10
+        fn = "Microsoft YaHei UI" if sys.platform == "win32" else ("PingFang SC" if sys.platform == "darwin" else "Sans")
+        font = (fn, size)
+        font_bold = (fn, size, "bold")
+        style = ttk.Style(self.root)
+        style.configure("TLabel", font=font)
+        style.configure("TButton", font=font)
+        style.configure("Nav.TButton", font=(fn, size + 1))
+        style.configure("NavSelected.TButton", font=(fn, size + 1, "bold"))
+        style.configure("TEntry", font=font)
+        style.configure("TCombobox", font=font)
+        style.configure("TCheckbutton", font=font)
+        style.configure("TRadiobutton", font=font)
+        style.configure("TNotebook.Tab", font=font)
+        style.configure("Settings.TNotebook.Tab", font=(fn, size + 1, "bold"))
+        style.configure("TLabelframe.Label", font=font_bold)
+        style.configure("Treeview", font=font, rowheight=size + 10)
+        style.configure("Treeview.Heading", font=font_bold)
+        if self._brand_label is not None:
+            self._brand_label.configure(font=(fn, size + 5, "bold"))
+        if hasattr(self, "log_text"):
+            mono = "Cascadia Mono" if sys.platform == "win32" else ("Menlo" if sys.platform == "darwin" else "Monospace")
+            mono_font = (mono, size)
+            self.log_text.configure(font=mono_font)
+            self.log_text.tag_configure("ts", font=mono_font)
+            self.log_text.tag_configure("bracket", font=(mono, size, "bold"))
+
+    def _toggle_theme(self) -> None:
+        self._apply_theme(not self._dark_mode)
+
+    @staticmethod
+    def _left_nav_label(index: int, label: str) -> str:
+        return _pad_display_text(f"{index:02d}  {label}", LEFT_NAV_TAB_WIDTH)
+
+    def _apply_root_icon(self) -> None:
+        icon_candidates = (
+            CORE_DIR / "256x.ico",
+            APP_DIR / "core" / "256x.ico",
+            BUNDLE_DIR / "core" / "256x.ico",
+            APP_DIR / "256x.ico",
+        )
+        for icon_path in icon_candidates:
+            if not icon_path.exists():
+                continue
+            try:
+                self.root.iconbitmap(str(icon_path))
+                return
+            except tk.TclError:
+                continue
+
+    def _build_ui(self) -> None:
+        main = ttk.Frame(self.root, padding=(20, 14, 20, 20))
+        main.grid(sticky="nsew")
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(0, weight=1)
+        main.columnconfigure(0, weight=1)
+        main.rowconfigure(1, weight=1)
+
+        # --- 顶部：品牌、合并状态与分组操作 ---
+        top = ttk.Frame(main)
+        top.grid(row=0, column=0, sticky="ew", pady=(0, 14), ipady=5)
+        top.columnconfigure(1, weight=1)
+
+        self._brand_label = ttk.Label(top, text="弹幕排队姬")
+        self._brand_label.grid(row=0, column=0, sticky="w", padx=(0, 22))
+
+        status_box = ttk.Frame(top)
+        status_box.grid(row=0, column=1, sticky="w")
+        self._header_dot_label = ttk.Label(status_box, text="●", font=("Segoe UI Symbol", 11, "bold"))
+        self._header_dot_label.pack(side="left")
+        ttk.Label(status_box, textvariable=self.header_status_var).pack(side="left", padx=(7, 0))
+
+        btn_bar = ttk.Frame(top)
+        btn_bar.grid(row=0, column=2, sticky="e")
+        self._start_button = ttk.Button(btn_bar, text="启动服务", style="Primary.TButton", command=self.start_server)
+        self._start_button.grid(row=0, column=0, padx=(0, 8))
+        self._stop_button = ttk.Button(btn_bar, text="停止", style="Danger.TButton", command=self.stop_server)
+        self._stop_button.grid(row=0, column=1, padx=(0, 8))
+        ttk.Button(btn_bar, text="登录配置", command=self.open_config).grid(row=0, column=2, padx=(0, 8))
+        ttk.Button(btn_bar, text="队列看板", command=self.open_web).grid(row=0, column=3, padx=(0, 8))
+        ttk.Button(btn_bar, text="OBS 弹窗", command=self.open_overlay_window).grid(row=0, column=4, padx=(0, 8))
+        self._theme_btn = ttk.Button(btn_bar, text="☀", width=3, style="Icon.TButton", command=self._toggle_theme)
+        self._theme_btn.grid(row=0, column=5)
+
+        self._startup_indicator = ttk.Frame(btn_bar)
+        self._startup_indicator.grid(row=1, column=0, columnspan=6, sticky="ew", pady=(7, 0))
+        self._startup_indicator.columnconfigure(1, weight=1)
+        ttk.Label(self._startup_indicator, textvariable=self.startup_status_var, width=18).grid(row=0, column=0, sticky="w", padx=(0, 8))
+        self._startup_progress = ttk.Progressbar(self._startup_indicator, mode="indeterminate", length=170)
+        self._startup_progress.grid(row=0, column=1, sticky="ew")
+        self._startup_indicator.grid_remove()
+
+        # --- 左侧导航 + 单层内容区 ---
+        shell = ttk.Frame(main)
+        shell.grid(row=1, column=0, sticky="nsew")
+        shell.columnconfigure(1, weight=1)
+        shell.rowconfigure(0, weight=1)
+        nav = tk.Frame(shell, width=166, bd=0, highlightthickness=0)
+        nav.grid(row=0, column=0, sticky="nsw", padx=(0, 14))
+        nav.grid_propagate(False)
+        self._nav_frame = nav
+        content = ttk.Frame(shell, style="Card.TFrame", padding=14)
+        content.grid(row=0, column=1, sticky="nsew")
+        content.columnconfigure(0, weight=1)
+        content.rowconfigure(0, weight=1)
+
+        page_defs = (
+            ("日志", self._build_log_tab), ("当前排队", self._build_queue_tab), ("设置", self._build_settings_tab),
+            ("透明窗口", self._build_overlay_tab), ("权限", self._build_quanxian_tab), ("性能", self._build_perf_tab),
+            ("关于", self._build_about_tab),
+        )
+        for index, (label, builder) in enumerate(page_defs):
+            row = tk.Frame(nav, bd=0, highlightthickness=0)
+            row.pack(fill="x", pady=1)
+            indicator = tk.Frame(row, width=3, bd=0)
+            indicator.pack(side="left", fill="y")
+            button = tk.Button(row, text=label, command=lambda i=index: self._show_page(i), anchor="w", padx=13, pady=10, bd=0, relief="flat", highlightthickness=0, cursor="hand2")
+            button.pack(side="left", fill="x", expand=True)
+            self._nav_items.append((row, button, indicator))
+            page = ttk.Frame(content, padding=2)
+            page.grid(row=0, column=0, sticky="nsew")
+            builder(page)
+            self._content_pages.append(page)
+
+        self._apply_theme(self._dark_mode)
+        self._show_page(0)
+        self._refresh_header_status()
+
+    def _show_page(self, index: int) -> None:
+        if not self._content_pages:
+            return
+        self._active_page = max(0, min(index, len(self._content_pages) - 1))
+        self._content_pages[self._active_page].tkraise()
+        theme = self._THEME_DARK if self._dark_mode else self._THEME_LIGHT
+        for item_index, (row, button, indicator) in enumerate(self._nav_items):
+            selected = item_index == self._active_page
+            button.configure(bg=theme["btn_active"] if selected else theme["bg2"], fg=theme["fg"] if selected else theme["fg2"], activebackground=theme["btn_active"], activeforeground=theme["fg"], font=("Microsoft YaHei UI", 11, "bold" if selected else "normal"))
+            row.configure(bg=theme["bg2"])
+            indicator.configure(bg=theme["accent"] if selected else theme["bg2"])
+
+    def _refresh_header_status(self) -> None:
+        running = self._backend_is_running()
+        room = self.roomid_var.get().strip() or "--"
+        if self._backend_starting:
+            connection = "正在启动"
+        else:
+            connection = "已连接" if "已连接" in self.ws_text_var.get() and "未连接" not in self.ws_text_var.get() else ("服务运行中" if running else "服务未启动")
+        self.header_status_var.set(f"{connection} · 房间 {room}")
+        if self._header_dot_label is not None:
+            theme = self._THEME_DARK if self._dark_mode else self._THEME_LIGHT
+            self._header_dot_label.configure(foreground=theme["status_ok"] if running else theme["error"])
+
+    def _build_queue_tab(self, frame: ttk.Frame) -> None:
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(1, weight=1)
+
+        # 顶部：排队人数 + 状态 + 手动刷新按钮
+        top_bar = ttk.Frame(frame)
+        top_bar.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        self.queue_count_var = tk.StringVar(value="当前排队：0 人")
+        ttk.Label(top_bar, textvariable=self.queue_count_var, font=("Arial", 11, "bold")).pack(side="left")
+        self.queue_status_var = tk.StringVar(value="")
+        ttk.Label(top_bar, textvariable=self.queue_status_var, foreground="#0a0", width=28).pack(side="left", padx=(10, 0))
+        ttk.Button(top_bar, text="刷新", command=lambda: threading.Thread(target=self._refresh_queue_list, daemon=True).start()).pack(side="right")
+        self.queue_slot_combo_top = ttk.Combobox(
+            top_bar,
+            textvariable=self.queue_slot_var,
+            values=[str(slot) for slot in range(1, MAX_QUEUE_ARCHIVE_SLOTS + 1)],
+            width=4,
+            state="readonly",
+        )
+        self.queue_slot_combo_top.pack(side="right", padx=(0, 6))
+        self.queue_slot_combo_top.bind("<<ComboboxSelected>>", self._on_queue_slot_selected)
+        ttk.Label(top_bar, text="存档").pack(side="right", padx=(0, 4))
+
+        # 排队列表（Treeview + 滚动条）
+        tree_frame = ttk.Frame(frame)
+        tree_frame.grid(row=1, column=0, sticky="nsew")
+        tree_frame.columnconfigure(0, weight=1)
+        tree_frame.rowconfigure(0, weight=1)
+
+        columns = ("seq", "item_id", "content")
+        self.queue_tree = ttk.Treeview(tree_frame, columns=columns, show="headings", selectmode="browse")
+        self.queue_tree.heading("seq", text="#")
+        self.queue_tree.heading("item_id", text="ID")
+        self.queue_tree.heading("content", text="排队内容")
+        self.queue_tree.column("seq", width=40, minwidth=30, anchor="center", stretch=False)
+        self.queue_tree.column("item_id", width=160, minwidth=80, anchor="w")
+        self.queue_tree.column("content", width=300, minwidth=100, anchor="w")
+
+        y_scroll = ttk.Scrollbar(tree_frame, orient="vertical", command=self.queue_tree.yview)
+        self.queue_tree.configure(yscrollcommand=y_scroll.set)
+
+        self.queue_tree.grid(row=0, column=0, sticky="nsew")
+        y_scroll.grid(row=0, column=1, sticky="ns")
+        self.queue_tree.bind("<Double-1>", self._on_queue_double_click)
+
+        # 操作按钮栏
+        op_bar = ttk.Frame(frame)
+        op_bar.grid(row=2, column=0, sticky="ew", pady=(6, 0))
+        ttk.Button(op_bar, text="删除", command=self._queue_delete).pack(side="left", padx=(0, 4))
+        ttk.Button(op_bar, text="上移", command=self._queue_move_up).pack(side="left", padx=(0, 4))
+        ttk.Button(op_bar, text="下移", command=self._queue_move_down).pack(side="left", padx=(0, 4))
+        ttk.Button(op_bar, text="在下方新增", command=self._queue_insert).pack(side="left", padx=(0, 4))
+        ttk.Button(op_bar, text="一键清空", command=self._queue_clear).pack(side="right")
+
+        # 启动定时刷新
+        self.root.after(2000, self._auto_refresh_queue)
+
+    @staticmethod
+    def _parse_queue_item(item: str) -> tuple[str, str]:
+        """将原始排队条目解析为 (id, 内容)。"""
+        try:
+            backend_server = load_backend_server_module()
+            return backend_server.queue_item_to_parts(item)
+        except Exception:
+            text = str(item or "").strip()
+            if not text:
+                return "", ""
+            parts = text.split(" ", 1)
+            item_id = parts[0].strip()
+            content = parts[1].strip() if len(parts) > 1 else ""
+            return item_id, content
+
+    @staticmethod
+    def _queue_entry_to_item(item_id: str, content: str) -> str:
+        try:
+            backend_server = load_backend_server_module()
+            return str(backend_server.queue_parts_to_item(item_id, content) or "").strip()
+        except Exception:
+            item_id_text = str(item_id or "").strip()
+            content_text = str(content or "").strip()
+            return f"{item_id_text} {content_text}".rstrip()
+
+    def _queue_entries_to_items(self, entries: list[dict[str, str]]) -> list[str]:
+        items: list[str] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            item = self._queue_entry_to_item(entry.get("id", ""), entry.get("content", ""))
+            if item:
+                items.append(item)
+        return items
+
+    def _load_style_data(self) -> dict[str, Any]:
+        style = dict(self._DEFAULT_STYLE)
+        try:
+            backend_server = load_backend_server_module()
+            data = backend_server.load_style()
+            if isinstance(data, dict):
+                style.update(data)
+        except Exception:
+            pass
+        return style
+
+    @staticmethod
+    def _detect_overlay_font_path() -> str:
+        if sys.platform != "win32":
+            return ""
+        fonts_dir = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+        candidates = (
+            "msyhbd.ttc",
+            "msyh.ttc",
+            "simhei.ttf",
+            "simsun.ttc",
+            "arial.ttf",
+        )
+        for candidate in candidates:
+            path = fonts_dir / candidate
+            if path.exists():
+                return str(path)
+        return ""
+
+    @staticmethod
+    def _sanitize_overlay_dimension(value: Any, default: int, minimum: int) -> int:
+        try:
+            parsed = int(str(value).strip() or default)
+        except (TypeError, ValueError):
+            parsed = default
+        return max(minimum, parsed)
+
+    @staticmethod
+    def _sanitize_overlay_scale(value: Any) -> int:
+        try:
+            parsed = int(str(value).strip() or DEFAULT_OVERLAY_SETTINGS["scale"])
+        except (TypeError, ValueError):
+            parsed = DEFAULT_OVERLAY_SETTINGS["scale"]
+        return max(40, min(250, parsed))
+
+    def _get_overlay_settings(self) -> dict[str, int]:
+        return {
+            "width": self._sanitize_overlay_dimension(self.overlay_width_var.get(), DEFAULT_OVERLAY_SETTINGS["width"], OVERLAY_MIN_WIDTH),
+            "height": self._sanitize_overlay_dimension(self.overlay_height_var.get(), DEFAULT_OVERLAY_SETTINGS["height"], OVERLAY_MIN_HEIGHT),
+            "scale": self._sanitize_overlay_scale(self.overlay_scale_var.get()),
+        }
+
+    def _set_overlay_settings(self, settings: dict[str, Any] | None) -> dict[str, int]:
+        raw = settings if isinstance(settings, dict) else {}
+        normalized = {
+            "width": self._sanitize_overlay_dimension(raw.get("width", DEFAULT_OVERLAY_SETTINGS["width"]), DEFAULT_OVERLAY_SETTINGS["width"], OVERLAY_MIN_WIDTH),
+            "height": self._sanitize_overlay_dimension(raw.get("height", DEFAULT_OVERLAY_SETTINGS["height"]), DEFAULT_OVERLAY_SETTINGS["height"], OVERLAY_MIN_HEIGHT),
+            "scale": self._sanitize_overlay_scale(raw.get("scale", DEFAULT_OVERLAY_SETTINGS["scale"])),
+        }
+        self.overlay_width_var.set(str(normalized["width"]))
+        self.overlay_height_var.set(str(normalized["height"]))
+        self.overlay_scale_var.set(str(normalized["scale"]))
+        return normalized
+
+    def _backend_is_running(self) -> bool:
+        return bool(self.server_proc and self.server_proc.poll() is None)
+
+    def _set_queue_slot_selection(self, slot: int) -> int:
+        slot = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(slot)))
+        self.queue_slot_choice_var.set(slot)
+        self.queue_slot_var.set(str(slot))
+        return slot
+
+    def _get_selected_slot(self) -> int:
+        try:
+            slot = int(str(self.queue_slot_var.get()).strip() or self.queue_slot_choice_var.get())
+        except (TypeError, ValueError, tk.TclError):
+            try:
+                slot = int(self.queue_slot_choice_var.get())
+            except (TypeError, ValueError, tk.TclError):
+                slot = 1
+        return self._set_queue_slot_selection(slot)
+
+    @staticmethod
+    def _platform_label_to_value(label: Any) -> str:
+        return PLATFORM_LABEL_TO_VALUE.get(str(label or "").strip(), "bilibili")
+
+    @staticmethod
+    def _platform_value_to_label(value: Any) -> str:
+        return PLATFORM_VALUE_TO_LABEL.get(str(value or "").strip().lower(), PLATFORM_VALUE_TO_LABEL["bilibili"])
+
+    def _set_platform_slot_selection(self, slot: int) -> int:
+        slot = min(MAX_QUEUE_ARCHIVE_SLOTS, max(1, int(slot)))
+        self.platform_config_slot_choice_var.set(slot)
+        self.platform_config_slot_var.set(str(slot))
+        return slot
+
+    def _get_selected_platform_slot(self) -> int:
+        try:
+            slot = int(str(self.platform_config_slot_var.get()).strip() or self.platform_config_slot_choice_var.get())
+        except (TypeError, ValueError, tk.TclError):
+            try:
+                slot = int(self.platform_config_slot_choice_var.get())
+            except (TypeError, ValueError, tk.TclError):
+                slot = 1
+        return self._set_platform_slot_selection(slot)
+
+    def _set_platform_config_payload(self, payload: dict[str, Any] | None) -> None:
+        raw = payload if isinstance(payload, dict) else {}
+        bilibili_cfg = raw.get("bilibili", {})
+        douyin_cfg = raw.get("douyin", {})
+        douyin_bootstrap_cfg = douyin_cfg.get("bootstrap", {}) if isinstance(douyin_cfg, dict) else {}
+        douyin_ws_cfg = douyin_cfg.get("ws", {}) if isinstance(douyin_cfg, dict) else {}
+        douyin_live_info_cfg = douyin_cfg.get("live_info", {}) if isinstance(douyin_cfg, dict) else {}
+        douyin_extra_query_cfg = douyin_cfg.get("extra_query", {}) if isinstance(douyin_cfg, dict) else {}
+
+        self.platform_var.set(self._platform_value_to_label(raw.get("platform", "bilibili")))
+        self.roomid_var.set(str(bilibili_cfg.get("roomid", 0) if isinstance(bilibili_cfg, dict) else 0))
+        self.uid_var.set(str(bilibili_cfg.get("uid", 0) if isinstance(bilibili_cfg, dict) else 0))
+        self.cookie_var.set(str(bilibili_cfg.get("cookie", "") if isinstance(bilibili_cfg, dict) else ""))
+
+        self.douyin_enabled_var.set(bool(douyin_cfg.get("enabled", False)) if isinstance(douyin_cfg, dict) else False)
+        self.douyin_live_id_var.set(str(douyin_cfg.get("live_id", "") if isinstance(douyin_cfg, dict) else ""))
+        self.douyin_cookie_var.set(str(douyin_cfg.get("cookie", "") if isinstance(douyin_cfg, dict) else ""))
+        self.douyin_signature_var.set(str(douyin_cfg.get("signature", "") if isinstance(douyin_cfg, dict) else ""))
+        self.douyin_cursor_var.set(str(douyin_bootstrap_cfg.get("cursor", "") if isinstance(douyin_bootstrap_cfg, dict) else ""))
+        self.douyin_internal_ext_var.set(str(douyin_bootstrap_cfg.get("internal_ext", "") if isinstance(douyin_bootstrap_cfg, dict) else ""))
+        self.douyin_ws_auto_reconnect_var.set(bool(douyin_ws_cfg.get("auto_reconnect", True)) if isinstance(douyin_ws_cfg, dict) else True)
+        self.douyin_ws_heartbeat_var.set(str(douyin_ws_cfg.get("heartbeat_interval_seconds", 5.0) if isinstance(douyin_ws_cfg, dict) else 5.0))
+        self.douyin_ws_reconnect_delay_var.set(str(douyin_ws_cfg.get("reconnect_delay_seconds", 2.0) if isinstance(douyin_ws_cfg, dict) else 2.0))
+        self.douyin_room_id_var.set(str(douyin_live_info_cfg.get("room_id", "") if isinstance(douyin_live_info_cfg, dict) else ""))
+        self.douyin_user_id_var.set(str(douyin_live_info_cfg.get("user_id", "") if isinstance(douyin_live_info_cfg, dict) else ""))
+        self.douyin_user_unique_id_var.set(str(douyin_live_info_cfg.get("user_unique_id", "") if isinstance(douyin_live_info_cfg, dict) else ""))
+        self.douyin_anchor_id_var.set(str(douyin_live_info_cfg.get("anchor_id", "") if isinstance(douyin_live_info_cfg, dict) else ""))
+        self.douyin_sec_uid_var.set(str(douyin_live_info_cfg.get("sec_uid", "") if isinstance(douyin_live_info_cfg, dict) else ""))
+        self.douyin_ttwid_var.set(str(douyin_live_info_cfg.get("ttwid", "") if isinstance(douyin_live_info_cfg, dict) else ""))
+        self.douyin_extra_query_var.set(
+            json.dumps(douyin_extra_query_cfg, ensure_ascii=False)
+            if isinstance(douyin_extra_query_cfg, dict) and douyin_extra_query_cfg
+            else "{}"
+        )
+        for platform_key in RESERVED_PLATFORM_KEYS:
+            reserved_cfg = raw.get(platform_key, {})
+            if not isinstance(reserved_cfg, dict):
+                reserved_cfg = {}
+            var_map = self.reserved_platform_vars.get(platform_key, {})
+            bool_var = var_map.get("enabled")
+            if isinstance(bool_var, tk.BooleanVar):
+                bool_var.set(bool(reserved_cfg.get("enabled", False)))
+            for field_name in ("room_id", "room_url", "anchor_id", "cookie", "auth_token", "notes"):
+                field_var = var_map.get(field_name)
+                if isinstance(field_var, tk.StringVar):
+                    field_var.set(str(reserved_cfg.get(field_name, "") or ""))
+            extra_var = var_map.get("extra")
+            if isinstance(extra_var, tk.StringVar):
+                extra_value = reserved_cfg.get("extra", {})
+                extra_var.set(
+                    json.dumps(extra_value, ensure_ascii=False)
+                    if isinstance(extra_value, dict) and extra_value
+                    else "{}"
+                )
+        self._refresh_platform_settings_visibility()
+
+    def _gather_platform_config_payload(self) -> dict[str, Any]:
+        extra_query_text = self.douyin_extra_query_var.get().strip()
+        extra_query: dict[str, Any]
+        if not extra_query_text:
+            extra_query = {}
+        else:
+            parsed_extra_query = json.loads(extra_query_text)
+            if not isinstance(parsed_extra_query, dict):
+                raise ValueError("抖音额外查询参数必须是 JSON 对象")
+            extra_query = parsed_extra_query
+
+        platform_value = self._platform_label_to_value(self.platform_var.get())
+        try:
+            from core.douyin_protocol import normalize_live_id as _normalize_douyin_live_id
+        except Exception:  # noqa: BLE001
+            _normalize_douyin_live_id = lambda value: str(value or "").strip()
+        douyin_fetch_input = self.douyin_fetch_url_var.get().strip()
+        douyin_live_id = _normalize_douyin_live_id(self.douyin_live_id_var.get().strip() or douyin_fetch_input)
+        douyin_enabled = bool(self.douyin_enabled_var.get())
+        if platform_value == "douyin" and douyin_live_id:
+            douyin_enabled = True
+        if douyin_live_id and self.douyin_live_id_var.get().strip() != douyin_live_id:
+            self.douyin_live_id_var.set(douyin_live_id)
+        if bool(self.douyin_enabled_var.get()) != douyin_enabled:
+            self.douyin_enabled_var.set(douyin_enabled)
+        payload = {
+            "platform": platform_value,
+            "bilibili": {
+                "roomid": _coerce_int_field(self.roomid_var.get(), 0, "B站直播间号"),
+                "uid": _coerce_int_field(self.uid_var.get(), 0, "B站 UID"),
+                "cookie": self.cookie_var.get().strip(),
+            },
+            "douyin": {
+                "enabled": douyin_enabled,
+                "live_id": douyin_live_id,
+                "cookie": self.douyin_cookie_var.get().strip(),
+                "signature": self.douyin_signature_var.get().strip(),
+                "bootstrap": {
+                    "cursor": self.douyin_cursor_var.get().strip(),
+                    "internal_ext": self.douyin_internal_ext_var.get().strip(),
+                },
+                "ws": {
+                    "auto_reconnect": bool(self.douyin_ws_auto_reconnect_var.get()),
+                    "heartbeat_interval_seconds": _coerce_float_field(
+                        self.douyin_ws_heartbeat_var.get(),
+                        5.0,
+                        "抖音心跳间隔",
+                    ),
+                    "reconnect_delay_seconds": _coerce_float_field(
+                        self.douyin_ws_reconnect_delay_var.get(),
+                        2.0,
+                        "抖音重连延迟",
+                    ),
+                },
+                "live_info": {
+                    "room_id": self.douyin_room_id_var.get().strip(),
+                    "user_id": self.douyin_user_id_var.get().strip(),
+                    "user_unique_id": self.douyin_user_unique_id_var.get().strip(),
+                    "anchor_id": self.douyin_anchor_id_var.get().strip(),
+                    "sec_uid": self.douyin_sec_uid_var.get().strip(),
+                    "ttwid": self.douyin_ttwid_var.get().strip(),
+                },
+                "extra_query": extra_query,
+            },
+        }
+        for platform_key in RESERVED_PLATFORM_KEYS:
+            var_map = self.reserved_platform_vars.get(platform_key, {})
+            extra_text = str(var_map.get("extra").get()).strip() if isinstance(var_map.get("extra"), tk.StringVar) else ""
+            if not extra_text:
+                reserved_extra = {}
+            else:
+                parsed_reserved_extra = json.loads(extra_text)
+                if not isinstance(parsed_reserved_extra, dict):
+                    raise ValueError(f"{self._platform_value_to_label(platform_key)} extra 参数必须是 JSON 对象")
+                reserved_extra = parsed_reserved_extra
+            payload[platform_key] = {
+                "enabled": bool(var_map.get("enabled").get()) if isinstance(var_map.get("enabled"), tk.BooleanVar) else False,
+                "room_id": str(var_map.get("room_id").get()).strip() if isinstance(var_map.get("room_id"), tk.StringVar) else "",
+                "room_url": str(var_map.get("room_url").get()).strip() if isinstance(var_map.get("room_url"), tk.StringVar) else "",
+                "anchor_id": str(var_map.get("anchor_id").get()).strip() if isinstance(var_map.get("anchor_id"), tk.StringVar) else "",
+                "cookie": str(var_map.get("cookie").get()).strip() if isinstance(var_map.get("cookie"), tk.StringVar) else "",
+                "auth_token": str(var_map.get("auth_token").get()).strip() if isinstance(var_map.get("auth_token"), tk.StringVar) else "",
+                "notes": str(var_map.get("notes").get()).strip() if isinstance(var_map.get("notes"), tk.StringVar) else "",
+                "extra": reserved_extra,
+            }
+        return payload
+
+    @staticmethod
+    def _parse_url_query_room_id(raw: str) -> str:
+        """从 URL query string 中直接提取 room_id（如有）。"""
+        try:
+            import urllib.parse as _up
+            parsed = _up.urlparse(raw)
+            qs = _up.parse_qs(parsed.query)
+            candidates = qs.get("room_id") or qs.get("roomId") or []
+            for v in candidates:
+                if str(v).isdigit():
+                    return str(v)
+        except Exception:  # noqa: BLE001
+            pass
+        return ""
+
+    def _load_douyin_live_info_from_input(self, raw: str | None = None) -> tuple[Any, str]:
+        """根据链接或 live_id 拉取抖音直播间参数并返回解析结果。"""
+        source_text = str(raw or "").strip() or self.douyin_fetch_url_var.get().strip() or self.douyin_live_id_var.get().strip()
+        if not source_text:
+            raise ValueError("请先填写直播间链接或 live_id")
+
+        from core.douyin_protocol import (
+            DouyinLiveInfo,
+            fetch_douyin_live_info,
+            map_room_status,
+            normalize_live_id,
+        )
+
+        live_id = normalize_live_id(source_text)
+        if not live_id:
+            raise ValueError("无法从输入中提取 live_id")
+
+        cookie = self.douyin_cookie_var.get().strip()
+        info: DouyinLiveInfo = fetch_douyin_live_info(live_id, cookie=cookie)
+        url_room_id = self._parse_url_query_room_id(source_text)
+        if url_room_id:
+            info.room_id = url_room_id
+        return info, map_room_status(info.room_status)
+
+    def _fetch_bilibili_params(self) -> None:
+        """Resolve the room, logged-in account and danmu discovery without exposing tokens."""
+        try:
+            from core.bilibili_protocol import extract_bilibili_room_id
+            room_id = extract_bilibili_room_id(self.bilibili_room_url_var.get()) or _coerce_int_field(self.roomid_var.get(), 0, "B站直播间号")
+        except ValueError as exc:
+            self._bilibili_fetch_status_var.set(str(exc))
+            return
+        if room_id <= 0:
+            self._bilibili_fetch_status_var.set("请先填写有效的 B站直播间号")
+            return
+        cookie = self.cookie_var.get().strip()
+        self._bilibili_fetch_status_var.set("正在解析房间、账号和弹幕服务器…")
+
+        def _worker() -> None:
+            try:
+                from core.bilibili_protocol import fetch_bilibili_room_config
+
+                result = fetch_bilibili_room_config(room_id, cookie)
+                self.root.after(0, lambda result=result: self._apply_bilibili_room_config(result))
+            except Exception as exc:  # noqa: BLE001
+                self.root.after(0, lambda exc=exc: self._bilibili_fetch_status_var.set(f"获取失败：{exc}"))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _build_gift_queue_tab(self, frame: ttk.Frame) -> None:
+        frame.columnconfigure(0, weight=1)
+        box = ttk.LabelFrame(frame, text="送礼插队规则（默认关闭）", padding=18)
+        box.grid(row=0, column=0, sticky="ew")
+        box.columnconfigure(1, weight=1)
+        ttk.Checkbutton(box, text="启用 B站礼物插队", variable=self.gift_queue_enabled_var).grid(row=0, column=0, columnspan=2, sticky="w", pady=6)
+        from core.bilibili_gifts import GIFT_BATTERIES
+        ttk.Label(box, text="指定礼物（可多选）").grid(row=1, column=0, sticky="nw", pady=6)
+        self.gift_listbox = tk.Listbox(box, selectmode="multiple", exportselection=False, height=10)
+        for name, batteries in GIFT_BATTERIES.items():
+            self.gift_listbox.insert("end", f"{name} · {'自定义' if batteries is None else str(batteries) + ' 电池'}")
+        self.gift_listbox.grid(row=1, column=1, sticky="ew", pady=6)
+        self.gift_listbox.bind("<<ListboxSelect>>", lambda _e: self._update_gift_condition_hint())
+        ttk.Label(box, text="最低电池数").grid(row=2, column=0, sticky="w", pady=6)
+        ttk.Entry(box, textvariable=self.gift_battery_min_var).grid(row=2, column=1, sticky="ew", pady=6)
+        ttk.Label(box, text="每次可排人数").grid(row=3, column=0, sticky="w", pady=6)
+        ttk.Entry(box, textvariable=self.gift_slots_per_gift_var).grid(row=3, column=1, sticky="ew", pady=6)
+        ttk.Label(box, text="插入名次（0=队尾）").grid(row=4, column=0, sticky="w", pady=6)
+        ttk.Entry(box, textvariable=self.gift_insert_rank_var).grid(row=4, column=1, sticky="ew", pady=6)
+        ttk.Checkbutton(box, text="允许多次插队（每次合格送礼继续累加名额）", variable=self.gift_allow_multiple_var).grid(row=5, column=0, columnspan=2, sticky="w", pady=6)
+        ttk.Checkbutton(box, text="仅允许礼物排队（临时将插入名次设为 0）", variable=self.gift_only_var, command=self._toggle_gift_only).grid(row=6, column=0, columnspan=2, sticky="w", pady=6)
+        ttk.Label(box, textvariable=self.gift_condition_hint_var, wraplength=760).grid(row=7, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        for var in (self.gift_queue_enabled_var, self.gift_battery_min_var, self.gift_slots_per_gift_var, self.gift_insert_rank_var, self.gift_allow_multiple_var):
+            var.trace_add("write", lambda *_: self._update_gift_condition_hint())
+        self._update_gift_condition_hint()
+
+    def _selected_gift_names(self) -> list[str]:
+        from core.bilibili_gifts import GIFT_BATTERIES
+        names = list(GIFT_BATTERIES)
+        return [names[i] for i in self.gift_listbox.curselection()] if self.gift_listbox else []
+
+    def _toggle_gift_only(self) -> None:
+        if self.gift_only_var.get():
+            current = max(0, _coerce_int_field(self.gift_insert_rank_var.get(), 1, "插入名次"))
+            if current > 0:
+                self.gift_saved_insert_rank_var.set(str(current))
+            self.gift_insert_rank_var.set("0")
+        else:
+            self.gift_insert_rank_var.set(str(max(1, _coerce_int_field(self.gift_saved_insert_rank_var.get(), 1, "原插入名次"))))
+        self._update_gift_condition_hint()
+
+    def _update_gift_condition_hint(self) -> None:
+        gifts = self._selected_gift_names()
+        battery = self.gift_battery_min_var.get().strip() or "0"
+        slots = self.gift_slots_per_gift_var.get().strip() or "1"
+        rank = self.gift_insert_rank_var.get().strip() or "1"
+        gift_text = "、".join(gifts) if gifts else "未指定礼物"
+        repeat = "可重复累加" if self.gift_allow_multiple_var.get() else "每个用户仅一次"
+        enabled = "已启用" if self.gift_queue_enabled_var.get() else "已关闭"
+        battery_text = f"单次电池数 ≥ {battery}" if battery.lstrip("+").isdigit() and int(battery) > 0 else "未启用电池门槛"
+        self.gift_condition_hint_var.set(f"条件：{enabled}；送出 [{gift_text}] 或 {battery_text}；每次可排 {slots} 名；插入名次 {rank}；{repeat}。有名字按输入顺序处理，无名字使用送礼者本人。")
+
+    def _apply_bilibili_room_config(self, result: dict[str, Any]) -> None:
+        real_room_id = _coerce_int_field(result.get("room_id"), 0, "真实房间号")
+        if real_room_id > 0:
+            self.roomid_var.set(str(real_room_id))
+        auth_uid = _coerce_int_field(result.get("auth_uid"), 0, "登录 UID")
+        if auth_uid > 0:
+            self.uid_var.set(str(auth_uid))
+        live_labels = {0: "未开播", 1: "直播中", 2: "轮播中"}
+        live_status = _coerce_int_field(result.get("live_status"), 0, "直播状态")
+        account = str(result.get("auth_uname", "") or "")
+        account_text = f"登录账号 {account}/{auth_uid}" if account else (f"登录 UID {auth_uid}" if auth_uid else "游客监听")
+        text = (
+            f"获取成功 · 真实房间 {real_room_id} · 主播 UID {result.get('anchor_uid', 0)} · "
+            f"{live_labels.get(live_status, f'状态 {live_status}')} · "
+            f"弹幕服务器 {result.get('danmu_server_count', 0)} 个 · {account_text}"
+        )
+        self._bilibili_fetch_status_var.set(text)
+        self._append_log(f"[GUI] B站监听配置已获取：{text}")
+
+    def _should_refresh_douyin_live_info_before_save(self) -> bool:
+        try:
+            from core.douyin_protocol import normalize_live_id as _normalize_douyin_live_id
+        except Exception:  # noqa: BLE001
+            _normalize_douyin_live_id = lambda value: str(value or "").strip()
+
+        source_text = self.douyin_fetch_url_var.get().strip() or self.douyin_live_id_var.get().strip()
+        if not source_text:
+            return False
+
+        expected_live_id = _normalize_douyin_live_id(source_text)
+        current_live_id = _normalize_douyin_live_id(self.douyin_live_id_var.get().strip())
+        required_fields = (
+            self.douyin_room_id_var.get().strip(),
+            self.douyin_user_id_var.get().strip(),
+            self.douyin_user_unique_id_var.get().strip(),
+            self.douyin_anchor_id_var.get().strip(),
+            self.douyin_sec_uid_var.get().strip(),
+            self.douyin_ttwid_var.get().strip(),
+        )
+        return bool(self.douyin_fetch_url_var.get().strip()) or current_live_id != expected_live_id or any(
+            not value for value in required_fields
+        )
+
+    def _ensure_douyin_live_info_before_save(self) -> None:
+        if self._platform_label_to_value(self.platform_var.get()) != "douyin":
+            return
+        if not self._should_refresh_douyin_live_info_before_save():
+            return
+
+        source_text = self.douyin_fetch_url_var.get().strip() or self.douyin_live_id_var.get().strip()
+        self.status_var.set("正在获取抖音直播间参数…")
+        self._douyin_fetch_status_var.set("保存前自动获取直播间参数…")
+        self.root.update_idletasks()
+        try:
+            info, status_str = self._load_douyin_live_info_from_input(source_text)
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"抖音直播间参数获取失败: {exc}") from exc
+
+        self._apply_douyin_live_info(info, status_str)
+        self._append_log(f"[GUI] 已根据抖音链接回填直播参数 live_id={info.live_id} room_id={info.room_id}")
+
+    def _fetch_douyin_params(self) -> None:
+        """在后台线程中获取抖音直播间参数，成功后回填到 UI。"""
+        raw = self.douyin_fetch_url_var.get().strip()
+        if not raw:
+            self._douyin_fetch_status_var.set("请先填写直播间链接或 live_id")
+            return
+        self._douyin_fetch_status_var.set("正在获取，请稍候…")
+
+        def _worker():
+            try:
+                info, status_str = self._load_douyin_live_info_from_input(raw)
+                self.root.after(
+                    0,
+                    lambda info=info, status_str=status_str: self._apply_douyin_live_info(info, status_str),
+                )
+            except Exception as exc:  # noqa: BLE001
+                msg = f"获取失败: {exc}"
+                self.root.after(0, lambda: self._douyin_fetch_status_var.set(msg))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _apply_douyin_live_info(self, info: Any, room_status: str) -> None:
+        """将抖取的直播间信息回填到设置页各输入框。"""
+        self.douyin_enabled_var.set(True)
+        if info.live_id:
+            self.douyin_live_id_var.set(info.live_id)
+        if info.room_id:
+            self.douyin_room_id_var.set(info.room_id)
+        if info.user_id:
+            self.douyin_user_id_var.set(info.user_id)
+        if info.user_unique_id:
+            self.douyin_user_unique_id_var.set(info.user_unique_id)
+        if info.anchor_id:
+            self.douyin_anchor_id_var.set(info.anchor_id)
+        if info.sec_uid:
+            self.douyin_sec_uid_var.set(info.sec_uid)
+        if info.ttwid:
+            self.douyin_ttwid_var.set(info.ttwid)
+        nickname = str(info.anchor_nickname or "").strip()
+        status_parts = []
+        if nickname:
+            status_parts.append(f"主播: {nickname}")
+        status_parts.append(f"状态: {room_status}")
+        status_parts.append("已自动启用抖音配置")
+        self._douyin_fetch_status_var.set("  ".join(status_parts) if status_parts else "获取成功")
+
+    def _refresh_platform_settings_visibility(self, _event=None) -> None:
+        platform_value = self._platform_label_to_value(self.platform_var.get())
+        self.platform_var.set(self._platform_value_to_label(platform_value))
+        gift_page = getattr(self, "_bilibili_gift_settings_page", None)
+        settings_notebook = getattr(self, "settings_notebook", None)
+        if gift_page is not None and settings_notebook is not None:
+            if platform_value == "bilibili":
+                settings_notebook.tab(gift_page, state="normal", text="B站礼物")
+            else:
+                if settings_notebook.select() == str(gift_page):
+                    settings_notebook.select(1)  # 平台参数
+                settings_notebook.tab(gift_page, state="hidden")
+        if not hasattr(self, "_platform_frame_map"):
+            return
+        for key, frame in self._platform_frame_map.items():
+            if key == platform_value:
+                frame.grid()
+            else:
+                frame.grid_remove()
+
+    def _build_reserved_platform_frame(self, parent: ttk.Frame, platform_key: str) -> ttk.LabelFrame:
+        meta = RESERVED_PLATFORM_UI_META.get(platform_key, {})
+        frame = ttk.LabelFrame(parent, text=meta.get("title", f"{platform_key}(预留)"), padding=8)
+        frame.grid(row=0, column=0, sticky="ew")
+        frame.columnconfigure(1, weight=1)
+        frame.columnconfigure(3, weight=1)
+        ttk.Label(
+            frame,
+            text=meta.get("hint", "当前仅预留配置位，暂不接入弹幕。"),
+            foreground="#666666",
+        ).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
+
+        var_map = self.reserved_platform_vars.get(platform_key, {})
+        ttk.Checkbutton(
+            frame,
+            text="启用该平台占位配置",
+            variable=var_map.get("enabled"),
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 6))
+
+        for idx, (field_name, label) in enumerate(RESERVED_PLATFORM_FIELD_DEFS, start=2):
+            ttk.Label(frame, text=label).grid(row=idx, column=0, sticky="w", pady=4)
+            field_var = var_map.get(field_name)
+            width = 64 if field_name in {"room_url", "notes", "extra"} else 48
+            span = 3 if field_name in {"room_url", "notes", "extra"} else 1
+            ttk.Entry(frame, textvariable=field_var, width=width).grid(
+                row=idx,
+                column=1,
+                columnspan=span,
+                sticky="ew",
+                pady=4,
+            )
+        return frame
+
+    def _apply_platform_config_slot_selection(self, slot: int) -> None:
+        slot = self._set_platform_slot_selection(slot)
+        try:
+            backend_server = load_backend_server_module()
+            payload = backend_server.load_platform_config_slot(slot)
+            updated = backend_server._merge_config(  # type: ignore[attr-defined]
+                backend_server.load_config(),
+                {
+                    **{
+                        "platform": payload.get("platform", "bilibili"),
+                        "bilibili": payload.get("bilibili", {}),
+                        "douyin": payload.get("douyin", {}),
+                    },
+                    **{
+                        platform_key: payload.get(platform_key, {})
+                        for platform_key in RESERVED_PLATFORM_KEYS
+                    },
+                    "platform_config_archive": {
+                        "slots": MAX_QUEUE_ARCHIVE_SLOTS,
+                        "active_slot": slot,
+                    },
+                },
+            )
+            backend_server.save_config(updated)
+        except Exception as exc:  # noqa: BLE001
+            self._append_log(f"[GUI] 读取平台配置槽位失败: {exc}")
+            return
+        self._set_platform_config_payload(payload)
+        self._prev_platform_config_slot = slot
+        self._append_log(
+            f"[GUI] 已切换平台配置槽位 {slot}（{self._platform_value_to_label(payload.get('platform', 'bilibili'))}）"
+        )
+
+    def _on_platform_config_slot_selected(self, _event=None) -> None:
+        slot = self._get_selected_platform_slot()
+        if slot == self._prev_platform_config_slot:
+            self._refresh_platform_settings_visibility()
+            return
+        self._apply_platform_config_slot_selection(slot)
+
+    def _persist_active_slot_to_config(self, slot: int) -> bool:
+        try:
+            backend_server = load_backend_server_module()
+            config = backend_server.load_config()
+            updated = backend_server._merge_config(  # type: ignore[attr-defined]
+                config,
+                {
+                    "queue_archive": {
+                        "enabled": bool(config.get("queue_archive", {}).get("enabled", True)),
+                        "slots": MAX_QUEUE_ARCHIVE_SLOTS,
+                        "active_slot": slot,
+                    }
+                },
+            )
+            backend_server.save_config(updated)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            self.root.after(0, lambda: self._append_log(f"[GUI] 写入存档槽位配置失败: {exc}"))
+            return False
+
+    def _on_queue_slot_selected(self, _event=None) -> None:
+        slot = self._get_selected_slot()
+        if slot == self._prev_slot:
+            return
+        threading.Thread(target=self._apply_queue_slot_selection, args=(slot,), daemon=True).start()
+
+    def _apply_queue_slot_selection(self, slot: int) -> None:
+        self._persist_active_slot_to_config(slot)
+        self._switch_queue_slot(slot)
+
+    @staticmethod
+    def _build_queue_entry(item_id: Any, content: Any, last_operation_at: Any = "") -> dict[str, str]:
+        return {
+            "id": str(item_id or "").strip(),
+            "content": str(content or "").strip(),
+            "last_operation_at": str(last_operation_at or "").strip(),
+        }
+
+    @staticmethod
+    def _queue_entry_timestamp_now() -> str:
+        import time as _time
+
+        return _time.strftime("%Y-%m-%d %H:%M:%S", _time.localtime())
+
+    def _normalize_queue_entries(self, items: list[str]) -> list[dict[str, str]]:
+        entries: list[dict[str, str]] = []
+        for item in items:
+            item_id, content = self._parse_queue_item(str(item))
+            entries.append(self._build_queue_entry(item_id, content))
+        return entries
+
+    def _extract_entries_from_payload(self, payload: Any) -> list[dict[str, str]]:
+        if isinstance(payload, dict):
+            raw_entries = payload.get("entries")
+            if isinstance(raw_entries, list):
+                entries: list[dict[str, str]] = []
+                for entry in raw_entries:
+                    if not isinstance(entry, dict):
+                        continue
+                    entries.append(
+                        self._build_queue_entry(
+                            entry.get("id", ""),
+                            entry.get("content", ""),
+                            entry.get("last_operation_at", ""),
+                        )
+                    )
+                return entries
+            raw_queue = payload.get("queue")
+            if isinstance(raw_queue, list):
+                return self._normalize_queue_entries([str(item) for item in raw_queue])
+        return []
+
+    def _active_slot_csv(self) -> "Path | None":
+        """返回当前活跃存档槽位的 CSV 路径（可在后端未启动时使用）。"""
+        try:
+            bs = load_backend_server_module()
+            slot = self._get_selected_slot()
+            return bs.PD_DIR / f"queue_archive_slot_{slot}.csv"
+        except Exception:
+            return None
+
+    def _read_queue_entries_from_csv(self) -> list[dict[str, str]]:
+        """直接从当前槽位 CSV 读取结构化队列条目。"""
+        path = self._active_slot_csv()
+        if path is None or not path.exists():
+            return []
+        try:
+            bs = load_backend_server_module()
+            entries = bs.read_queue_archive_entries(path)
+            return [
+                self._build_queue_entry(
+                    entry.get("id", ""),
+                    entry.get("content", ""),
+                    entry.get("last_operation_at", ""),
+                )
+                for entry in entries
+                if isinstance(entry, dict)
+            ]
+        except Exception:
+            return []
+
+    def _write_queue_entries_to_csv(self, entries: list[dict[str, str]]) -> bool:
+        """将结构化条目列表写回当前活跃存档槽位的 CSV。"""
+        path = self._active_slot_csv()
+        if path is None:
+            return False
+        try:
+            bs = load_backend_server_module()
+            bs.write_queue_archive_entries(path, entries)
+            return True
+        except Exception as exc:
+            self.root.after(0, lambda: self._append_log(f"[GUI] CSV 写入失败: {exc}"))
+            return False
+
+    def _fetch_queue_entries_from_backend(self) -> list[dict[str, str]] | None:
+        if not self._backend_is_running():
+            return None
+        port = self.port_var.get().strip() or "9816"
+        url = f"http://127.0.0.1:{port}/api/queue/state"
+        try:
+            with urllib.request.urlopen(url, timeout=2) as resp:
+                payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+            return self._extract_entries_from_payload(payload)
+        except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError):
+            return None
+
+    def _refresh_queue_list(self) -> None:
+        """后端运行时优先读取内存队列，否则读取当前槽位 CSV。"""
+        if self._queue_refresh_busy:
+            return
+        self._queue_refresh_busy = True
+        try:
+            entries = self._fetch_queue_entries_from_backend()
+            if entries is None:
+                entries = self._read_queue_entries_from_csv()
+            self.root.after(0, lambda: self._update_queue_ui(entries))
+        finally:
+            self._queue_refresh_busy = False
+
+    def _update_queue_ui(self, entries: list[dict[str, str]]) -> None:
+        # 记住当前选中序号，刷新后恢复
+        sel = self.queue_tree.selection()
+        prev_idx: int | None = None
+        if sel:
+            try:
+                prev_idx = int(self.queue_tree.item(sel[0], "values")[0])
+            except (IndexError, ValueError):
+                prev_idx = None
+
+        for child in self.queue_tree.get_children():
+            self.queue_tree.delete(child)
+        iid_map: dict[int, str] = {}
+        for idx, entry in enumerate(entries, start=1):
+            iid = self.queue_tree.insert(
+                "",
+                "end",
+                values=(idx, str(entry.get("id", "")), str(entry.get("content", ""))),
+            )
+            iid_map[idx] = iid
+        self.queue_count_var.set(f"当前排队：{len(entries)} 人")
+
+        # 恢复选中
+        if prev_idx is not None and prev_idx in iid_map:
+            self.queue_tree.selection_set(iid_map[prev_idx])
+            self.queue_tree.see(iid_map[prev_idx])
+
+    def _auto_refresh_queue(self) -> None:
+        threading.Thread(target=self._refresh_queue_list, daemon=True).start()
+        self.root.after(3000, self._auto_refresh_queue)
+
+    def _overlay_window_alive(self) -> bool:
+        return bool(self._overlay_window and self._overlay_window.winfo_exists())
+
+    def _overlay_default_geometry(self) -> str:
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        settings = self._get_overlay_settings()
+        width = min(screen_w - 48, settings["width"])
+        height = min(screen_h - 48, settings["height"])
+        x = max(24, screen_w - width - 80)
+        y = max(24, min(120, screen_h - height - 80))
+        return f"{width}x{height}+{x}+{y}"
+
+    def _overlay_process_running(self) -> bool:
+        return bool(self.overlay_proc and self.overlay_proc.poll() is None)
+
+    def _build_overlay_command(self) -> list[str]:
+        settings = self._get_overlay_settings()
+        port = self.port_var.get().strip() or "9816"
+        common_args = [
+            "--port",
+            str(port),
+            "--width",
+            str(settings["width"]),
+            "--height",
+            str(settings["height"]),
+            "--scale",
+            str(settings["scale"]),
+        ]
+        if not self._overlay_topmost:
+            common_args.append("--no-topmost")
+        if getattr(sys, "frozen", False):
+            overlay_exe = APP_DIR / OVERLAY_HOST_EXE_NAME
+            if overlay_exe.exists():
+                return [str(overlay_exe), *common_args]
+            # fallback: run overlay host in current executable
+            return [sys.executable, "--overlay-host", *common_args]
+        return [sys.executable, str(OVERLAY_HOST_SCRIPT), *common_args]
+
+    def _stop_overlay_process(self) -> None:
+        if not self._overlay_process_running():
+            self.overlay_proc = None
+            return
+        try:
+            self.overlay_proc.terminate()
+            self.overlay_proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            self.overlay_proc.kill()
+        finally:
+            self.overlay_proc = None
+
+    def _restart_overlay_process(self) -> None:
+        self._stop_overlay_process()
+        self.open_overlay_window()
+
+    def _set_overlay_topmost(self, topmost: bool) -> None:
+        self._overlay_topmost = topmost
+        if self._overlay_process_running():
+            self._restart_overlay_process()
+        self._append_log(f"[GUI] 透明窗口已{'置顶' if topmost else '取消置顶'}")
+
+    def open_overlay_window(self) -> None:
+        if self._overlay_process_running():
+            self._append_log("[GUI] 透明弹窗进程已在运行")
+            return
+
+        command = self._build_overlay_command()
+        if not command:
+            messagebox.showerror("启动失败", "无法构建透明弹窗启动命令")
+            return
+
+        try:
+            overlay_env = os.environ.copy()
+            overlay_env["DANMUJI_OVERLAY_FROM_GUI"] = "1"
+            _cflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            self.overlay_proc = subprocess.Popen(
+                command,
+                cwd=str(APP_DIR),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+                creationflags=_cflags,
+                env=overlay_env,
+            )
+            if self.overlay_proc.stdout:
+                threading.Thread(
+                    target=self._read_stream_lines,
+                    args=(self.overlay_proc.stdout, "OVERLAY"),
+                    daemon=True,
+                ).start()
+            if self.overlay_proc.stderr:
+                threading.Thread(
+                    target=self._read_stream_lines,
+                    args=(self.overlay_proc.stderr, "OVERLAY-ERR"),
+                    daemon=True,
+                ).start()
+            self._append_log(f"[GUI] 透明弹窗进程已启动：{' '.join(command)}")
+            if getattr(sys, "frozen", False) and not (APP_DIR / OVERLAY_HOST_EXE_NAME).exists():
+                self._append_log(
+                    f"[GUI] 未找到独立进程 {OVERLAY_HOST_EXE_NAME}，当前使用主程序进程承载透明窗"
+                )
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("启动失败", str(exc))
+
+    def _close_overlay_window(self) -> None:
+        if not self._overlay_window_alive():
+            self._overlay_window = None
+            self._overlay_canvas = None
+            self._overlay_photo = None
+            return
+        try:
+            self._overlay_window.destroy()
+        except tk.TclError:
+            pass
+        self._overlay_window = None
+        self._overlay_canvas = None
+        self._overlay_photo = None
+        self._overlay_refresh_running = False
+        self._overlay_resize_mode = ""
+        self._overlay_drag_origin = None
+        self._overlay_resize_origin = None
+
+    def _apply_overlay_native_window_style(self) -> None:
+        if sys.platform != "win32" or ctypes is None or not self._overlay_window_alive():
+            return
+        try:
+            hwnd = self._overlay_window.winfo_id()
+            GWL_EXSTYLE = -20
+            WS_EX_APPWINDOW = 0x00040000
+            WS_EX_TOOLWINDOW = 0x00000080
+            SWP_NOMOVE = 0x0002
+            SWP_NOSIZE = 0x0001
+            SWP_NOZORDER = 0x0004
+            SWP_FRAMECHANGED = 0x0020
+            exstyle = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            exstyle = (exstyle | WS_EX_APPWINDOW) & ~WS_EX_TOOLWINDOW
+            ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, exstyle)
+            ctypes.windll.user32.SetWindowPos(
+                hwnd,
+                0,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED,
+            )
+            self._overlay_window.withdraw()
+            self._overlay_window.after(10, self._restore_overlay_window)
+        except Exception as exc:  # noqa: BLE001
+            self._append_log(f"[GUI] 透明弹窗任务栏样式设置失败: {exc}")
+
+    def _restore_overlay_window(self) -> None:
+        if not self._overlay_window_alive():
+            return
+        self._overlay_window.deiconify()
+        self._overlay_window.lift()
+        try:
+            self._overlay_window.wm_attributes("-topmost", self._overlay_topmost)
+        except tk.TclError:
+            pass
+
+    @staticmethod
+    def _overlay_hit_test(x: int, y: int, width: int, height: int) -> str:
+        margin = OVERLAY_RESIZE_MARGIN
+        left = x <= margin
+        right = x >= width - margin
+        top = y <= margin
+        bottom = y >= height - margin
+        if top and left:
+            return "nw"
+        if top and right:
+            return "ne"
+        if bottom and left:
+            return "sw"
+        if bottom and right:
+            return "se"
+        if left:
+            return "w"
+        if right:
+            return "e"
+        if top:
+            return "n"
+        if bottom:
+            return "s"
+        return ""
+
+    @staticmethod
+    def _overlay_cursor_for_mode(mode: str) -> str:
+        return {
+            "n": "sb_v_double_arrow",
+            "s": "sb_v_double_arrow",
+            "e": "sb_h_double_arrow",
+            "w": "sb_h_double_arrow",
+            "ne": "size_ne_sw",
+            "sw": "size_ne_sw",
+            "nw": "size_nw_se",
+            "se": "size_nw_se",
+        }.get(mode, "")
+
+    def _set_overlay_cursor(self, cursor: str) -> None:
+        if self._overlay_canvas is None:
+            return
+        try:
+            self._overlay_canvas.configure(cursor=cursor)
+        except tk.TclError:
+            self._overlay_canvas.configure(cursor="")
+
+    def _on_overlay_canvas_motion(self, event) -> None:
+        if not self._overlay_window_alive() or self._overlay_canvas is None:
+            return
+        if self._overlay_drag_origin or self._overlay_resize_mode:
+            return
+        mode = self._overlay_hit_test(
+            int(event.x),
+            int(event.y),
+            self._overlay_canvas.winfo_width(),
+            self._overlay_canvas.winfo_height(),
+        )
+        self._set_overlay_cursor(self._overlay_cursor_for_mode(mode))
+
+    def _begin_overlay_interaction(self, event) -> None:
+        if not self._overlay_window_alive() or self._overlay_canvas is None:
+            return
+        mode = self._overlay_hit_test(
+            int(event.x),
+            int(event.y),
+            self._overlay_canvas.winfo_width(),
+            self._overlay_canvas.winfo_height(),
+        )
+        if mode:
+            self._overlay_resize_mode = mode
+            self._overlay_resize_origin = (event.x_root, event.y_root)
+            self._overlay_resize_geometry = (
+                self._overlay_window.winfo_x(),
+                self._overlay_window.winfo_y(),
+                self._overlay_window.winfo_width(),
+                self._overlay_window.winfo_height(),
+            )
+            self._set_overlay_cursor(self._overlay_cursor_for_mode(mode))
+            return
+        self._overlay_drag_origin = (event.x_root, event.y_root)
+        self._overlay_window_origin = (
+            self._overlay_window.winfo_x(),
+            self._overlay_window.winfo_y(),
+        )
+        self._set_overlay_cursor("fleur")
+
+    def _perform_overlay_interaction(self, event) -> None:
+        if not self._overlay_window_alive():
+            return
+        if self._overlay_resize_mode and self._overlay_resize_origin and self._overlay_resize_geometry:
+            dx = event.x_root - self._overlay_resize_origin[0]
+            dy = event.y_root - self._overlay_resize_origin[1]
+            x, y, width, height = self._overlay_resize_geometry
+            new_x, new_y, new_w, new_h = x, y, width, height
+            if "e" in self._overlay_resize_mode:
+                new_w = max(OVERLAY_MIN_WIDTH, width + dx)
+            if "s" in self._overlay_resize_mode:
+                new_h = max(OVERLAY_MIN_HEIGHT, height + dy)
+            if "w" in self._overlay_resize_mode:
+                new_w = max(OVERLAY_MIN_WIDTH, width - dx)
+                new_x = x + (width - new_w)
+            if "n" in self._overlay_resize_mode:
+                new_h = max(OVERLAY_MIN_HEIGHT, height - dy)
+                new_y = y + (height - new_h)
+            self._overlay_window.geometry(f"{new_w}x{new_h}+{new_x}+{new_y}")
+            return
+        if not self._overlay_drag_origin or not self._overlay_window_origin:
+            return
+        dx = event.x_root - self._overlay_drag_origin[0]
+        dy = event.y_root - self._overlay_drag_origin[1]
+        x = self._overlay_window_origin[0] + dx
+        y = self._overlay_window_origin[1] + dy
+        self._overlay_window.geometry(f"+{x}+{y}")
+
+    def _end_overlay_interaction(self, _event) -> None:
+        self._overlay_drag_origin = None
+        self._overlay_window_origin = None
+        self._overlay_resize_mode = ""
+        self._overlay_resize_origin = None
+        self._overlay_resize_geometry = None
+        self._set_overlay_cursor("")
+
+    def _on_overlay_window_configure(self, event) -> None:
+        if not self._overlay_window_alive():
+            return
+        if event.widget is not self._overlay_window:
+            return
+        current_size = (self._overlay_window.winfo_width(), self._overlay_window.winfo_height())
+        if current_size != self._overlay_last_size:
+            self._overlay_last_size = current_size
+            self.overlay_width_var.set(str(max(OVERLAY_MIN_WIDTH, current_size[0])))
+            self.overlay_height_var.set(str(max(OVERLAY_MIN_HEIGHT, current_size[1])))
+            self._redraw_overlay()
+
+    def _toggle_overlay_topmost(self) -> None:
+        if not self._overlay_window_alive():
+            return
+        self._overlay_topmost = not self._overlay_topmost
+        try:
+            self._overlay_window.wm_attributes("-topmost", self._overlay_topmost)
+        except tk.TclError:
+            pass
+        status = "开启" if self._overlay_topmost else "关闭"
+        self._append_log(f"[GUI] 透明弹窗置顶已{status}")
+
+    def _refresh_overlay_async(self) -> None:
+        if not self._overlay_window_alive():
+            self._overlay_refresh_running = False
+            return
+        if self._overlay_refresh_running:
+            return
+        self._overlay_refresh_running = True
+        threading.Thread(target=self._refresh_overlay_worker, daemon=True).start()
+
+    def _refresh_overlay_worker(self) -> None:
+        try:
+            entries = self._fetch_queue_entries_from_backend()
+            if entries is None:
+                entries = self._read_queue_entries_from_csv()
+            items = [
+                f"{str(entry.get('id', '')).strip()} {str(entry.get('content', '')).strip()}".rstrip()
+                for entry in entries
+                if isinstance(entry, dict) and str(entry.get("id", "") or entry.get("content", "")).strip()
+            ]
+            style = self._load_style_data()
+        except Exception:
+            items = []
+            style = dict(self._DEFAULT_STYLE)
+
+        def _apply() -> None:
+            if not self._overlay_window_alive():
+                self._overlay_refresh_running = False
+                return
+            changed = items != self._overlay_items or style != self._overlay_style
+            self._overlay_items = list(items)
+            self._overlay_style = dict(style)
+            self._overlay_refresh_running = False
+            if changed:
+                self._redraw_overlay()
+            self.root.after(OVERLAY_REFRESH_MS, self._refresh_overlay_async)
+
+        self.root.after(0, _apply)
+
+    def _overlay_get_font(self, size: int) -> Any:
+        size = max(12, int(size))
+        cache_key = (self._overlay_font_path, size)
+        cached = self._overlay_font_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        try:
+            if self._overlay_font_path:
+                font = ImageFont.truetype(self._overlay_font_path, size=size)
+            else:
+                font = ImageFont.load_default()
+        except Exception:  # noqa: BLE001
+            font = ImageFont.load_default()
+        self._overlay_font_cache[cache_key] = font
+        return font
+
+    @staticmethod
+    def _parse_overlay_color(value: Any, fallback: str) -> tuple[int, int, int, int]:
+        text = str(value or "").strip() or fallback
+        lowered = text.lower()
+        if lowered.startswith("rgba(") and lowered.endswith(")"):
+            parts = [part.strip() for part in lowered[5:-1].split(",")]
+            if len(parts) == 4:
+                try:
+                    red = max(0, min(255, int(float(parts[0]))))
+                    green = max(0, min(255, int(float(parts[1]))))
+                    blue = max(0, min(255, int(float(parts[2]))))
+                    alpha_raw = float(parts[3])
+                    alpha = int(max(0.0, min(1.0, alpha_raw)) * 255) if alpha_raw <= 1 else int(max(0, min(255, alpha_raw)))
+                    return red, green, blue, alpha
+                except ValueError:
+                    pass
+        if lowered.startswith("rgb(") and lowered.endswith(")"):
+            parts = [part.strip() for part in lowered[4:-1].split(",")]
+            if len(parts) == 3:
+                try:
+                    return (
+                        max(0, min(255, int(float(parts[0])))),
+                        max(0, min(255, int(float(parts[1])))),
+                        max(0, min(255, int(float(parts[2])))),
+                        255,
+                    )
+                except ValueError:
+                    pass
+        try:
+            red, green, blue = ImageColor.getrgb(text)
+        except Exception:  # noqa: BLE001
+            red, green, blue = ImageColor.getrgb(fallback)
+        return red, green, blue, 255
+
+    @staticmethod
+    def _make_overlay_gradient(size: tuple[int, int], start: tuple[int, int, int, int], end: tuple[int, int, int, int], horizontal: bool) -> Any:
+        width, height = size
+        gradient = Image.new("RGBA", (max(1, width), max(1, height)), start)
+        draw = ImageDraw.Draw(gradient)
+        span = (width - 1) if horizontal else (height - 1)
+        span = max(1, span)
+        for offset in range(span + 1):
+            ratio = offset / span
+            color = tuple(
+                int(start[idx] + (end[idx] - start[idx]) * ratio)
+                for idx in range(4)
+            )
+            if horizontal:
+                draw.line((offset, 0, offset, height), fill=color)
+            else:
+                draw.line((0, offset, width, offset), fill=color)
+        return gradient
+
+    def _wrap_overlay_text(self, text: str, font: Any, max_width: int) -> str:
+        content = str(text or "").strip()
+        if not content or max_width <= 24:
+            return content
+        probe = Image.new("RGBA", (4, 4), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(probe)
+        lines: list[str] = []
+        current = ""
+        for char in content:
+            candidate = f"{current}{char}"
+            try:
+                width = int(draw.textlength(candidate, font=font))
+            except Exception:  # noqa: BLE001
+                width = len(candidate) * 12
+            if current and width > max_width:
+                lines.append(current)
+                current = char
+            else:
+                current = candidate
+        if current:
+            lines.append(current)
+        return "\n".join(lines)
+
+    def _draw_overlay_gradient_text(
+        self,
+        image: Any,
+        text: str,
+        x: int,
+        y: int,
+        font: Any,
+        start_color: tuple[int, int, int, int],
+        end_color: tuple[int, int, int, int],
+        stroke_color: tuple[int, int, int, int],
+        *,
+        stroke_width: int,
+        horizontal: bool,
+        spacing: int = 4,
+    ) -> tuple[int, int]:
+        if not text:
+            return 0, 0
+        probe = Image.new("RGBA", (4, 4), (0, 0, 0, 0))
+        probe_draw = ImageDraw.Draw(probe)
+        bbox = probe_draw.multiline_textbbox(
+            (0, 0),
+            text,
+            font=font,
+            spacing=spacing,
+            stroke_width=stroke_width,
+        )
+        width = max(1, bbox[2] - bbox[0])
+        height = max(1, bbox[3] - bbox[1])
+        pad = stroke_width + 4
+        layer_size = (width + pad * 2, height + pad * 2)
+        text_pos = (pad - bbox[0], pad - bbox[1])
+
+        outline = Image.new("RGBA", layer_size, (0, 0, 0, 0))
+        outline_draw = ImageDraw.Draw(outline)
+        outline_draw.multiline_text(
+            text_pos,
+            text,
+            font=font,
+            fill=stroke_color,
+            spacing=spacing,
+            stroke_width=stroke_width,
+            stroke_fill=stroke_color,
+        )
+
+        fill_mask = Image.new("L", layer_size, 0)
+        fill_draw = ImageDraw.Draw(fill_mask)
+        fill_draw.multiline_text(
+            text_pos,
+            text,
+            font=font,
+            fill=255,
+            spacing=spacing,
+        )
+        gradient = self._make_overlay_gradient(layer_size, start_color, end_color, horizontal)
+        fill_layer = Image.new("RGBA", layer_size, (0, 0, 0, 0))
+        fill_layer.paste(gradient, (0, 0), fill_mask)
+        outline.alpha_composite(fill_layer)
+        image.alpha_composite(outline, (int(x), int(y)))
+        return width + pad * 2, height + pad * 2
+
+    def _redraw_overlay(self) -> None:
+        if not self._overlay_window_alive() or self._overlay_canvas is None or not PIL_AVAILABLE:
+            return
+        canvas = self._overlay_canvas
+        width = max(1, canvas.winfo_width())
+        height = max(1, canvas.winfo_height())
+        if width <= 1 or height <= 1:
+            return
+
+        style = dict(self._DEFAULT_STYLE)
+        style.update(self._overlay_style)
+        overlay_settings = self._get_overlay_settings()
+        try:
+            queue_font_size = int(str(style.get("queue_font_size", 50)).strip() or 50)
+        except ValueError:
+            queue_font_size = 50
+        queue_font_size = max(14, int(queue_font_size * overlay_settings["scale"] / 100))
+
+        grad_start = self._parse_overlay_color(style.get("text_grad_start", "#f7f7f7"), "#f7f7f7")
+        grad_end = self._parse_overlay_color(style.get("text_grad_end", "rgba(255,255,255,0.6)"), "rgba(255,255,255,0.6)")
+        stroke = self._parse_overlay_color(style.get("text_stroke_color", "#000000"), "#000000")
+        border_base = self._parse_overlay_color(style.get("text_color", "#eaf6ff"), "#eaf6ff")
+        border_color = (border_base[0], border_base[1], border_base[2], 110)
+
+        image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        border_px = 1
+        border_draw = ImageDraw.Draw(image)
+        for offset in range(border_px):
+            border_draw.rectangle(
+                (offset, offset, width - 1 - offset, height - 1 - offset),
+                outline=border_color,
+            )
+
+        queue_font = self._overlay_get_font(queue_font_size)
+        queue_x = 14
+        queue_y = 12
+        max_text_width = max(80, width - queue_x - 16)
+        line_gap = max(2, int(queue_font_size * 0.16))
+        stroke_width = max(2, int(queue_font_size * 0.05))
+        for item in self._overlay_items:
+            text = str(item or "").strip()
+            if not text:
+                continue
+            wrapped = self._wrap_overlay_text(text, queue_font, max_text_width)
+            _text_width, text_height = self._draw_overlay_gradient_text(
+                image,
+                wrapped,
+                queue_x,
+                queue_y,
+                queue_font,
+                grad_start,
+                grad_end,
+                stroke,
+                stroke_width=stroke_width,
+                horizontal=True,
+            )
+            queue_y += text_height + line_gap
+            if queue_y >= height - queue_font_size:
+                break
+
+        self._overlay_photo = ImageTk.PhotoImage(image)
+        canvas.delete("all")
+        canvas.create_image(0, 0, anchor="nw", image=self._overlay_photo)
+
+    def _build_blacklist_tab(self, frame: ttk.Frame) -> None:
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(1, weight=1)
+
+        top_bar = ttk.Frame(frame)
+        top_bar.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        self.blacklist_count_var = tk.StringVar(value="黑名单：0 人")
+        ttk.Label(top_bar, textvariable=self.blacklist_count_var, font=("Arial", 11, "bold")).pack(side="left")
+        self.blacklist_status_var = tk.StringVar(value="")
+        ttk.Label(top_bar, textvariable=self.blacklist_status_var, foreground="#0a0", width=28).pack(side="left", padx=(10, 0))
+        ttk.Button(top_bar, text="刷新", command=lambda: threading.Thread(target=self._refresh_blacklist_list, daemon=True).start()).pack(side="right")
+
+        tree_frame = ttk.Frame(frame)
+        tree_frame.grid(row=1, column=0, sticky="nsew")
+        tree_frame.columnconfigure(0, weight=1)
+        tree_frame.rowconfigure(0, weight=1)
+
+        columns = ("seq", "name")
+        self.blacklist_tree = ttk.Treeview(tree_frame, columns=columns, show="headings", selectmode="browse")
+        self.blacklist_tree.heading("seq", text="#")
+        self.blacklist_tree.heading("name", text="用户名")
+        self.blacklist_tree.column("seq", width=40, minwidth=30, anchor="center", stretch=False)
+        self.blacklist_tree.column("name", width=420, minwidth=120, anchor="w")
+
+        y_scroll = ttk.Scrollbar(tree_frame, orient="vertical", command=self.blacklist_tree.yview)
+        self.blacklist_tree.configure(yscrollcommand=y_scroll.set)
+        self.blacklist_tree.grid(row=0, column=0, sticky="nsew")
+        y_scroll.grid(row=0, column=1, sticky="ns")
+
+        op_bar = ttk.Frame(frame)
+        op_bar.grid(row=2, column=0, sticky="ew", pady=(6, 0))
+        ttk.Button(op_bar, text="新增", command=self._blacklist_add).pack(side="left", padx=(0, 4))
+        ttk.Button(op_bar, text="删除", command=self._blacklist_delete).pack(side="left", padx=(0, 4))
+        ttk.Button(op_bar, text="一键清空", command=self._blacklist_clear).pack(side="right")
+
+        self.root.after(2200, self._auto_refresh_blacklist)
+
+    @staticmethod
+    def _build_blacklist_entry(name: Any) -> dict[str, str]:
+        return {"id": str(name or "").strip(), "content": ""}
+
+    def _normalize_blacklist_entries(self, values: list[Any]) -> list[dict[str, str]]:
+        entries: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for value in values:
+            if isinstance(value, dict):
+                name = str(value.get("id", "") or value.get("content", "")).strip()
+            else:
+                name = str(value or "").strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            entries.append(self._build_blacklist_entry(name))
+        return entries
+
+    def _extract_blacklist_entries_from_payload(self, payload: Any) -> list[dict[str, str]]:
+        if isinstance(payload, dict):
+            raw_entries = payload.get("entries")
+            if isinstance(raw_entries, list):
+                return self._normalize_blacklist_entries(raw_entries)
+        if isinstance(payload, list):
+            return self._normalize_blacklist_entries(payload)
+        return []
+
+    def _blacklist_csv_path(self) -> "Path | None":
+        try:
+            bs = load_backend_server_module()
+            return getattr(bs, "BLACKLIST_PATH", APP_DIR / "core" / "cd" / "blacklist.csv")
+        except Exception:
+            return APP_DIR / "core" / "cd" / "blacklist.csv"
+
+    def _read_blacklist_entries_from_csv(self) -> list[dict[str, str]]:
+        path = self._blacklist_csv_path()
+        if path is None or not path.exists():
+            try:
+                bs = load_backend_server_module()
+                return self._normalize_blacklist_entries(bs.load_quanxian().get("blacklist", []))
+            except Exception:
+                return []
+        try:
+            bs = load_backend_server_module()
+            entries = bs.read_blacklist_entries(path)
+            return self._normalize_blacklist_entries(entries)
+        except Exception:
+            return []
+
+    def _write_blacklist_entries_to_config(self, entries: list[dict[str, str]]) -> bool:
+        try:
+            bs = load_backend_server_module()
+            quanxian = bs.load_quanxian()
+            quanxian["blacklist"] = [str(entry.get("id", "")).strip() for entry in entries if str(entry.get("id", "")).strip()]
+            bs.save_quanxian(quanxian)
+            return True
+        except Exception as exc:
+            self.root.after(0, lambda: self._append_log(f"[GUI] 黑名单保存失败: {exc}"))
+            return False
+
+    def _fetch_blacklist_entries_from_backend(self) -> list[dict[str, str]] | None:
+        if not self._backend_is_running():
+            return None
+        port = self.port_var.get().strip() or "9816"
+        url = f"http://127.0.0.1:{port}/api/blacklist/state"
+        try:
+            with urllib.request.urlopen(url, timeout=2) as resp:
+                payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+            return self._extract_blacklist_entries_from_payload(payload)
+        except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError):
+            return None
+
+    def _refresh_blacklist_list(self) -> None:
+        if self._blacklist_refresh_busy:
+            return
+        self._blacklist_refresh_busy = True
+        try:
+            entries = self._fetch_blacklist_entries_from_backend()
+            if entries is None:
+                entries = self._read_blacklist_entries_from_csv()
+            self.root.after(0, lambda: self._update_blacklist_ui(entries))
+        finally:
+            self._blacklist_refresh_busy = False
+
+    def _update_blacklist_ui(self, entries: list[dict[str, str]]) -> None:
+        sel = self.blacklist_tree.selection()
+        prev_idx: int | None = None
+        if sel:
+            try:
+                prev_idx = int(self.blacklist_tree.item(sel[0], "values")[0])
+            except (IndexError, ValueError):
+                prev_idx = None
+
+        for child in self.blacklist_tree.get_children():
+            self.blacklist_tree.delete(child)
+        iid_map: dict[int, str] = {}
+        for idx, entry in enumerate(entries, start=1):
+            iid = self.blacklist_tree.insert("", "end", values=(idx, str(entry.get("id", ""))))
+            iid_map[idx] = iid
+        self.blacklist_count_var.set(f"黑名单：{len(entries)} 人")
+
+        if prev_idx is not None and prev_idx in iid_map:
+            self.blacklist_tree.selection_set(iid_map[prev_idx])
+            self.blacklist_tree.see(iid_map[prev_idx])
+
+    def _auto_refresh_blacklist(self) -> None:
+        threading.Thread(target=self._refresh_blacklist_list, daemon=True).start()
+        self.root.after(4000, self._auto_refresh_blacklist)
+
+    def _get_selected_blacklist_index(self) -> int | None:
+        sel = self.blacklist_tree.selection()
+        if not sel:
+            return None
+        values = self.blacklist_tree.item(sel[0], "values")
+        try:
+            return int(values[0])
+        except (IndexError, ValueError):
+            return None
+
+    def _blacklist_backend_op(self, path: str, payload: dict[str, Any], status_msg: str = "") -> bool:
+        if not self._backend_is_running():
+            return False
+        port = self.port_var.get().strip() or "9816"
+        url = f"http://127.0.0.1:{port}{path}"
+        body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                result = json.loads(resp.read().decode("utf-8", errors="replace"))
+            entries = self._extract_blacklist_entries_from_payload(result)
+        except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+            self.root.after(0, lambda: self._append_log(f"[GUI] 黑名单操作失败: {exc}"))
+            return False
+
+        import time as _time
+        ts = _time.strftime("%H:%M:%S")
+        msg = f"{ts} {status_msg}" if status_msg else ts
+        self.root.after(0, lambda: (self._update_blacklist_ui(entries), self.blacklist_status_var.set(msg)))
+        return True
+
+    def _blacklist_local_op(self, op, status_msg: str = "") -> None:
+        entries = self._read_blacklist_entries_from_csv()
+        new_entries = op([dict(entry) for entry in entries])
+        if new_entries is None:
+            new_entries = entries
+        new_entries = self._normalize_blacklist_entries(new_entries)
+        if not self._write_blacklist_entries_to_config(new_entries):
+            return
+        final_entries = self._read_blacklist_entries_from_csv()
+        import time as _time
+        ts = _time.strftime("%H:%M:%S")
+        msg = f"{ts} {status_msg}" if status_msg else ts
+        self.root.after(0, lambda: (self._update_blacklist_ui(final_entries), self.blacklist_status_var.set(msg)))
+
+    def _blacklist_add(self) -> None:
+        from tkinter import simpledialog
+        name = simpledialog.askstring("新增黑名单", "请输入要加入黑名单的用户名：", parent=self.root)
+        if not name or not name.strip():
+            return
+        target = name.strip()
+        if self._backend_is_running():
+            threading.Thread(
+                target=self._blacklist_backend_op,
+                args=("/api/blacklist/add", {"name": target}, f"已加入黑名单：{target}"),
+                daemon=True,
+            ).start()
+            return
+
+        def op(entries):
+            entries.append(self._build_blacklist_entry(target))
+            return entries
+
+        threading.Thread(target=self._blacklist_local_op, args=(op, f"已加入黑名单：{target}"), daemon=True).start()
+
+    def _blacklist_delete(self) -> None:
+        idx = self._get_selected_blacklist_index()
+        if idx is None:
+            return
+        if self._backend_is_running():
+            threading.Thread(
+                target=self._blacklist_backend_op,
+                args=("/api/blacklist/delete", {"index": idx}, f"已删除第{idx}个黑名单用户"),
+                daemon=True,
+            ).start()
+            return
+
+        def op(entries):
+            if 1 <= idx <= len(entries):
+                entries.pop(idx - 1)
+            return entries
+
+        threading.Thread(target=self._blacklist_local_op, args=(op, f"已删除第{idx}个黑名单用户"), daemon=True).start()
+
+    def _blacklist_clear(self) -> None:
+        import time
+        now = time.time()
+        if self._blacklist_clear_click_time > 0 and now - self._blacklist_clear_click_time <= 5.0:
+            self._blacklist_clear_click_time = 0.0
+            if self._backend_is_running():
+                threading.Thread(
+                    target=self._blacklist_backend_op,
+                    args=("/api/blacklist/clear", {}, "黑名单已清空"),
+                    daemon=True,
+                ).start()
+            else:
+                threading.Thread(target=self._blacklist_local_op, args=(lambda _entries: [], "黑名单已清空"), daemon=True).start()
+        else:
+            self._blacklist_clear_click_time = now
+            self._append_log("[GUI] 确认清空黑名单？请在 5 秒内再次点击「一键清空」")
+
+    # ── 队列操作辅助 ──────────────────────────────────────────────────────
+
+    def _get_selected_index(self) -> int | None:
+        """返回当前选中项的序号（1-based），未选中则返回 None。"""
+        sel = self.queue_tree.selection()
+        if not sel:
+            return None
+        values = self.queue_tree.item(sel[0], "values")
+        try:
+            return int(values[0])
+        except (IndexError, ValueError):
+            return None
+
+    def _queue_backend_op(self, path: str, payload: dict[str, Any], status_msg: str = "") -> bool:
+        if not self._backend_is_running():
+            return False
+        port = self.port_var.get().strip() or "9816"
+        url = f"http://127.0.0.1:{port}{path}"
+        body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                result = json.loads(resp.read().decode("utf-8", errors="replace"))
+            entries = self._extract_entries_from_payload(result)
+        except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+            self.root.after(0, lambda: self._append_log(f"[GUI] 队列操作失败: {exc}"))
+            return False
+
+        import time as _time
+        ts = _time.strftime("%H:%M:%S")
+        msg = f"{ts} {status_msg}" if status_msg else ts
+        self.root.after(0, lambda: (self._update_queue_ui(entries), self.queue_status_var.set(msg)))
+        return True
+
+    def _queue_local_op(self, op, status_msg: str = "") -> None:
+        entries = self._read_queue_entries_from_csv()
+        new_entries = op([dict(entry) for entry in entries])
+        if new_entries is None:
+            new_entries = entries
+        new_entries = [
+            self._build_queue_entry(
+                entry.get("id", ""),
+                entry.get("content", ""),
+                entry.get("last_operation_at", ""),
+            )
+            for entry in new_entries
+            if isinstance(entry, dict)
+        ]
+        if not self._write_queue_entries_to_csv(new_entries):
+            return
+        import time as _time
+        ts = _time.strftime("%H:%M:%S")
+        msg = f"{ts} {status_msg}" if status_msg else ts
+        self.root.after(0, lambda: (self._update_queue_ui(new_entries), self.queue_status_var.set(msg)))
+
+    def _get_selected_row_values(self) -> tuple[int, str, str] | None:
+        sel = self.queue_tree.selection()
+        if not sel:
+            return None
+        values = self.queue_tree.item(sel[0], "values")
+        try:
+            idx = int(values[0])
+        except (IndexError, ValueError):
+            return None
+        item_id = str(values[1]) if len(values) > 1 else ""
+        content = str(values[2]) if len(values) > 2 else ""
+        return idx, item_id, content
+
+    def _edit_selected_queue_content(self) -> None:
+        selected = self._get_selected_row_values()
+        if selected is None:
+            return
+        idx, item_id, current_content = selected
+        from tkinter import simpledialog
+
+        new_content = simpledialog.askstring(
+            "修改排队内容",
+            f"请修改 {item_id or '该条目'} 的排队内容：",
+            initialvalue=current_content,
+            parent=self.root,
+        )
+        if new_content is None:
+            return
+
+        normalized_content = new_content.strip()
+        if self._backend_is_running():
+            threading.Thread(
+                target=self._queue_backend_op,
+                args=("/api/queue/update", {"index": idx, "content": normalized_content}, f"已修改第{idx}位内容"),
+                daemon=True,
+            ).start()
+            return
+
+        def op(entries):
+            if 1 <= idx <= len(entries):
+                entries[idx - 1]["content"] = normalized_content
+                entries[idx - 1]["last_operation_at"] = self._queue_entry_timestamp_now()
+            return entries
+
+        threading.Thread(target=self._queue_local_op, args=(op, f"已修改第{idx}位内容"), daemon=True).start()
+
+    def _on_queue_double_click(self, event) -> None:
+        row_id = self.queue_tree.identify_row(event.y)
+        if not row_id:
+            return
+        self.queue_tree.selection_set(row_id)
+        self._edit_selected_queue_content()
+
+    def _queue_delete(self) -> None:
+        idx = self._get_selected_index()
+        if idx is None:
+            return
+        if self._backend_is_running():
+            threading.Thread(
+                target=self._queue_backend_op,
+                args=("/api/queue/delete", {"index": idx}, f"已删除第{idx}位"),
+                daemon=True,
+            ).start()
+            return
+
+        def op(entries):
+            if 1 <= idx <= len(entries):
+                entries.pop(idx - 1)
+            return entries
+
+        threading.Thread(target=self._queue_local_op, args=(op, f"已删除第{idx}位"), daemon=True).start()
+
+    def _queue_move_up(self) -> None:
+        idx = self._get_selected_index()
+        if idx is None:
+            return
+        if self._backend_is_running():
+            threading.Thread(
+                target=self._queue_backend_op,
+                args=("/api/queue/move", {"index": idx, "direction": "up"}, f"第{idx}位已上移"),
+                daemon=True,
+            ).start()
+            return
+
+        def op(entries):
+            if 2 <= idx <= len(entries):
+                entries[idx - 2], entries[idx - 1] = entries[idx - 1], entries[idx - 2]
+                ts = self._queue_entry_timestamp_now()
+                entries[idx - 2]["last_operation_at"] = ts
+                entries[idx - 1]["last_operation_at"] = ts
+            return entries
+
+        threading.Thread(target=self._queue_local_op, args=(op, f"第{idx}位已上移"), daemon=True).start()
+
+    def _queue_move_down(self) -> None:
+        idx = self._get_selected_index()
+        if idx is None:
+            return
+        if self._backend_is_running():
+            threading.Thread(
+                target=self._queue_backend_op,
+                args=("/api/queue/move", {"index": idx, "direction": "down"}, f"第{idx}位已下移"),
+                daemon=True,
+            ).start()
+            return
+
+        def op(entries):
+            if 1 <= idx <= len(entries) - 1:
+                entries[idx - 1], entries[idx] = entries[idx], entries[idx - 1]
+                ts = self._queue_entry_timestamp_now()
+                entries[idx - 1]["last_operation_at"] = ts
+                entries[idx]["last_operation_at"] = ts
+            return entries
+
+        threading.Thread(target=self._queue_local_op, args=(op, f"第{idx}位已下移"), daemon=True).start()
+
+    def _queue_insert(self) -> None:
+        idx = self._get_selected_index() or 0
+        from tkinter import simpledialog
+        entry = simpledialog.askstring("在下方新增", "请输入排队内容（如：用户名 角色名）：", parent=self.root)
+        if not entry or not entry.strip():
+            return
+        val = entry.strip()
+        if self._backend_is_running():
+            threading.Thread(
+                target=self._queue_backend_op,
+                args=("/api/queue/insert", {"after": idx, "entry": val}, f"已在第{idx}位后新增"),
+                daemon=True,
+            ).start()
+            return
+
+        item_id, content = self._parse_queue_item(val)
+
+        def op(entries):
+            pos = max(0, min(idx, len(entries)))
+            entries.insert(pos, self._build_queue_entry(item_id, content, self._queue_entry_timestamp_now()))
+            return entries
+
+        threading.Thread(target=self._queue_local_op, args=(op, f"已在第{idx}位后新增"), daemon=True).start()
+
+    def _queue_clear(self) -> None:
+        import time
+        now = time.time()
+        if self._clear_click_time > 0 and now - self._clear_click_time <= 5.0:
+            self._clear_click_time = 0.0
+            if self._backend_is_running():
+                threading.Thread(
+                    target=self._queue_backend_op,
+                    args=("/api/queue/clear", {}, "已清空"),
+                    daemon=True,
+                ).start()
+            else:
+                threading.Thread(target=self._queue_local_op, args=(lambda _entries: [], "已清空"), daemon=True).start()
+        else:
+            self._clear_click_time = now
+            self._append_log("[GUI] 确认清空？请在 5 秒内再次点击「一键清空」")
+
+    # ── 样式设置辅助 ──────────────────────────────────────────────────────
+
+    _DEFAULT_STYLE = {
+        "bg1": "#0e2036", "bg2": "#060b14", "bg3": "#020409",
+        "text_color": "#eaf6ff", "queue_font_size": "50",
+        "queue_font_weight": "700", "queue_font_style": "italic",
+        "text_grad_start": "#f7f7f7", "text_grad_end": "rgba(255,255,255,0.6)",
+        "text_stroke_color": "#000000",
+        "text_stroke_enabled": True,
+    }
+
+    _STYLE_FONT_STYLE_LABEL_TO_VALUE = {
+        "正常": "normal",
+        "斜体": "italic",
+        "倾斜": "oblique",
+    }
+    _STYLE_FONT_STYLE_VALUE_TO_LABEL = {
+        "normal": "正常",
+        "italic": "斜体",
+        "oblique": "倾斜",
+    }
+    _STYLE_FONT_WEIGHT_OPTIONS = (
+        "100 极细",
+        "200 特细",
+        "300 偏细",
+        "400 常规",
+        "500 中等",
+        "600 半粗",
+        "700 粗体",
+        "800 特粗",
+        "900 极粗",
+    )
+    _STYLE_FONT_WEIGHT_LABEL_TO_VALUE = {
+        "100 极细": "100",
+        "200 特细": "200",
+        "300 偏细": "300",
+        "400 常规": "400",
+        "500 中等": "500",
+        "600 半粗": "600",
+        "700 粗体": "700",
+        "800 特粗": "800",
+        "900 极粗": "900",
+    }
+    _STYLE_FONT_WEIGHT_VALUE_TO_LABEL = {
+        "100": "100 极细",
+        "200": "200 特细",
+        "300": "300 偏细",
+        "400": "400 常规",
+        "500": "500 中等",
+        "600": "600 半粗",
+        "700": "700 粗体",
+        "800": "800 特粗",
+        "900": "900 极粗",
+    }
+
+    def _build_style_tab_legacy(self, frame: ttk.Frame) -> None:
+        from tkinter import colorchooser
+        frame.columnconfigure(0, weight=0)
+        frame.columnconfigure(1, weight=1)
+        frame.rowconfigure(0, weight=1)
+
+        left = ttk.Frame(frame)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 16))
+
+        right = ttk.LabelFrame(frame, text="预览效果（近似）")
+        right.grid(row=0, column=1, sticky="nsew")
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(0, weight=1)
+
+        ttk.Label(
+            left,
+            text="网页背景固定透明，透明窗口与网页共用以下字体样式。",
+            foreground="#666666",
+        ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 10))
+
+        fields = [
+            ("bg1",              "背景渐变色 1",   True),
+            ("bg2",              "背景渐变色 2",   True),
+            ("bg3",              "背景渐变色 3",   True),
+            ("text_color",       "页面文字颜色",   True),
+            ("queue_font_size",  "队列字体大小(px)", False),
+            ("text_grad_start",  "文字渐变起始色", True),
+            ("text_grad_end",    "文字渐变结束色", False),
+            ("text_stroke_color","文字描边颜色",   True),
+        ]
+        self._style_vars: dict[str, tk.StringVar] = {}
+        for row_idx, (key, label, has_picker) in enumerate(fields):
+            ttk.Label(left, text=label, anchor="e", width=14).grid(row=row_idx, column=0, sticky="e", padx=(0, 6), pady=3)
+            var = tk.StringVar(value=self._DEFAULT_STYLE.get(key, ""))
+            self._style_vars[key] = var
+            entry = ttk.Entry(left, textvariable=var, width=20)
+            entry.grid(row=row_idx, column=1, sticky="w")
+            if has_picker:
+                def _pick(v=var):
+                    color = colorchooser.askcolor(color=v.get() if v.get().startswith("#") else "#ffffff", parent=frame)
+                    if color and color[1]:
+                        v.set(color[1])
+                ttk.Button(left, text="取色", command=_pick, width=4).grid(row=row_idx, column=2, padx=(4, 0))
+
+        btn_bar = ttk.Frame(left)
+        btn_bar.grid(row=len(fields), column=0, columnspan=3, sticky="w", pady=(12, 0))
+        ttk.Button(btn_bar, text="保存样式", command=self._save_style).grid(row=0, column=0, padx=(0, 8))
+        ttk.Button(btn_bar, text="恢复默认", command=self._reset_style).grid(row=0, column=1)
+        self._style_save_status_var = tk.StringVar(value="")
+        ttk.Label(btn_bar, textvariable=self._style_save_status_var, foreground="#0a0").grid(row=0, column=2, padx=(12, 0))
+
+        # 预览画布
+        self._style_preview_canvas = tk.Canvas(right, highlightthickness=0)
+        self._style_preview_canvas.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+        for var in self._style_vars.values():
+            var.trace_add("write", lambda *_: self.root.after(0, self._redraw_style_preview))
+        self._style_preview_canvas.bind("<Configure>", lambda *_: self._redraw_style_preview())
+
+        self._load_style_into_ui()
+
+    def _redraw_style_preview_legacy(self) -> None:
+        cv = self._style_preview_canvas
+        w = cv.winfo_width()
+        h = cv.winfo_height()
+        if w <= 1 or h <= 1:
+            return
+
+        def _safe(key: str, fallback: str) -> str:
+            v = self._style_vars.get(key, tk.StringVar()).get().strip()
+            return v if v.startswith("#") else fallback
+
+        bg = _safe("bg1", "#0e2036")
+        text_c = _safe("text_grad_start", "#f7f7f7")
+        side_c = _safe("text_color", "#eaf6ff")
+        try:
+            fsize_raw = int(self._style_vars["queue_font_size"].get().strip() or 50)
+        except (ValueError, KeyError):
+            fsize_raw = 50
+        # 按预览宽度等比缩放：假设原始宽1920
+        fsize = max(8, int(fsize_raw * w / 1920 * 2.5))
+
+        cv.configure(bg=bg)
+        cv.delete("all")
+
+        # 侧边竖排文字区域
+        side_w = max(24, w // 8)
+        cv.create_rectangle(0, 0, side_w, h, fill=_safe("bg2", "#060b14"), outline="")
+        font_side = ("Microsoft YaHei UI", max(6, fsize - 4), "bold") if sys.platform == "win32" else ("", max(6, fsize - 4), "bold")
+        cv.create_text(side_w // 2, 16, text="排\n队\n姬", fill=side_c, font=font_side, anchor="n")
+
+        # 主队列文字
+        font_main = ("Microsoft YaHei UI", fsize, "bold italic") if sys.platform == "win32" else ("", fsize, "bold italic")
+        sample = ["示例用户名 角色名", "第二位 职业名称", "第三位用户"]
+        y = 12
+        for item in sample:
+            cv.create_text(side_w + 10, y, text=item, fill=text_c, font=font_main, anchor="nw")
+            y += fsize + 6
+            if y > h - fsize:
+                break
+
+    def _load_style_into_ui_legacy2(self) -> None:
+        try:
+            backend_server = load_backend_server_module()
+            data = backend_server.load_style()
+        except Exception:
+            data = {}
+        for key, var in self._style_vars.items():
+            val = data.get(key)
+            if val is not None:
+                var.set(str(val))
+
+    def _refresh_style_state_legacy2(self) -> None:
+        self._load_style_into_ui()
+        self._redraw_style_preview()
+        if self._overlay_window_alive():
+            self._overlay_style = dict(self._load_style_data())
+            self._redraw_overlay()
+
+    def _save_style_legacy2(self) -> None:
+        data: dict = {}
+        for key, var in self._style_vars.items():
+            v = var.get().strip()
+            if key == "queue_font_size":
+                try:
+                    data[key] = int(v)
+                except ValueError:
+                    data[key] = 50
+            else:
+                data[key] = v
+        # 始终先写本地文件（index.html 启动时从文件 fetch）
+        try:
+            backend_server = load_backend_server_module()
+            backend_server.save_style(data)
+        except Exception as exc:
+            self._append_log(f"[GUI] 样式写入文件失败: {exc}")
+            self._style_save_status_var.set("保存失败")
+            return
+        # 如果后端在跑，通知它也刷新（可选）
+        port = self.port_var.get().strip() or "9816"
+        url = f"http://127.0.0.1:{port}/api/style"
+        body = json.dumps(data).encode("utf-8")
+        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=2):
+                pass
+        except (urllib.error.URLError, TimeoutError):
+            pass
+        import time as _t
+        self._style_save_status_var.set(f"✓ 修改成功 {_t.strftime('%H:%M:%S')}")
+        self._append_log("[GUI] 样式已保存，刷新排队展示页即可生效")
+        if self._overlay_window_alive():
+            self._overlay_style = dict(self._load_style_data())
+            self._redraw_overlay()
+
+    def _reset_style_legacy2(self) -> None:
+        for key, var in self._style_vars.items():
+            var.set(self._DEFAULT_STYLE.get(key, ""))
+
+    def _build_style_tab_legacy2(self, frame: ttk.Frame) -> None:
+        from tkinter import colorchooser
+
+        frame.columnconfigure(0, weight=0)
+        frame.columnconfigure(1, weight=1)
+        frame.rowconfigure(0, weight=1)
+
+        left = ttk.Frame(frame)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 16))
+
+        right = ttk.LabelFrame(frame, text="样式预览")
+        right.grid(row=0, column=1, sticky="nsew")
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(0, weight=1)
+
+        ttk.Label(
+            left,
+            text="网页背景固定透明，透明窗口与网页共用以下字体样式。",
+            foreground="#666666",
+        ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 10))
+
+        fields = [
+            ("text_color", "文字颜色", "color"),
+            ("text_stroke_color", "文字描边颜色", "color"),
+            ("queue_font_size", "队列字体大小(px)", "entry"),
+            ("queue_font_weight", "字体粗细", "combo"),
+            ("queue_font_style", "字体样式", "combo"),
+        ]
+        self._style_vars: dict[str, tk.StringVar] = {}
+        for row_idx, (key, label, field_type) in enumerate(fields, start=1):
+            ttk.Label(left, text=label, anchor="e", width=14).grid(
+                row=row_idx,
+                column=0,
+                sticky="e",
+                padx=(0, 6),
+                pady=3,
+            )
+            var = tk.StringVar(value=self._DEFAULT_STYLE.get(key, ""))
+            self._style_vars[key] = var
+            if field_type == "combo":
+                values = (
+                    ("400", "500", "600", "700", "800", "900")
+                    if key == "queue_font_weight"
+                    else ("normal", "italic", "oblique")
+                )
+                widget = ttk.Combobox(
+                    left,
+                    textvariable=var,
+                    values=values,
+                    width=17,
+                    state="readonly",
+                )
+            else:
+                widget = ttk.Entry(left, textvariable=var, width=20)
+            widget.grid(row=row_idx, column=1, sticky="w")
+
+            if field_type == "color":
+                def _pick(v=var):
+                    color = colorchooser.askcolor(
+                        color=v.get() if v.get().startswith("#") else "#ffffff",
+                        parent=frame,
+                    )
+                    if color and color[1]:
+                        v.set(color[1])
+
+                ttk.Button(left, text="取色", command=_pick, width=4).grid(
+                    row=row_idx,
+                    column=2,
+                    padx=(4, 0),
+                )
+
+        btn_bar = ttk.Frame(left)
+        btn_bar.grid(row=len(fields) + 1, column=0, columnspan=3, sticky="w", pady=(12, 0))
+        ttk.Button(btn_bar, text="保存样式", command=self._save_style).grid(row=0, column=0, padx=(0, 8))
+        ttk.Button(btn_bar, text="恢复默认", command=self._reset_style).grid(row=0, column=1)
+        self._style_save_status_var = tk.StringVar(value="")
+        ttk.Label(btn_bar, textvariable=self._style_save_status_var, foreground="#0a0").grid(row=0, column=2, padx=(12, 0))
+
+        self._style_preview_canvas = tk.Canvas(right, highlightthickness=0)
+        self._style_preview_canvas.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+        for var in self._style_vars.values():
+            var.trace_add("write", lambda *_: self.root.after(0, self._redraw_style_preview))
+        self._style_preview_canvas.bind("<Configure>", lambda *_: self._redraw_style_preview())
+
+        self._load_style_into_ui()
+
+    def _redraw_style_preview_legacy2(self) -> None:
+        cv = self._style_preview_canvas
+        w = cv.winfo_width()
+        h = cv.winfo_height()
+        if w <= 1 or h <= 1:
+            return
+
+        def _safe_color(key: str, fallback: str) -> str:
+            value = self._style_vars.get(key, tk.StringVar()).get().strip()
+            return value if value.startswith("#") else fallback
+
+        def _font_tuple(size: int) -> tuple[str, int, str]:
+            try:
+                weight_value = int(str(self._style_vars["queue_font_weight"].get()).strip() or 700)
+            except (ValueError, KeyError):
+                weight_value = 700
+            style_value = str(
+                self._style_vars.get("queue_font_style", tk.StringVar(value="italic")).get()
+            ).strip().lower()
+            options: list[str] = []
+            if weight_value >= 600:
+                options.append("bold")
+            if style_value in {"italic", "oblique"}:
+                options.append("italic")
+            return (
+                "Microsoft YaHei UI" if sys.platform == "win32" else "",
+                size,
+                " ".join(options) if options else "normal",
+            )
+
+        text_color = _safe_color("text_color", "#eaf6ff")
+        stroke_color = _safe_color("text_stroke_color", "#000000")
+        try:
+            font_size_raw = int(self._style_vars["queue_font_size"].get().strip() or 50)
+        except (ValueError, KeyError):
+            font_size_raw = 50
+        font_size = max(8, int(font_size_raw * w / 1920 * 2.5))
+
+        cv.configure(bg="#d8d8d8")
+        cv.delete("all")
+
+        tile = 18
+        for top in range(0, h, tile):
+            for left in range(0, w, tile):
+                fill = "#f4f4f4" if ((left // tile) + (top // tile)) % 2 == 0 else "#e8e8e8"
+                cv.create_rectangle(left, top, left + tile, top + tile, fill=fill, outline="")
+        cv.create_rectangle(0, 0, w - 1, h - 1, outline="#98a7b3", width=1)
+        cv.create_text(
+            12,
+            10,
+            text="透明背景预览",
+            fill="#5a6772",
+            anchor="nw",
+            font=("Microsoft YaHei UI" if sys.platform == "win32" else "", 10),
+        )
+
+        font_main = _font_tuple(font_size)
+        sample = ["1001 主播点歌", "1002 舰长优先", "1003 房管处理"]
+        y = 34
+        for item in sample:
+            for dx, dy in ((-2, 0), (2, 0), (0, -2), (0, 2), (-1, -1), (1, -1), (-1, 1), (1, 1)):
+                cv.create_text(16 + dx, y + dy, text=item, fill=stroke_color, font=font_main, anchor="nw")
+            cv.create_text(16, y, text=item, fill=text_color, font=font_main, anchor="nw")
+            y += font_size + 6
+            if y > h - font_size:
+                break
+
+    @staticmethod
+    def _style_as_bool(value: Any, default: bool = True) -> bool:
+        if isinstance(value, bool):
+            return value
+        text = str(value or "").strip().lower()
+        if text in {"1", "true", "yes", "on"}:
+            return True
+        if text in {"0", "false", "no", "off"}:
+            return False
+        return default
+
+    def _style_font_style_to_css(self, value: Any) -> str:
+        text = str(value or "").strip()
+        if text in self._STYLE_FONT_STYLE_LABEL_TO_VALUE:
+            return self._STYLE_FONT_STYLE_LABEL_TO_VALUE[text]
+        lowered = text.lower()
+        if lowered in self._STYLE_FONT_STYLE_VALUE_TO_LABEL:
+            return lowered
+        return str(self._DEFAULT_STYLE.get("queue_font_style", "italic"))
+
+    def _style_font_style_to_label(self, value: Any) -> str:
+        css_value = self._style_font_style_to_css(value)
+        return self._STYLE_FONT_STYLE_VALUE_TO_LABEL.get(css_value, "斜体")
+
+    def _style_font_weight_to_css(self, value: Any) -> str:
+        text = str(value or "").strip()
+        if text in self._STYLE_FONT_WEIGHT_LABEL_TO_VALUE:
+            return self._STYLE_FONT_WEIGHT_LABEL_TO_VALUE[text]
+        matched = re.search(r"([1-9]00)", text)
+        if matched:
+            return matched.group(1)
+        return str(self._DEFAULT_STYLE.get("queue_font_weight", "700"))
+
+    def _style_font_weight_to_label(self, value: Any) -> str:
+        css_value = self._style_font_weight_to_css(value)
+        return self._STYLE_FONT_WEIGHT_VALUE_TO_LABEL.get(css_value, f"{css_value} 常规")
+
+    def _load_style_into_ui(self) -> None:
+        try:
+            backend_server = load_backend_server_module()
+            data = backend_server.load_style()
+        except Exception:
+            data = {}
+        for key, var in self._style_vars.items():
+            val = data.get(key, self._DEFAULT_STYLE.get(key, ""))
+            if key == "queue_font_style":
+                var.set(self._style_font_style_to_label(val))
+            elif key == "queue_font_weight":
+                var.set(self._style_font_weight_to_label(val))
+            else:
+                var.set(str(val))
+        for key, var in getattr(self, "_style_bool_vars", {}).items():
+            val = data.get(key, self._DEFAULT_STYLE.get(key, True))
+            var.set(self._style_as_bool(val, bool(self._DEFAULT_STYLE.get(key, True))))
+        if hasattr(self, "_style_archive_slot_var"):
+            self._style_archive_slot_var.set(str(self._get_selected_slot()))
+
+    def _refresh_style_state(self) -> None:
+        self._load_style_into_ui()
+        self._redraw_style_preview()
+        if self._overlay_window_alive():
+            self._overlay_style = dict(self._load_style_data())
+            self._redraw_overlay()
+
+    def _save_style(self) -> bool:
+        data: dict[str, Any] = {}
+        for key, var in self._style_vars.items():
+            value = var.get().strip()
+            if key == "queue_font_size":
+                try:
+                    data[key] = int(value)
+                except ValueError:
+                    data[key] = 50
+            elif key == "queue_font_style":
+                data[key] = self._style_font_style_to_css(value)
+            elif key == "queue_font_weight":
+                data[key] = self._style_font_weight_to_css(value)
+            else:
+                data[key] = value
+        for key, var in getattr(self, "_style_bool_vars", {}).items():
+            data[key] = bool(var.get())
+        try:
+            backend_server = load_backend_server_module()
+            backend_server.save_style(data)
+        except Exception as exc:
+            self._append_log(f"[GUI] 样式写入文件失败: {exc}")
+            self._style_save_status_var.set("保存失败")
+            return False
+        port = self.port_var.get().strip() or "9816"
+        url = f"http://127.0.0.1:{port}/api/style"
+        body = json.dumps(data).encode("utf-8")
+        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=2):
+                pass
+        except (urllib.error.URLError, TimeoutError):
+            pass
+        import time as _t
+        self._style_save_status_var.set(f"保存成功 {_t.strftime('%H:%M:%S')}")
+        self._append_log("[GUI] 样式已保存，刷新排队展示页即可生效")
+        if self._overlay_window_alive():
+            self._overlay_style = dict(self._load_style_data())
+            self._redraw_overlay()
+        return True
+
+    def _reset_style(self) -> None:
+        for key, var in self._style_vars.items():
+            default_value = self._DEFAULT_STYLE.get(key, "")
+            if key == "queue_font_style":
+                var.set(self._style_font_style_to_label(default_value))
+            elif key == "queue_font_weight":
+                var.set(self._style_font_weight_to_label(default_value))
+            else:
+                var.set(str(default_value))
+        for key, var in getattr(self, "_style_bool_vars", {}).items():
+            var.set(self._style_as_bool(self._DEFAULT_STYLE.get(key, True), True))
+        if hasattr(self, "_style_archive_slot_var"):
+            self._style_archive_slot_var.set(str(self._get_selected_slot()))
+
+    def _switch_style_archive_from_ui(self) -> None:
+        try:
+            slot = int(str(self._style_archive_slot_var.get()).strip() or self._get_selected_slot())
+        except (TypeError, ValueError, tk.TclError):
+            slot = self._get_selected_slot()
+        slot = max(1, min(MAX_QUEUE_ARCHIVE_SLOTS, slot))
+        self._style_archive_slot_var.set(str(slot))
+        if slot == self._prev_slot:
+            self._refresh_style_state()
+            self._append_log(f"[GUI] CSS 样式存档当前已是槽位 {slot}")
+            return
+        threading.Thread(target=self._apply_queue_slot_selection, args=(slot,), daemon=True).start()
+
+    def _build_style_tab(self, frame: ttk.Frame) -> None:
+        from tkinter import colorchooser
+
+        frame.columnconfigure(0, weight=0)
+        frame.columnconfigure(1, weight=1)
+        frame.rowconfigure(0, weight=1)
+
+        left = ttk.Frame(frame)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 16))
+
+        right = ttk.LabelFrame(frame, text="样式预览")
+        right.grid(row=0, column=1, sticky="nsew")
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(0, weight=1)
+
+        ttk.Label(
+            left,
+            text="网页背景固定透明；CSS 样式存档与当前排队存档槽位联动。",
+            foreground="#666666",
+        ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 10))
+
+        fields = [
+            ("text_color", "文字颜色", "color"),
+            ("text_stroke_color", "描边颜色", "color"),
+            ("queue_font_size", "队列字体大小(px)", "entry"),
+            ("queue_font_weight", "字体粗细(100-900)", "combo"),
+            ("queue_font_style", "字体样式", "combo"),
+        ]
+        self._style_vars: dict[str, tk.StringVar] = {}
+        self._style_bool_vars: dict[str, tk.BooleanVar] = {
+            "text_stroke_enabled": tk.BooleanVar(
+                value=self._style_as_bool(self._DEFAULT_STYLE.get("text_stroke_enabled", True), True)
+            )
+        }
+        self._style_archive_slot_var = tk.StringVar(value=str(self._get_selected_slot()))
+        for row_idx, (key, label, field_type) in enumerate(fields, start=1):
+            ttk.Label(left, text=label, anchor="e", width=16).grid(
+                row=row_idx,
+                column=0,
+                sticky="e",
+                padx=(0, 6),
+                pady=3,
+            )
+            default_value = self._DEFAULT_STYLE.get(key, "")
+            if key == "queue_font_style":
+                initial_value = self._style_font_style_to_label(default_value)
+            elif key == "queue_font_weight":
+                initial_value = self._style_font_weight_to_label(default_value)
+            else:
+                initial_value = str(default_value)
+            var = tk.StringVar(value=initial_value)
+            self._style_vars[key] = var
+            if field_type == "combo":
+                values = self._STYLE_FONT_WEIGHT_OPTIONS if key == "queue_font_weight" else tuple(self._STYLE_FONT_STYLE_LABEL_TO_VALUE.keys())
+                widget = ttk.Combobox(
+                    left,
+                    textvariable=var,
+                    values=values,
+                    width=17,
+                    state="normal" if key == "queue_font_weight" else "readonly",
+                )
+            else:
+                widget = ttk.Entry(left, textvariable=var, width=20)
+            widget.grid(row=row_idx, column=1, sticky="w")
+
+            if field_type == "color":
+                def _pick(v=var):
+                    color = colorchooser.askcolor(
+                        color=v.get() if v.get().startswith("#") else "#ffffff",
+                        parent=frame,
+                    )
+                    if color and color[1]:
+                        v.set(color[1])
+
+                ttk.Button(left, text="取色", command=_pick, width=4).grid(
+                    row=row_idx,
+                    column=2,
+                    padx=(4, 0),
+                )
+
+        ttk.Checkbutton(
+            left,
+            text="启用文字描边",
+            variable=self._style_bool_vars["text_stroke_enabled"],
+        ).grid(row=len(fields) + 1, column=1, sticky="w", pady=(2, 6))
+
+        ttk.Label(left, text="CSS样式存档槽位", anchor="e", width=16).grid(
+            row=len(fields) + 2,
+            column=0,
+            sticky="e",
+            padx=(0, 6),
+            pady=3,
+        )
+        ttk.Combobox(
+            left,
+            textvariable=self._style_archive_slot_var,
+            values=[str(i) for i in range(1, MAX_QUEUE_ARCHIVE_SLOTS + 1)],
+            width=17,
+            state="readonly",
+        ).grid(row=len(fields) + 2, column=1, sticky="w")
+        ttk.Button(left, text="切换存档", command=self._switch_style_archive_from_ui, width=8).grid(
+            row=len(fields) + 2,
+            column=2,
+            padx=(4, 0),
+        )
+
+        btn_bar = ttk.Frame(left)
+        btn_bar.grid(row=len(fields) + 3, column=0, columnspan=3, sticky="w", pady=(12, 0))
+        ttk.Button(btn_bar, text="恢复默认", command=self._reset_style).grid(row=0, column=0)
+        self._style_save_status_var = tk.StringVar(value="")
+        ttk.Label(btn_bar, textvariable=self._style_save_status_var, foreground="#0a0").grid(row=0, column=1, padx=(12, 0))
+
+        self._style_preview_canvas = tk.Canvas(right, highlightthickness=0)
+        self._style_preview_canvas.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+        for var in self._style_vars.values():
+            var.trace_add("write", lambda *_: self.root.after(0, self._redraw_style_preview))
+        for var in self._style_bool_vars.values():
+            var.trace_add("write", lambda *_: self.root.after(0, self._redraw_style_preview))
+        self._style_preview_canvas.bind("<Configure>", lambda *_: self._redraw_style_preview())
+
+        self._load_style_into_ui()
+
+    def _redraw_style_preview(self) -> None:
+        cv = self._style_preview_canvas
+        w = cv.winfo_width()
+        h = cv.winfo_height()
+        if w <= 1 or h <= 1:
+            return
+
+        def _safe_color(key: str, fallback: str) -> str:
+            value = self._style_vars.get(key, tk.StringVar()).get().strip()
+            return value if value.startswith("#") else fallback
+
+        def _font_tuple(size: int) -> tuple[str, int, str]:
+            weight_value = int(self._style_font_weight_to_css(self._style_vars["queue_font_weight"].get()) or 700)
+            style_value = self._style_font_style_to_css(self._style_vars["queue_font_style"].get())
+            options: list[str] = []
+            if weight_value >= 600:
+                options.append("bold")
+            if style_value in {"italic", "oblique"}:
+                options.append("italic")
+            return (
+                "Microsoft YaHei UI" if sys.platform == "win32" else "",
+                size,
+                " ".join(options) if options else "normal",
+            )
+
+        text_color = _safe_color("text_color", "#eaf6ff")
+        stroke_color = _safe_color("text_stroke_color", "#000000")
+        stroke_enabled = self._style_as_bool(self._style_bool_vars["text_stroke_enabled"].get(), True)
+        try:
+            font_size_raw = int(self._style_vars["queue_font_size"].get().strip() or 50)
+        except (ValueError, KeyError):
+            font_size_raw = 50
+        font_size = max(8, int(font_size_raw * w / 1920 * 2.5))
+
+        cv.configure(bg="#d8d8d8")
+        cv.delete("all")
+
+        tile = 18
+        for top in range(0, h, tile):
+            for left in range(0, w, tile):
+                fill = "#f4f4f4" if ((left // tile) + (top // tile)) % 2 == 0 else "#e8e8e8"
+                cv.create_rectangle(left, top, left + tile, top + tile, fill=fill, outline="")
+        cv.create_rectangle(0, 0, w - 1, h - 1, outline="#98a7b3", width=1)
+        cv.create_text(
+            12,
+            10,
+            text="透明背景预览",
+            fill="#5a6772",
+            anchor="nw",
+            font=("Microsoft YaHei UI" if sys.platform == "win32" else "", 10),
+        )
+
+        font_main = _font_tuple(font_size)
+        sample = ["1001 主播点歌", "1002 舰长优先", "1003 房管处理"]
+        y = 34
+        for item in sample:
+            if stroke_enabled:
+                for dx, dy in ((-2, 0), (2, 0), (0, -2), (0, 2), (-1, -1), (1, -1), (-1, 1), (1, 1)):
+                    cv.create_text(16 + dx, y + dy, text=item, fill=stroke_color, font=font_main, anchor="nw")
+            cv.create_text(16, y, text=item, fill=text_color, font=font_main, anchor="nw")
+            y += font_size + 6
+            if y > h - font_size:
+                break
+
+    def _apply_overlay_settings_from_ui(self) -> None:
+        settings = self._set_overlay_settings(self._get_overlay_settings())
+        self._apply_overlay_settings_to_window(settings)
+        if self._overlay_process_running():
+            self._restart_overlay_process()
+        self._append_log(
+            f"[GUI] 透明窗口设置已应用：{settings['width']}x{settings['height']}，缩放 {settings['scale']}%"
+        )
+
+    def _apply_overlay_settings_to_window(self, settings: dict[str, int] | None = None) -> None:
+        if not self._overlay_window_alive():
+            return
+        normalized = self._set_overlay_settings(settings or self._get_overlay_settings())
+        current_x = self._overlay_window.winfo_x()
+        current_y = self._overlay_window.winfo_y()
+        self._overlay_window.geometry(
+            f"{normalized['width']}x{normalized['height']}+{current_x}+{current_y}"
+        )
+        self._redraw_overlay()
+
+    def _build_log_tab(self, frame: ttk.Frame) -> None:
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(1, weight=1)
+
+        # 标题与日志工具
+        status_bar = ttk.Frame(frame, style="Toolbar.TFrame")
+        status_bar.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        status_bar.columnconfigure(1, weight=1)
+        ttk.Label(status_bar, text="运行日志", style="Card.TLabel", font=("Microsoft YaHei UI", 15, "bold")).grid(row=0, column=0, sticky="w")
+        tools = ttk.Frame(status_bar, style="Toolbar.TFrame")
+        tools.grid(row=0, column=1, sticky="e")
+        search = ttk.Entry(tools, textvariable=self.log_search_var, width=18)
+        search.grid(row=0, column=0, padx=(0, 6))
+        search.bind("<KeyRelease>", lambda _e: self._refresh_log_view())
+        ttk.Checkbutton(tools, text="仅错误", variable=self.log_errors_only_var, command=self._refresh_log_view).grid(row=0, column=1, padx=3)
+        ttk.Checkbutton(tools, text="仅弹幕", variable=self.log_danmu_only_var, command=self._refresh_log_view).grid(row=0, column=2, padx=3)
+        ttk.Checkbutton(tools, text="自动换行", variable=self.log_wrap_var, command=self._toggle_log_wrap).grid(row=0, column=3, padx=3)
+        ttk.Checkbutton(tools, text="自动滚动", variable=self.log_auto_scroll_var).grid(row=0, column=4, padx=3)
+        ttk.Button(tools, text="清空", command=self._clear_log).grid(row=0, column=5, padx=(6, 3))
+        ttk.Button(tools, text="复制", command=self._copy_log).grid(row=0, column=6, padx=3)
+        ttk.Button(tools, text="导出", command=self._export_log).grid(row=0, column=7, padx=(3, 0))
+
+        connection_bar = ttk.Frame(frame, style="Toolbar.TFrame")
+        connection_bar.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        self._ws_light_label = ttk.Label(
+            connection_bar,
+            textvariable=self.ws_light_var,
+            style="Card.TLabel", font=("Segoe UI Symbol", 10, "bold"),
+        )
+        self._ws_light_label.pack(side="left")
+        ttk.Label(connection_bar, textvariable=self.ws_text_var, style="Muted.Card.TLabel").pack(side="left", padx=(7, 0))
+
+        # 日志文本
+        log_frame = ttk.Frame(frame)
+        log_frame.grid(row=1, column=0, sticky="nsew")
+        log_frame.columnconfigure(0, weight=1)
+        log_frame.rowconfigure(0, weight=1)
+        _sys_font = ("Microsoft YaHei UI", 9) if sys.platform == "win32" else ("PingFang SC", 11) if sys.platform == "darwin" else ("Sans", 10)
+        self.log_text = tk.Text(log_frame, height=18, wrap="word", state="disabled", font=_sys_font, bd=0, highlightthickness=0, padx=12, pady=10, spacing1=2, spacing3=4)
+        self._all_text_widgets.append(self.log_text)
+        self.log_text.grid(row=0, column=0, sticky="nsew")
+        log_scroll = ttk.Scrollbar(log_frame, orient="vertical", command=self.log_text.yview)
+        log_scroll.grid(row=0, column=1, sticky="ns")
+        self.log_text.configure(yscrollcommand=log_scroll.set)
+
+    def _toggle_log_wrap(self) -> None:
+        if hasattr(self, "log_text"):
+            self.log_text.configure(wrap="word" if self.log_wrap_var.get() else "none")
+
+    def _clear_log(self) -> None:
+        self._log_records.clear()
+        self._refresh_log_view()
+
+    def _copy_log(self) -> None:
+        text = self.log_text.get("1.0", "end-1c")
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+
+    def _export_log(self) -> None:
+        target = filedialog.asksaveasfilename(title="导出运行日志", defaultextension=".log", filetypes=(("日志文件", "*.log"), ("文本文件", "*.txt")))
+        if target:
+            Path(target).write_text(self.log_text.get("1.0", "end-1c"), encoding="utf-8")
+
+    def _build_settings_tab(self, frame: ttk.Frame) -> None:
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=1)
+
+        settings_tabs = ttk.Notebook(frame, style="Settings.TNotebook")
+        settings_tabs.grid(row=0, column=0, columnspan=2, sticky="nsew")
+        self.settings_notebook = settings_tabs
+
+        basic_inner = self._add_scrollable_settings_page(settings_tabs, "基础设置")
+        platform_inner = self._add_scrollable_settings_page(settings_tabs, "平台参数")
+        blacklist_inner = self._add_scrollable_settings_page(settings_tabs, "黑名单")
+        switches_inner = self._add_scrollable_settings_page(settings_tabs, "开关")
+        style_inner = self._add_scrollable_settings_page(settings_tabs, "样式设置")
+        gift_queue_inner = self._add_scrollable_settings_page(settings_tabs, "B站礼物")
+        self._bilibili_gift_settings_page = gift_queue_inner.master.master
+
+        # 保存配置/刷新按钮放在 canvas 外（固定底部）
+        btn_bar = ttk.Frame(frame)
+        btn_bar.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 4), padx=4)
+        ttk.Button(btn_bar, text="保存配置", command=self.save_to_file).grid(row=0, column=0, padx=(0, 8))
+        ttk.Button(btn_bar, text="刷新配置", command=self.load_from_file).grid(row=0, column=1)
+
+        basic_frame = ttk.Frame(basic_inner, padding=10)
+        basic_frame.grid(row=0, column=0, sticky="ew")
+        basic_frame.columnconfigure(1, weight=1)
+        basic_frame.columnconfigure(3, weight=1)
+
+        fields = [
+            ("监听地址（自动）", self.host_var),
+            ("监听端口", self.port_var),
+            ("日志保留天数", self.retention_days_var),
+        ]
+        for row_idx, (label, var) in enumerate(fields):
+            ttk.Label(basic_frame, text=label).grid(row=row_idx, column=0, sticky="w", pady=4)
+            entry = ttk.Entry(basic_frame, textvariable=var, width=26)
+            entry.grid(row=row_idx, column=1, sticky="ew", pady=4)
+            if var is self.host_var:
+                entry.configure(state="readonly")
+
+        ttk.Label(basic_frame, text="日志等级").grid(row=0, column=2, sticky="w", padx=(16, 0), pady=4)
+        self.log_level_combo = ttk.Combobox(
+            basic_frame,
+            textvariable=self.log_level_var,
+            values=LOG_LEVEL_OPTIONS,
+            width=18,
+            state="readonly",
+        )
+        self.log_level_combo.grid(row=0, column=3, sticky="w", pady=4)
+
+        ttk.Label(basic_frame, text="当前排队存档").grid(row=1, column=2, sticky="w", padx=(16, 0), pady=4)
+        self.queue_slot_combo_settings = ttk.Combobox(
+            basic_frame,
+            textvariable=self.queue_slot_var,
+            values=[str(slot) for slot in range(1, MAX_QUEUE_ARCHIVE_SLOTS + 1)],
+            width=10,
+            state="readonly",
+        )
+        self.queue_slot_combo_settings.grid(row=1, column=3, sticky="w", pady=4)
+        self.queue_slot_combo_settings.bind("<<ComboboxSelected>>", self._on_queue_slot_selected)
+
+        ttk.Label(basic_frame, text="平台配置槽位").grid(row=2, column=2, sticky="w", padx=(16, 0), pady=4)
+        self.platform_slot_combo_settings = ttk.Combobox(
+            basic_frame,
+            textvariable=self.platform_config_slot_var,
+            values=[str(slot) for slot in range(1, MAX_QUEUE_ARCHIVE_SLOTS + 1)],
+            width=10,
+            state="readonly",
+        )
+        self.platform_slot_combo_settings.grid(row=2, column=3, sticky="w", pady=4)
+        self.platform_slot_combo_settings.bind("<<ComboboxSelected>>", self._on_platform_config_slot_selected)
+
+        ttk.Checkbutton(basic_frame, text="启用排队存档", variable=self.queue_enabled_var).grid(
+            row=3, column=1, sticky="w", pady=4
+        )
+        ttk.Checkbutton(basic_frame, text="启动时自动运行后端", variable=self.auto_start_var).grid(
+            row=3, column=3, sticky="w", pady=4
+        )
+
+        ttk.Label(basic_frame, text="语言").grid(row=4, column=0, sticky="w", pady=4)
+        ttk.Combobox(
+            basic_frame,
+            textvariable=self.language_var,
+            values=["中文"],
+            state="readonly",
+            width=12,
+        ).grid(row=4, column=1, sticky="w", pady=4)
+
+        ttk.Label(basic_frame, text="界面字体大小").grid(row=4, column=2, sticky="w", padx=(16, 0), pady=4)
+        ttk.Combobox(
+            basic_frame,
+            textvariable=self.ui_font_size_var,
+            values=["9", "10", "11", "12", "13", "14"],
+            state="readonly",
+            width=8,
+        ).grid(row=4, column=3, sticky="w", pady=4)
+
+        ttk.Checkbutton(
+            basic_frame,
+            text="允许局域网访问（监听 0.0.0.0，重启后生效）",
+            variable=self.lan_listen_var,
+            command=self._sync_lan_listen_host,
+        ).grid(row=7, column=0, columnspan=4, sticky="w", pady=(6, 0))
+
+        self._settings_hint_label = ttk.Label(
+            basic_frame,
+            text="局域网监听仅开放展示页、队列状态和 WebSocket；Cookie 与管理接口仍仅限本机。",
+        )
+        self._settings_hint_label.grid(row=8, column=0, columnspan=4, sticky="w", pady=(6, 0))
+
+        ttk.Label(basic_frame, text="每日排队次数").grid(row=5, column=0, sticky="w", pady=4)
+        ttk.Checkbutton(
+            basic_frame,
+            text="不限制",
+            variable=self.daily_queue_unlimited_var,
+            command=self._toggle_daily_queue_limit_ui,
+        ).grid(row=5, column=1, sticky="w", pady=4)
+        ttk.Label(basic_frame, text="每人最多").grid(row=5, column=2, sticky="w", padx=(16, 0), pady=4)
+        limit_box = ttk.Spinbox(basic_frame, from_=1, to=999, textvariable=self.daily_queue_limit_var, width=8)
+        limit_box.grid(row=5, column=3, sticky="w", pady=4)
+        self._daily_queue_limit_spinbox = limit_box
+
+        ttk.Label(basic_frame, text="次数重置时间").grid(row=6, column=0, sticky="w", pady=4)
+        reset_box = ttk.Frame(basic_frame)
+        reset_box.grid(row=6, column=1, columnspan=3, sticky="w", pady=4)
+        ttk.Spinbox(reset_box, from_=0, to=23, format="%02.0f", textvariable=self.daily_queue_reset_hour_var, width=4).pack(side="left")
+        ttk.Label(reset_box, text=":").pack(side="left", padx=4)
+        ttk.Spinbox(reset_box, from_=0, to=59, format="%02.0f", textvariable=self.daily_queue_reset_minute_var, width=4).pack(side="left")
+        ttk.Label(reset_box, text="（默认每天 04:00）").pack(side="left", padx=(8, 0))
+        self._toggle_daily_queue_limit_ui()
+
+        platform_frame = ttk.Frame(platform_inner, padding=10)
+        platform_frame.grid(row=0, column=0, sticky="ew")
+        platform_frame.columnconfigure(1, weight=1)
+
+        ttk.Label(platform_frame, text="当前平台").grid(row=0, column=0, sticky="w", pady=4)
+        platform_combo = ttk.Combobox(
+            platform_frame,
+            textvariable=self.platform_var,
+            values=PLATFORM_LABELS,
+            state="readonly",
+            width=16,
+        )
+        platform_combo.grid(row=0, column=1, sticky="w", pady=4)
+        platform_combo.bind("<<ComboboxSelected>>", self._refresh_platform_settings_visibility)
+
+        self._platform_hint_label = ttk.Label(
+            platform_frame,
+            text="只显示当前平台需要填写的参数；隐藏平台的内容会原样保留在该槽位里。",
+        )
+        self._platform_hint_label.grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 8))
+
+        platform_forms = ttk.Frame(platform_frame)
+        platform_forms.grid(row=2, column=0, columnspan=2, sticky="ew")
+        platform_forms.columnconfigure(0, weight=1)
+
+        bilibili_frame = ttk.LabelFrame(platform_forms, text="B站参数", padding=8)
+        bilibili_frame.grid(row=0, column=0, sticky="ew")
+        bilibili_frame.columnconfigure(1, weight=1)
+        bilibili_frame.columnconfigure(3, weight=1)
+        ttk.Label(bilibili_frame, text="直播间号").grid(row=0, column=0, sticky="w", pady=4)
+        ttk.Entry(bilibili_frame, textvariable=self.roomid_var, width=24).grid(row=0, column=1, sticky="ew", pady=4)
+        ttk.Button(bilibili_frame, text="一键获取监听配置", command=self._fetch_bilibili_params).grid(
+            row=0, column=2, columnspan=2, padx=(16, 0), sticky="ew", pady=4
+        )
+        ttk.Label(bilibili_frame, text="直播间网页链接").grid(row=1, column=0, sticky="w", pady=4)
+        ttk.Entry(bilibili_frame, textvariable=self.bilibili_room_url_var).grid(row=1, column=1, columnspan=2, sticky="ew", pady=4)
+        ttk.Button(bilibili_frame, text="从链接获取", command=self._fetch_bilibili_params).grid(row=1, column=3, padx=(6, 0), sticky="ew", pady=4)
+        ttk.Label(bilibili_frame, text="登录 UID").grid(row=2, column=0, sticky="w", pady=4)
+        ttk.Entry(bilibili_frame, textvariable=self.uid_var, width=24).grid(row=2, column=1, sticky="ew", pady=4)
+        ttk.Button(bilibili_frame, text="扫码获取 Cookie", command=self.open_config).grid(row=2, column=2, columnspan=2, padx=(16, 0), sticky="ew", pady=4)
+        ttk.Label(bilibili_frame, text="用户 Cookie").grid(row=3, column=0, sticky="w", pady=4)
+        ttk.Entry(bilibili_frame, textvariable=self.cookie_var, width=48, show="●").grid(row=3, column=1, columnspan=3, sticky="ew", pady=4)
+        ttk.Label(bilibili_frame, textvariable=self._bilibili_fetch_status_var, wraplength=760).grid(
+            row=4, column=0, columnspan=4, sticky="w", pady=(6, 2)
+        )
+
+        douyin_frame = ttk.LabelFrame(platform_forms, text="抖音参数", padding=8)
+        douyin_frame.grid(row=0, column=0, sticky="ew")
+        douyin_frame.columnconfigure(1, weight=1)
+        douyin_frame.columnconfigure(3, weight=1)
+        douyin_fields = [
+            ("直播标识 live_id", self.douyin_live_id_var),
+            ("Cookie", self.douyin_cookie_var),
+            ("签名 signature", self.douyin_signature_var),
+            ("bootstrap.cursor", self.douyin_cursor_var),
+            ("bootstrap.internal_ext", self.douyin_internal_ext_var),
+            ("room_id", self.douyin_room_id_var),
+            ("user_id", self.douyin_user_id_var),
+            ("user_unique_id", self.douyin_user_unique_id_var),
+            ("anchor_id", self.douyin_anchor_id_var),
+            ("sec_uid", self.douyin_sec_uid_var),
+            ("ttwid", self.douyin_ttwid_var),
+            ("extra_query(JSON)", self.douyin_extra_query_var),
+        ]
+        # row=0: 直播间链接一键获取
+        fetch_bar = ttk.Frame(douyin_frame)
+        fetch_bar.grid(row=0, column=0, columnspan=4, sticky="ew", pady=(0, 6))
+        fetch_bar.columnconfigure(1, weight=1)
+        ttk.Label(fetch_bar, text="直播间链接").grid(row=0, column=0, sticky="w", padx=(0, 6))
+        ttk.Entry(fetch_bar, textvariable=self.douyin_fetch_url_var, width=48).grid(row=0, column=1, sticky="ew")
+        ttk.Button(fetch_bar, text="获取参数", command=self._fetch_douyin_params).grid(row=0, column=2, padx=(6, 0))
+        ttk.Label(fetch_bar, textvariable=self._douyin_fetch_status_var).grid(row=1, column=0, columnspan=3, sticky="w", pady=(2, 0))
+
+        # row=1: 启用开关
+        ttk.Checkbutton(douyin_frame, text="启用抖音配置", variable=self.douyin_enabled_var).grid(
+            row=1, column=0, columnspan=2, sticky="w", pady=(0, 6)
+        )
+        ttk.Checkbutton(douyin_frame, text="自动重连", variable=self.douyin_ws_auto_reconnect_var).grid(
+            row=1, column=2, columnspan=2, sticky="w", pady=(0, 6)
+        )
+        # row=2: 心跳/重连
+        ttk.Label(douyin_frame, text="心跳间隔(秒)").grid(row=2, column=0, sticky="w", pady=4)
+        ttk.Entry(douyin_frame, textvariable=self.douyin_ws_heartbeat_var, width=18).grid(row=2, column=1, sticky="w", pady=4)
+        ttk.Label(douyin_frame, text="重连延迟(秒)").grid(row=2, column=2, sticky="w", padx=(16, 0), pady=4)
+        ttk.Entry(douyin_frame, textvariable=self.douyin_ws_reconnect_delay_var, width=18).grid(row=2, column=3, sticky="w", pady=4)
+        for idx, (label, var) in enumerate(douyin_fields, start=3):
+            ttk.Label(douyin_frame, text=label).grid(row=idx, column=0, sticky="w", pady=4)
+            span = 3 if label == "extra_query(JSON)" else 1
+            width = 64 if label == "extra_query(JSON)" else 48
+            ttk.Entry(douyin_frame, textvariable=var, width=width).grid(
+                row=idx,
+                column=1,
+                columnspan=span,
+                sticky="ew",
+                pady=4,
+            )
+
+        reserved_frames = {
+            platform_key: self._build_reserved_platform_frame(platform_forms, platform_key)
+            for platform_key in RESERVED_PLATFORM_KEYS
+        }
+        self._platform_frame_map = {
+            "bilibili": bilibili_frame,
+            "douyin": douyin_frame,
+            **reserved_frames,
+        }
+        self._refresh_platform_settings_visibility()
+        self._build_blacklist_tab(blacklist_inner)
+        self._build_kaiguan_tab(switches_inner)
+        self._build_style_tab(style_inner)
+        self._build_gift_queue_tab(gift_queue_inner)
+
+    def _toggle_daily_queue_limit_ui(self) -> None:
+        if self._daily_queue_limit_spinbox is not None:
+            self._daily_queue_limit_spinbox.configure(state="disabled" if self.daily_queue_unlimited_var.get() else "normal")
+
+    def _add_scrollable_settings_page(self, notebook: ttk.Notebook, title: str) -> ttk.Frame:
+        page = ttk.Frame(notebook, padding=(0, 8, 0, 0))
+        page.columnconfigure(0, weight=1)
+        page.rowconfigure(0, weight=1)
+        notebook.add(page, text=title)
+
+        canvas = tk.Canvas(page, highlightthickness=0, bd=0)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(page, orient="vertical", command=canvas.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns", padx=(8, 0))
+        canvas.configure(yscrollcommand=scrollbar.set)
+        self._settings_canvases.append(canvas)
+        if self._settings_canvas is None:
+            self._settings_canvas = canvas
+
+        inner = ttk.Frame(canvas)
+        inner.columnconfigure(0, weight=1)
+        window_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind("<Configure>", lambda _e, cv=canvas: cv.configure(scrollregion=cv.bbox("all")))
+        canvas.bind("<Configure>", lambda event, cv=canvas, item=window_id: cv.itemconfigure(item, width=event.width))
+        canvas.bind("<Enter>", lambda _e, cv=canvas: cv.bind_all("<MouseWheel>", lambda event: cv.yview_scroll(int(-event.delta / 120), "units")))
+        canvas.bind("<Leave>", lambda _e, cv=canvas: cv.unbind_all("<MouseWheel>"))
+        return inner
+
+    def _build_overlay_tab(self, frame: ttk.Frame) -> None:
+        frame.columnconfigure(0, weight=1)
+
+        overlay_frame = ttk.LabelFrame(frame, text="透明窗口设置", padding=10)
+        overlay_frame.grid(row=0, column=0, sticky="ew")
+        overlay_frame.columnconfigure(1, weight=1)
+        overlay_frame.columnconfigure(3, weight=1)
+        ttk.Label(overlay_frame, text="宽度(px)").grid(row=0, column=0, sticky="w", pady=4)
+        ttk.Entry(overlay_frame, textvariable=self.overlay_width_var, width=12).grid(row=0, column=1, sticky="w", pady=4)
+        ttk.Label(overlay_frame, text="高度(px)").grid(row=0, column=2, sticky="w", padx=(16, 0), pady=4)
+        ttk.Entry(overlay_frame, textvariable=self.overlay_height_var, width=12).grid(row=0, column=3, sticky="w", pady=4)
+        ttk.Label(overlay_frame, text="文字缩放(%)").grid(row=1, column=0, sticky="w", pady=4)
+        ttk.Entry(overlay_frame, textvariable=self.overlay_scale_var, width=12).grid(row=1, column=1, sticky="w", pady=4)
+        ttk.Label(
+            overlay_frame,
+            text='在 OBS 中使用「窗口捕获」，按标题“排队透明弹窗”选择；拖动边框可缩放。',
+        ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        ttk.Button(overlay_frame, text="应用到透明窗", command=self._apply_overlay_settings_from_ui).grid(
+            row=1, column=3, sticky="e", pady=4
+        )
+
+        ctrl_frame = ttk.Frame(overlay_frame)
+        ctrl_frame.grid(row=3, column=0, columnspan=4, sticky="w", pady=(8, 0))
+        ttk.Button(ctrl_frame, text="启动弹窗", command=self.open_overlay_window).pack(side="left", padx=(0, 6))
+        ttk.Button(ctrl_frame, text="关闭弹窗", command=self._stop_overlay_process).pack(side="left", padx=(0, 6))
+        ttk.Button(ctrl_frame, text="置顶", command=lambda: self._set_overlay_topmost(True)).pack(side="left", padx=(0, 6))
+        ttk.Button(ctrl_frame, text="取消置顶", command=lambda: self._set_overlay_topmost(False)).pack(side="left")
+
+        tip_frame = ttk.LabelFrame(frame, text="说明", padding=10)
+        tip_frame.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        ttk.Label(
+            tip_frame,
+            text="透明窗口设置会随主配置一起保存；如果透明窗已在运行，点击“应用到透明窗”会立即重载。",
+            wraplength=720,
+            justify="left",
+        ).grid(row=0, column=0, sticky="w")
+
+    def _build_perf_tab(self, frame: ttk.Frame) -> None:
+        frame.columnconfigure(1, weight=1)
+        self._perf_vars: dict[str, tk.StringVar] = {}
+        rows = [
+            ("cpu",  "CPU 使用率"),
+            ("mem",  "本进程内存"),
+            ("sysmem", "系统内存"),
+            ("disk", "程序目录"),
+        ]
+        for row_idx, (key, label) in enumerate(rows):
+            ttk.Label(frame, text=label, width=10, anchor="e").grid(
+                row=row_idx, column=0, sticky="e", padx=(0, 12), pady=8
+            )
+            var = tk.StringVar(value="读取中…")
+            self._perf_vars[key] = var
+            ttk.Label(frame, textvariable=var, anchor="w").grid(
+                row=row_idx, column=1, sticky="w"
+            )
+        self.root.after(500, self._refresh_perf)
+
+    def _refresh_perf(self) -> None:
+        threading.Thread(target=self._fetch_perf, daemon=True).start()
+        self.root.after(2000, self._refresh_perf)
+
+    def _fetch_perf(self) -> None:
+        try:
+            import psutil  # type: ignore[import-untyped]
+            cpu_text = f"{psutil.cpu_percent(interval=0.3):.1f}%"
+            proc = psutil.Process()
+            proc_mem = proc.memory_info().rss
+            mem_text = f"{proc_mem / 1024**2:.1f} MB"
+            sys_mem = psutil.virtual_memory()
+            sysmem_text = (
+                f"{sys_mem.used / 1024**3:.1f} GB / {sys_mem.total / 1024**3:.1f} GB"
+                f"  ({sys_mem.percent:.1f}%)"
+            )
+            dir_bytes = sum(
+                f.stat().st_size
+                for f in APP_DIR.rglob("*")
+                if f.is_file()
+            )
+            disk = psutil.disk_usage(str(APP_DIR))
+            dir_mb = dir_bytes / 1024 ** 2
+            dir_pct = dir_bytes / disk.total * 100
+            disk_text = f"{dir_mb:.1f} MB，占硬盘的 {dir_pct:.2f}%"
+        except ImportError:
+            cpu_text = mem_text = sysmem_text = disk_text = "需安装 psutil"
+        except Exception as exc:  # noqa: BLE001
+            cpu_text = mem_text = sysmem_text = disk_text = f"读取失败: {exc}"
+
+        self.root.after(
+            0,
+            lambda: (
+                self._perf_vars["cpu"].set(cpu_text),
+                self._perf_vars["mem"].set(mem_text),
+                self._perf_vars["sysmem"].set(sysmem_text),
+                self._perf_vars["disk"].set(disk_text),
+            ),
+        )
+
+    def _build_about_tab(self, frame: ttk.Frame) -> None:
+        update_ui.build_about_tab(self, frame, APP_NAME, APP_VERSION, APP_DIR)
+
+    def _build_quanxian_tab(self, frame: ttk.Frame) -> None:
+        frame.columnconfigure(0, weight=1)
+        self._quanxian_text: dict[str, tk.Text] = {}
+        levels = [
+            ("super_admin", "最高管理员（可新增/删除管理员，拥有全部权限）"),
+            ("admin",       "管理员（拥有除新增/删除管理员以外的所有权限）"),
+            ("jianzhang",   "舰长（仅拥有插队命令权限）"),
+            ("member",      "成员（普通观众，仅自助排队/取消/修改）"),
+            ("blacklist",   "黑名单（禁止触发任何弹幕指令，也不能同时是管理员/最高管理员）"),
+        ]
+        for row_idx, (key, label) in enumerate(levels):
+            ttk.Label(frame, text=label).grid(row=row_idx * 2, column=0, sticky="w", pady=(8, 2))
+            container = ttk.Frame(frame)
+            container.grid(row=row_idx * 2 + 1, column=0, sticky="ew", pady=(0, 2))
+            container.columnconfigure(0, weight=1)
+            t = tk.Text(container, height=3, wrap="word")
+            self._all_text_widgets.append(t)
+            t.grid(row=0, column=0, sticky="ew")
+            sb = ttk.Scrollbar(container, orient="vertical", command=t.yview)
+            sb.grid(row=0, column=1, sticky="ns")
+            t.configure(yscrollcommand=sb.set)
+            self._quanxian_text[key] = t
+
+        btn_row = len(levels) * 2
+        btn_bar = ttk.Frame(frame)
+        btn_bar.grid(row=btn_row, column=0, sticky="w", pady=(10, 0))
+        ttk.Button(btn_bar, text="保存权限", command=self._save_quanxian).pack(side="left", padx=(0, 8))
+        ttk.Button(btn_bar, text="刷新权限", command=self._load_quanxian).pack(side="left")
+        self._load_quanxian()
+
+    def _build_kaiguan_tab(self, frame: ttk.Frame) -> None:
+        self._kaiguan_vars: dict[str, tk.BooleanVar] = {}
+        for row_idx, (key, label) in enumerate(KAIGUAN_LABELS):
+            default = DEFAULT_KAIGUAN_GUI.get(key, True)
+            var = tk.BooleanVar(value=default)
+            self._kaiguan_vars[key] = var
+            ttk.Checkbutton(frame, text=label, variable=var).grid(row=row_idx, column=0, sticky="w", pady=2)
+
+        btn_bar = ttk.Frame(frame)
+        btn_bar.grid(row=len(KAIGUAN_LABELS), column=0, sticky="w", pady=(12, 0))
+        ttk.Button(btn_bar, text="刷新开关", command=self._load_kaiguan).pack(side="left")
+        self._load_kaiguan()
+
+    def _load_quanxian(self) -> None:
+        port = self.port_var.get().strip() or "9816"
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/quanxian", timeout=2) as r:
+                data = json.loads(r.read().decode("utf-8", errors="replace"))
+            for key, widget in self._quanxian_text.items():
+                widget.delete("1.0", "end")
+                items = [x for x in data.get(key, []) if x]
+                widget.insert("end", "\n".join(items))
+        except Exception:
+            # 后端未运行时从本地配置读（优先 config.yaml，兼容 quanxian.yaml）
+            try:
+                backend_server = load_backend_server_module()
+                raw = backend_server.load_quanxian()
+            except Exception:
+                raw = load_simple_yaml(QUANXIAN_PATH)
+            for key, widget in self._quanxian_text.items():
+                widget.delete("1.0", "end")
+                items = [x for x in raw.get(key, []) if x]
+                widget.insert("end", "\n".join(items))
+
+    def _save_quanxian(self) -> None:
+        payload: dict[str, list[str]] = {}
+        for key, widget in self._quanxian_text.items():
+            names = [line.strip() for line in widget.get("1.0", "end").splitlines() if line.strip()]
+            payload[key] = names
+        port = self.port_var.get().strip() or "9816"
+        body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/quanxian",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=2):
+                pass
+            self._append_log("[GUI] 权限配置已保存并生效")
+        except Exception:
+            # 后端未运行时写本地配置（同步写入 config.yaml）
+            self._write_quanxian_local(payload)
+            self._append_log("[GUI] 权限配置已保存到本地（后端未运行，下次启动生效）")
+
+    def _write_quanxian_local(self, payload: dict[str, list[str]]) -> None:
+        try:
+            backend_server = load_backend_server_module()
+            backend_server.save_quanxian(payload)
+        except Exception:
+            labels = {
+                "super_admin": "最高管理员：拥有所有权限，包括新增/删除管理员",
+                "admin": "管理员：拥有除新增/删除管理员以外的所有操作权限",
+                "jianzhang": "舰长：仅拥有「插队」命令权限",
+                "member": "成员：普通观众",
+                "blacklist": "黑名单：禁止触发任何弹幕指令，且不能同时是最高管理员/管理员",
+            }
+            lines: list[str] = ["# 权限配置\n"]
+            for key in ("super_admin", "admin", "jianzhang", "member", "blacklist"):
+                lines.append(f"# {labels.get(key, key)}\n{key}:\n")
+                for item in payload.get(key, []):
+                    escaped = str(item).replace('"', '\\"')
+                    lines.append(f'  - "{escaped}"\n')
+                lines.append("\n")
+            QUANXIAN_PATH.write_text("".join(lines), encoding="utf-8")
+
+    def _load_kaiguan(self) -> None:
+        port = self.port_var.get().strip() or "9816"
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/kaiguan", timeout=2) as r:
+                data = json.loads(r.read().decode("utf-8", errors="replace"))
+            for key, var in self._kaiguan_vars.items():
+                var.set(bool(data.get(key, DEFAULT_KAIGUAN_GUI.get(key, True))))
+        except Exception:
+            try:
+                backend_server = load_backend_server_module()
+                raw = backend_server.load_kaiguan()
+            except Exception:
+                raw = load_simple_yaml(KAIGUAN_PATH)
+            for key, var in self._kaiguan_vars.items():
+                default = DEFAULT_KAIGUAN_GUI.get(key, True)
+                val = raw.get(key, default)
+                var.set(bool(val) if isinstance(val, bool) else default)
+
+    def _save_kaiguan(self, *, prefer_backend: bool = True) -> bool:
+        payload = {key: var.get() for key, var in self._kaiguan_vars.items()}
+        if not prefer_backend:
+            self._write_kaiguan_local(payload)
+            self._append_log("[GUI] 功能开关已保存到本地（启动后生效）")
+            return True
+        port = self.port_var.get().strip() or "9816"
+        body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/kaiguan",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=2):
+                pass
+            self._append_log("[GUI] 功能开关已保存并生效")
+        except Exception:
+            self._write_kaiguan_local(payload)
+            self._append_log("[GUI] 功能开关已保存到本地（后端未运行，下次启动生效）")
+        return True
+
+    def _write_kaiguan_local(self, payload: dict[str, bool]) -> None:
+        try:
+            backend_server = load_backend_server_module()
+            backend_server.save_kaiguan(payload)
+        except Exception:
+            comments = {
+                "paidui": "排队总开关：关闭后普通/官服/B服/超级/米服排队全部关闭",
+                "guanfu_paidui": "官服排队（需总开关开启）",
+                "bfu_paidui": "B服排队（需总开关开启）",
+                "chaoji_paidui": "超级排队（需总开关开启）",
+                "mifu_paidui": "米服排队（需总开关开启）",
+                "quxiao_paidui": "取消排队",
+                "xiugai_paidui": "修改/替换排队内容",
+                "jianzhang_chadui": "舰长插队",
+                "fangguan_op": "允许B站房管执行管理员命令",
+            }
+            lines: list[str] = ["# 功能开关（true=启用，false=禁用）\n"]
+            for key, _ in KAIGUAN_LABELS:
+                value = payload.get(key, DEFAULT_KAIGUAN_GUI.get(key, True))
+                value_str = "true" if value else "false"
+                lines.append(f"{key}: {value_str}              # {comments.get(key, key)}\n")
+            KAIGUAN_PATH.write_text("".join(lines), encoding="utf-8")
+
+    def _sync_lan_listen_host(self) -> None:
+        self.host_var.set("0.0.0.0" if self.lan_listen_var.get() else "127.0.0.1")
+
+    def load_from_file(self) -> None:
+        try:
+            backend_server = load_backend_server_module()
+            config = backend_server.load_config()
+        except Exception:
+            config = load_simple_yaml(CONFIG_PATH)
+        server = config.get("server", {})
+        bilibili = config.get("bilibili", config.get("api", {}))
+        douyin = config.get("douyin", {})
+        logging_cfg = config.get("logging", {})
+        queue_archive = config.get("queue_archive", {})
+        platform_archive = config.get("platform_config_archive", {})
+
+        configured_host = str(server.get("host", "127.0.0.1") or "127.0.0.1").strip()
+        lan_listen = bool(server.get("lan_listen", configured_host in {"0.0.0.0", "::", "[::]"}))
+        self.lan_listen_var.set(lan_listen)
+        self._sync_lan_listen_host()
+        self.port_var.set(str(server.get("port", 9816)))
+        self.log_level_var.set(str(logging_cfg.get("level", "INFO")))
+        self.retention_days_var.set(str(logging_cfg.get("retention_days", 7)))
+        self.queue_enabled_var.set(bool(queue_archive.get("enabled", True)))
+        try:
+            active_slot = _coerce_int_field(queue_archive.get("active_slot", 1), 1, "排队存档槽位")
+        except ValueError:
+            active_slot = 1
+        active_slot = self._set_queue_slot_selection(active_slot)
+        self._prev_slot = active_slot
+        try:
+            active_platform_slot = _coerce_int_field(platform_archive.get("active_slot", 1), 1, "平台配置槽位")
+        except ValueError:
+            active_platform_slot = 1
+        active_platform_slot = self._set_platform_slot_selection(active_platform_slot)
+        self._prev_platform_config_slot = active_platform_slot
+        self._set_platform_config_payload(
+            {
+                "platform": config.get("platform", "bilibili"),
+                "bilibili": bilibili if isinstance(bilibili, dict) else {},
+                "douyin": douyin if isinstance(douyin, dict) else {},
+                **{
+                    platform_key: config.get(platform_key, {})
+                    for platform_key in RESERVED_PLATFORM_KEYS
+                },
+            }
+        )
+        myjs_cfg = config.get("myjs", {}) if isinstance(config.get("myjs", {}), dict) else {}
+        daily_limit = min(999, max(0, _coerce_int_field(myjs_cfg.get("daily_queue_limit", 0), 0, "每日排队次数")))
+        self.daily_queue_unlimited_var.set(daily_limit == 0)
+        self.daily_queue_limit_var.set(str(daily_limit if daily_limit > 0 else 1))
+        reset_match = re.fullmatch(r"([01]\d|2[0-3]):([0-5]\d)", str(myjs_cfg.get("daily_queue_reset_time", "04:00") or "04:00"))
+        self.daily_queue_reset_hour_var.set(reset_match.group(1) if reset_match else "04")
+        self.daily_queue_reset_minute_var.set(reset_match.group(2) if reset_match else "00")
+        self._toggle_daily_queue_limit_ui()
+        self.gift_queue_enabled_var.set(bool(myjs_cfg.get("gift_queue_enabled", False)))
+        gift_names = myjs_cfg.get("gift_queue_names", [])
+        if isinstance(gift_names, list):
+            self.gift_queue_names_var.set(", ".join(str(x) for x in gift_names if str(x).strip()) or "辣条")
+            if self.gift_listbox is not None:
+                from core.bilibili_gifts import GIFT_BATTERIES
+                selected = {str(x) for x in gift_names}
+                self.gift_listbox.selection_clear(0, "end")
+                for index, name in enumerate(GIFT_BATTERIES):
+                    if name in selected:
+                        self.gift_listbox.selection_set(index)
+        self.gift_battery_min_var.set(str(myjs_cfg.get("gift_queue_min_batteries", 0)))
+        self.gift_allow_multiple_var.set(bool(myjs_cfg.get("gift_queue_allow_multiple", False)))
+        self.gift_slots_per_gift_var.set(str(myjs_cfg.get("gift_queue_slots_per_gift", 1)))
+        self.gift_saved_insert_rank_var.set(str(myjs_cfg.get("gift_queue_saved_insert_rank", 1)))
+        self.gift_only_var.set(bool(myjs_cfg.get("gift_queue_only", False)))
+        self.gift_insert_rank_var.set("0" if self.gift_only_var.get() else str(myjs_cfg.get("gift_queue_insert_rank", 1)))
+        self._update_gift_condition_hint()
+        ui_cfg = config.get("ui", {})
+        self._set_overlay_settings(ui_cfg.get("overlay_window", DEFAULT_OVERLAY_SETTINGS))
+        self.auto_start_var.set(bool(ui_cfg.get("auto_start_backend", False)))
+        self.language_var.set(str(ui_cfg.get("language", "中文")))
+        self.ui_font_size_var.set(str(ui_cfg.get("ui_font_size", 10)))
+        if self._overlay_window_alive():
+            self._apply_overlay_settings_to_window()
+            self._overlay_style = dict(self._load_style_data())
+            self._redraw_overlay()
+        if hasattr(self, "_kaiguan_vars"):
+            self._load_kaiguan()
+        if hasattr(self, "_style_vars"):
+            self._refresh_style_state()
+        self.status_var.set("已加载配置")
+        self._append_log("[GUI] 已加载配置")
+
+    def refresh_runtime_status(self) -> None:
+        if not self._backend_is_running():
+            self.ws_light_var.set("🔴")
+            self.ws_text_var.set("直播间链接状态：后端未启动")
+            self.root.after(2000, self.refresh_runtime_status)
+            return
+
+        port = self.port_var.get().strip() or "9816"
+        url = f"http://127.0.0.1:{port}/api/runtime-status"
+
+        def _fetch() -> None:
+            try:
+                with urllib.request.urlopen(url, timeout=1.5) as resp:
+                    payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+                active = bool(payload.get("danmu_stream_active"))
+                ws_clients = int(payload.get("ws_clients", 0))
+                relay_platform = str(payload.get("danmu_platform", "") or "").strip().lower()
+                relay_reason = str(payload.get("danmu_last_disconnect_reason", "") or "").strip()
+                if active:
+                    light, text = "🟢", f"直播间链接状态：已连接（WS 客户端 {ws_clients}）"
+                elif relay_platform in RESERVED_PLATFORM_KEYS and relay_reason:
+                    light, text = "🟡", f"直播间链接状态：{relay_reason}"
+                else:
+                    light, text = "🔴", f"直播间链接状态：等待弹幕流（WS 客户端 {ws_clients}）"
+            except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError):
+                light, text = "🔴", "直播间链接状态：后端未响应"
+            self.root.after(0, lambda: (self.ws_light_var.set(light), self.ws_text_var.set(text)))
+            self.root.after(2000, self.refresh_runtime_status)
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def gather_config(self) -> dict:
+        platform_payload = self._gather_platform_config_payload()
+        return {
+            "server": {
+                "host": "0.0.0.0" if self.lan_listen_var.get() else "127.0.0.1",
+                "port": _coerce_int_field(self.port_var.get(), 9816, "监听端口"),
+                "lan_listen": bool(self.lan_listen_var.get()),
+            },
+            "platform": platform_payload["platform"],
+            "bilibili": platform_payload["bilibili"],
+            "douyin": platform_payload["douyin"],
+            **{
+                platform_key: platform_payload[platform_key]
+                for platform_key in RESERVED_PLATFORM_KEYS
+            },
+            "platform_config_archive": {
+                "slots": MAX_QUEUE_ARCHIVE_SLOTS,
+                "active_slot": self._get_selected_platform_slot(),
+            },
+            "myjs": {
+                "daily_queue_limit": 0 if self.daily_queue_unlimited_var.get() else min(999, max(1, _coerce_int_field(self.daily_queue_limit_var.get(), 1, "每日排队次数"))),
+                "daily_queue_reset_time": f"{min(23, max(0, _coerce_int_field(self.daily_queue_reset_hour_var.get(), 4, '重置小时'))):02d}:{min(59, max(0, _coerce_int_field(self.daily_queue_reset_minute_var.get(), 0, '重置分钟'))):02d}",
+                "gift_queue_enabled": bool(self.gift_queue_enabled_var.get()),
+                "gift_queue_names": self._selected_gift_names(),
+                "gift_queue_min_batteries": max(0, _coerce_int_field(self.gift_battery_min_var.get(), 0, "最低电池数")),
+                "gift_queue_allow_multiple": bool(self.gift_allow_multiple_var.get()),
+                "gift_queue_slots_per_gift": max(1, _coerce_int_field(self.gift_slots_per_gift_var.get(), 1, "每次可排人数")),
+                "gift_queue_insert_rank": max(0, _coerce_int_field(self.gift_insert_rank_var.get(), 1, "插入名次")),
+                "gift_queue_saved_insert_rank": max(1, _coerce_int_field(self.gift_saved_insert_rank_var.get(), 1, "原插入名次")),
+                "gift_queue_only": bool(self.gift_only_var.get()),
+            },
+            "logging": {
+                "level": self.log_level_var.get().strip().upper() or "INFO",
+                "retention_days": _coerce_int_field(self.retention_days_var.get(), 7, "日志保留天数"),
+            },
+            "queue_archive": {
+                "enabled": bool(self.queue_enabled_var.get()),
+                "slots": MAX_QUEUE_ARCHIVE_SLOTS,
+                "active_slot": self._get_selected_slot(),
+            },
+            "ui": {
+                "auto_start_backend": bool(self.auto_start_var.get()),
+                "language": self.language_var.get(),
+                "overlay_window": self._get_overlay_settings(),
+                "ui_font_size": max(8, min(20, int(self.ui_font_size_var.get().strip() or 10))),
+            },
+        }
+
+    def _insert_with_links(self, text: str, base_tag: str) -> None:
+        """将 text 插入日志，URL 部分自动加 link 标签并绑定点击事件。"""
+        last = 0
+        for m in _URL_RE.finditer(text):
+            if m.start() > last:
+                self.log_text.insert("end", text[last:m.start()], base_tag)
+            url = m.group(0)
+            # 用 mark 记录插入起点
+            self.log_text.mark_set("_url_s", "end")
+            self.log_text.mark_gravity("_url_s", "left")
+            self.log_text.insert("end", url, (base_tag, "link"))
+            start_idx = self.log_text.index("_url_s")
+            end_idx = self.log_text.index("end")
+            self.log_text.mark_unset("_url_s")
+            # 每段 URL 绑独立 tag，携带闭包 URL
+            tag_name = f"_lnk_{start_idx.replace('.', '_')}"
+            self.log_text.tag_add(tag_name, start_idx, end_idx)
+            self.log_text.tag_bind(tag_name, "<Button-1>", lambda e, u=url: webbrowser.open(u))
+            self.log_text.tag_bind(tag_name, "<Enter>", lambda e: self.log_text.configure(cursor="hand2"))
+            self.log_text.tag_bind(tag_name, "<Leave>", lambda e: self.log_text.configure(cursor=""))
+            last = m.end()
+        if last < len(text):
+            self.log_text.insert("end", text[last:], base_tag)
+
+    @staticmethod
+    def _classify_log(message: str, warn: bool = False) -> str:
+        upper = message.upper()
+        if warn or "[ERROR]" in upper or "CRITICAL" in upper or "失败" in message or "错误" in message:
+            return "ERROR"
+        if "[WARNING]" in upper or "[WARN]" in upper or "警告" in message:
+            return "WARNING"
+        if "DANMU" in upper or "[弹幕]" in message or "弹幕：" in message:
+            return "DANMU"
+        if "EVENT" in upper or "_UPDATE" in upper or "LIVE_GIFT_EVENT" in upper:
+            return "EVENT"
+        return "INFO"
+
+    def _render_log_record(self, timestamp: str, level: str, text: str) -> None:
+        self.log_text.insert("end", timestamp, "ts")
+        self.log_text.insert("end", "  ", "sep")
+        self.log_text.insert("end", f"{level:<7}", f"level_{level.lower()}")
+        self.log_text.insert("end", "  ", "sep")
+        self._insert_with_links(text.rstrip() + "\n", "ev")
+
+    def _refresh_log_view(self) -> None:
+        if not hasattr(self, "log_text"):
+            return
+        needle = self.log_search_var.get().strip().casefold()
+        self.log_text.configure(state="normal")
+        self.log_text.delete("1.0", "end")
+        for timestamp, level, text in self._log_records:
+            if self.log_errors_only_var.get() and level not in {"ERROR", "WARNING"}:
+                continue
+            if self.log_danmu_only_var.get() and level != "DANMU":
+                continue
+            if needle and needle not in f"{timestamp} {level} {text}".casefold():
+                continue
+            self._render_log_record(timestamp, level, text)
+        if self.log_auto_scroll_var.get():
+            self.log_text.see("end")
+        self.log_text.configure(state="disabled")
+
+    def _append_log(self, message: str, warn: bool = False) -> None:
+        import time as _t
+        # 补时间戳前缀
+        if not _PANEL_TS_RE.match(message):
+            message = f"{_t.strftime('%H:%M:%S')} {message}"
+        m = _PANEL_TS_RE.match(message)
+        ts_part = m.group(1) if m else _t.strftime('%H:%M:%S')
+        ev_part = (m.group(2) if m else message).rstrip()
+        level = self._classify_log(ev_part, warn)
+        # 去掉重复的 [INFO]/[GUI] 前缀，固定列中已经展示类型。
+        ev_part = _BRACKET_TAG_RE.sub("", ev_part, count=1)
+        self._log_records.append((ts_part, level, ev_part))
+        if len(self._log_records) > 10000:
+            del self._log_records[:1000]
+        self.log_text.configure(state="normal")
+        needle = self.log_search_var.get().strip().casefold()
+        visible = not (self.log_errors_only_var.get() and level not in {"ERROR", "WARNING"})
+        visible = visible and not (self.log_danmu_only_var.get() and level != "DANMU")
+        visible = visible and (not needle or needle in f"{ts_part} {level} {ev_part}".casefold())
+        if visible:
+            self._render_log_record(ts_part, level, ev_part)
+        if self.log_auto_scroll_var.get():
+            self.log_text.see("end")
+        self.log_text.configure(state="disabled")
+
+    def _enqueue_log(self, message: str) -> None:
+        match = _LOG_LEVEL_RE.search(message)
+        if match:
+            msg_level = _LEVEL_ORDER.get(match.group(1), 0)
+            min_level = _LEVEL_ORDER.get(self.log_level_var.get().upper(), 0)
+            if msg_level < min_level:
+                return
+
+        # 剥离 [STDERR]/[STDOUT] 包装，取出真正的日志行
+        inner = message
+        for pfx in ("[STDERR] ", "[STDOUT] "):
+            if inner.startswith(pfx):
+                inner = inner[len(pfx):]
+                break
+
+        # 将后端完整时间戳 "2026-04-09 12:34:56,ms [LEVEL] name: msg" → "12:34:56 msg"
+        ts_match = _LOG_TS_RE.match(inner)
+        if ts_match:
+            panel_line = f"{ts_match.group(1)} [{ts_match.group(2)}] {ts_match.group(3)}"
+        else:
+            panel_line = inner
+
+        self.log_queue.put(sanitize_log_message(panel_line))
+
+    def _schedule_log_pump(self) -> None:
+        if self.log_pump_running:
+            return
+        self.log_pump_running = True
+        self.root.after(120, self._flush_log_queue)
+
+    def _flush_log_queue(self) -> None:
+        while True:
+            try:
+                message = self.log_queue.get_nowait()
+            except queue.Empty:
+                break
+            self._append_log(message)
+        self.root.after(120, self._flush_log_queue)
+
+    def _read_stream_lines(self, stream, tag: str) -> None:
+        try:
+            while True:
+                try:
+                    line = stream.readline()
+                except UnicodeDecodeError as exc:
+                    self._enqueue_log(f"[{tag}] <decode error: {exc}>")
+                    continue
+                if line == "":
+                    break
+                text = line.rstrip()
+                if text:
+                    self._enqueue_log(f"[{tag}] {text}")
+        finally:
+            try:
+                stream.close()
+            except OSError:
+                pass
+
+    def _bind_process_logs(self) -> None:
+        if not self.server_proc:
+            return
+        if self.server_proc.stdout:
+            self.stdout_thread = threading.Thread(
+                target=self._read_stream_lines,
+                args=(self.server_proc.stdout, "STDOUT"),
+                daemon=True,
+            )
+            self.stdout_thread.start()
+        if self.server_proc.stderr:
+            self.stderr_thread = threading.Thread(
+                target=self._read_stream_lines,
+                args=(self.server_proc.stderr, "STDERR"),
+                daemon=True,
+            )
+            self.stderr_thread.start()
+
+    def save_to_file(self, *, use_backend_api: bool = True, switch_queue_slot: bool = True) -> bool:
+        try:
+            self._ensure_douyin_live_info_before_save()
+            backend_server = load_backend_server_module()
+            with backend_server.config_io_transaction():
+                platform_slot = self._get_selected_platform_slot()
+                platform_payload = self._gather_platform_config_payload()
+                backend_server.save_platform_config_slot(platform_slot, platform_payload)
+                config = backend_server._merge_config(  # type: ignore[attr-defined]
+                    backend_server.load_config(),
+                    self.gather_config(),
+                )
+                backend_server.save_config(config)
+                self._save_kaiguan(prefer_backend=use_backend_api)
+                if not self._save_style():
+                    raise OSError("样式设置保存失败")
+            self._prev_platform_config_slot = platform_slot
+            self.status_var.set("配置保存成功")
+            self._append_log("[GUI] 配置保存成功")
+        except ValueError as exc:
+            messagebox.showerror("输入错误", str(exc))
+            return False
+        except OSError as exc:
+            messagebox.showerror("保存失败", str(exc))
+            return False
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("保存失败", str(exc))
+            return False
+        if self._overlay_window_alive():
+            self._apply_overlay_settings_to_window()
+        if self._overlay_process_running():
+            self._restart_overlay_process()
+        if switch_queue_slot:
+            self._switch_queue_slot()
+        return True
+
+    def _read_slot_csv(self, slot: int) -> list[dict[str, str]]:
+        """读取指定槽位 CSV 的结构化队列条目。"""
+        try:
+            bs = load_backend_server_module()
+            path = bs.PD_DIR / f"queue_archive_slot_{slot}.csv"
+        except Exception:
+            return []
+        if not path.exists():
+            return []
+        try:
+            entries = bs.read_queue_archive_entries(path)
+            return [
+                self._build_queue_entry(
+                    entry.get("id", ""),
+                    entry.get("content", ""),
+                    entry.get("last_operation_at", ""),
+                )
+                for entry in entries
+                if isinstance(entry, dict)
+            ]
+        except Exception:
+            return []
+
+    def _switch_queue_slot(self, slot: int | None = None) -> None:
+        new_slot = self._set_queue_slot_selection(slot) if slot is not None else self._get_selected_slot()
+        old_slot = self._prev_slot
+        if new_slot == old_slot:
+            return
+        # 切换前读取旧槽位人数（以 CSV 为准）
+        old_count = len(self._read_slot_csv(old_slot))
+        # 读取新槽位 CSV 人数
+        new_count_csv = len(self._read_slot_csv(new_slot))
+
+        port = self.port_var.get().strip() or "9816"
+        url = f"http://127.0.0.1:{port}/api/queue/switch"
+        body = json.dumps({"slot": new_slot}).encode("utf-8")
+        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                result = json.loads(resp.read().decode("utf-8", errors="replace"))
+            new_count = result.get("size", new_count_csv)
+            self._append_log(f"[GUI] 切换到存档槽位 {new_slot}，旧存档 {old_count} 人，新存档 {new_count} 人")
+            self._prev_slot = new_slot
+            self.root.after(0, self._refresh_style_state)
+            self.root.after(300, lambda: threading.Thread(target=self._refresh_queue_list, daemon=True).start())
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+            try:
+                backend_server = load_backend_server_module()
+                backend_server.reconcile_live_css_with_archive(old_slot)
+                backend_server.apply_css_archive_to_live(new_slot, force=True)
+            except Exception as exc:
+                self._append_log(f"[GUI] 切换 CSS 样式存档失败: {exc}")
+            self._append_log(f"[GUI] 存档槽位已选择 {new_slot}，旧存档 {old_count} 人，新存档 {new_count_csv} 人（下次启动生效）")
+            self._prev_slot = new_slot
+            self.root.after(0, self._refresh_style_state)
+
+    def _show_backend_startup_ui(self) -> None:
+        self._backend_starting = True
+        self._startup_animation_step = 0
+        self.status_var.set("正在启动后端…")
+        self.startup_status_var.set("正在保存配置…")
+        if self._start_button is not None:
+            self._start_button.configure(state="disabled", text="启动中")
+        if self._stop_button is not None:
+            self._stop_button.configure(state="disabled")
+        if self._startup_indicator is not None:
+            self._startup_indicator.grid()
+        if self._startup_progress is not None:
+            self._startup_progress.start(12)
+        try:
+            self.root.configure(cursor="watch")
+        except tk.TclError:
+            pass
+        self._animate_backend_startup_button()
+        self._refresh_header_status()
+
+    def _animate_backend_startup_button(self) -> None:
+        if not self._backend_starting:
+            return
+        dots = "." * (self._startup_animation_step % 4)
+        self._startup_animation_step += 1
+        if self._start_button is not None:
+            self._start_button.configure(text=f"启动中{dots}")
+        self._startup_animation_job = self.root.after(280, self._animate_backend_startup_button)
+
+    def _finish_backend_startup_ui(self) -> None:
+        self._backend_starting = False
+        if self._startup_animation_job is not None:
+            try:
+                self.root.after_cancel(self._startup_animation_job)
+            except tk.TclError:
+                pass
+            self._startup_animation_job = None
+        if self._startup_progress is not None:
+            self._startup_progress.stop()
+        if self._startup_indicator is not None:
+            self._startup_indicator.grid_remove()
+        if self._start_button is not None:
+            self._start_button.configure(state="normal", text="启动服务")
+        if self._stop_button is not None:
+            self._stop_button.configure(state="normal")
+        try:
+            self.root.configure(cursor="")
+        except tk.TclError:
+            pass
+        self.startup_status_var.set("")
+        self._refresh_header_status()
+
+    def _wait_for_backend_ready(self, port: int, command: list[str]) -> None:
+        process = self.server_proc
+        if process is None:
+            self._startup_result_queue.put((False, "后端进程未创建", command))
+            return
+        deadline = time.monotonic() + 15.0
+        last_error = ""
+        health_url = f"http://127.0.0.1:{port}/api/config/basic"
+        while time.monotonic() < deadline:
+            return_code = process.poll()
+            if return_code is not None:
+                self._startup_result_queue.put((False, f"后端进程提前退出，退出码 {return_code}", command))
+                return
+            try:
+                with urllib.request.urlopen(health_url, timeout=0.4) as response:
+                    if 200 <= int(getattr(response, "status", 200)) < 500:
+                        self._startup_result_queue.put((True, "", command))
+                        return
+            except Exception as exc:  # noqa: BLE001
+                last_error = str(exc)
+            time.sleep(0.18)
+        detail = f"：{last_error}" if last_error else ""
+        self._startup_result_queue.put((False, f"等待后端响应超时{detail}", command))
+
+    def _poll_backend_start_result(self) -> None:
+        if not self._backend_starting:
+            return
+        try:
+            ok, error, command = self._startup_result_queue.get_nowait()
+        except queue.Empty:
+            self.root.after(100, self._poll_backend_start_result)
+            return
+        if ok:
+            self._finish_backend_startup_ui()
+            self.status_var.set("后端已启动")
+            self._append_log(f"[GUI] 后端已启动：{' '.join(command)}")
+            self._switch_queue_slot()
+        else:
+            self._fail_backend_start(error)
+
+    def _fail_backend_start(self, error: str) -> None:
+        process = self.server_proc
+        if process is not None and process.poll() is None:
+            try:
+                process.terminate()
+            except OSError:
+                pass
+        self.server_proc = None
+        self._finish_backend_startup_ui()
+        self.status_var.set("后端启动失败")
+        self._append_log(f"[GUI] 后端启动失败：{error}")
+        messagebox.showerror("启动失败", error)
+
+    def start_server(self) -> None:
+        if self._backend_starting:
+            return
+        if self.server_proc and self.server_proc.poll() is None:
+            self.status_var.set("后端已经在运行")
+            self._append_log("[GUI] 后端已经在运行")
+            return
+        self._show_backend_startup_ui()
+        self.root.after(80, self._start_server_after_paint)
+
+    def _start_server_after_paint(self) -> None:
+        try:
+            if not self.save_to_file(use_backend_api=False, switch_queue_slot=False):
+                self._finish_backend_startup_ui()
+                self.status_var.set("启动已取消")
+                return
+            self.startup_status_var.set("正在创建后端进程…")
+            if getattr(sys, "frozen", False):
+                command = [sys.executable, "--backend"]
+            else:
+                command = [sys.executable, str(SERVER_PATH)]
+            backend_env = os.environ.copy()
+            backend_env["DANMUJI_LAUNCHED_BY_GUI"] = "1"
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            self.server_proc = subprocess.Popen(
+                command,
+                cwd=str(APP_DIR),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+                creationflags=creation_flags,
+                env=backend_env,
+            )
+            self._bind_process_logs()
+            self._schedule_log_pump()
+            self.startup_status_var.set("正在等待后端响应…")
+            try:
+                port = int(self.port_var.get().strip() or "9816")
+            except ValueError:
+                port = 9816
+            threading.Thread(target=self._wait_for_backend_ready, args=(port, command), daemon=True).start()
+            self.root.after(100, self._poll_backend_start_result)
+        except Exception as exc:  # noqa: BLE001
+            self._fail_backend_start(str(exc))
+    def stop_server(self) -> None:
+        if not self.server_proc or self.server_proc.poll() is not None:
+            self.status_var.set("后端未运行")
+            self.ws_light_var.set("🔴")
+            self.ws_text_var.set("直播间链接状态：后端未启动")
+            return
+
+        self.server_proc.terminate()
+        try:
+            self.server_proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            self.server_proc.kill()
+        self.status_var.set("后端已停止")
+        self.ws_light_var.set("🔴")
+        self.ws_text_var.set("直播间链接状态：后端未启动")
+        self._append_log("[GUI] 后端已停止")
+
+    _FREE_NOTICE = (
+        "【免费提示】本软件完全免费，源码公开。"
+        "若有人向你收费获取此软件（亲手上门帮安装调试除外），请立刻退款并举报！"
+        "侵权/倒卖者将承担民事赔偿责任，情节严重者依据《著作权法》可追究刑事责任（最高判处 3 年有期徒刑并处罚金）。"
+    )
+
+    def open_config(self) -> None:
+        port = self.port_var.get().strip() or "9816"
+        self._append_log(self._FREE_NOTICE, warn=True)
+        webbrowser.open(f"http://127.0.0.1:{port}/config")
+
+    def open_web(self) -> None:
+        port = self.port_var.get().strip() or "9816"
+        self._append_log(self._FREE_NOTICE, warn=True)
+        webbrowser.open(f"http://127.0.0.1:{port}/index")
+
+    def on_close(self) -> None:
+        self._stop_overlay_process()
+        self._close_overlay_window()
+        if self.server_proc and self.server_proc.poll() is None:
+            self.stop_server()
+        self.root.destroy()
+
+
+def main() -> None:
+    if "--backend" in sys.argv[1:]:
+        backend_server = load_backend_server_module()
+        config = backend_server.load_config()
+        host = str(config.get("server", {}).get("host", "0.0.0.0"))
+        port = int(config.get("server", {}).get("port", 9816))
+        backend_server.run_server(host=host, port=port)
+        return
+    if "--overlay-host" in sys.argv[1:]:
+        from core import overlay_host
+
+        args = [arg for arg in sys.argv[1:] if arg != "--overlay-host"]
+        overlay_host.main(args)
+        return
+
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        root.wm_attributes("-alpha", 0)
+    except tk.TclError:
+        pass
+    app = ControlPanelApp(root)
+    root.geometry("1180x720")
+    root.minsize(1040, 620)
+    root.update_idletasks()
+    root.deiconify()
+    try:
+        root.wm_attributes("-alpha", 1)
+    except tk.TclError:
+        pass
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    main()

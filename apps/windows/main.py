@@ -7,15 +7,41 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from apps.server import server as backend  # noqa: E402
 from apps.server.main import configure_web_assets  # noqa: E402
 
 configure_web_assets()
 
-from core.control_panel import main as legacy_main  # noqa: E402
+from apps.windows import control_panel  # noqa: E402
+
+
+def _configure_control_panel_paths() -> None:
+    frozen = bool(getattr(sys, "frozen", False))
+    bundle_root = Path(getattr(sys, "_MEIPASS", REPO_ROOT)).resolve()
+    app_dir = Path(sys.executable).resolve().parent if frozen else REPO_ROOT
+    windows_dir = REPO_ROOT / "apps" / "windows"
+    config_dir = app_dir if frozen else REPO_ROOT / "core"
+
+    control_panel.REPO_DIR = REPO_ROOT
+    control_panel.CORE_DIR = windows_dir
+    control_panel.BUNDLE_DIR = bundle_root
+    control_panel.APP_DIR = app_dir
+    control_panel._YAML_DIR = config_dir
+    control_panel.BUNDLE_CORE_DIR = bundle_root / "apps" / "windows"
+    control_panel.RUNTIME_CORE_DIR = windows_dir
+    control_panel.CONFIG_PATH = config_dir / "config.yaml"
+    control_panel.QUANXIAN_PATH = config_dir / "quanxian.yaml"
+    control_panel.KAIGUAN_PATH = config_dir / "kaiguan.yaml"
+    control_panel.SERVER_PATH = REPO_ROOT / "apps" / "server" / "main.py"
+    control_panel.OVERLAY_HOST_SCRIPT = windows_dir / "overlay_host.py"
+    control_panel._BACKEND_SERVER_MODULE = backend
+
+
+_configure_control_panel_paths()
 
 
 def main() -> None:
-    legacy_main()
+    control_panel.main()
 
 
 if __name__ == "__main__":

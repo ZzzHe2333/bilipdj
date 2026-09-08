@@ -4,7 +4,8 @@ import ast
 import unittest
 from pathlib import Path
 
-SOURCE_PATH = Path(__file__).resolve().parents[1] / "core" / "control_panel.py"
+SOURCE_PATH = Path(__file__).resolve().parents[1] / "apps" / "windows" / "control_panel.py"
+
 
 class BackendStartupAnimationTests(unittest.TestCase):
     @classmethod
@@ -33,6 +34,7 @@ class BackendStartupAnimationTests(unittest.TestCase):
 
     def test_source_is_valid_python(self) -> None:
         self.assertIsInstance(self.tree, ast.Module)
+
 
 if __name__ == "__main__":
     unittest.main()

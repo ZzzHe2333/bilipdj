@@ -4,17 +4,9 @@ on:
   workflow_dispatch:
   push:
     branches: [now]
-    paths:
-      - 'apps/server/**'
-      - 'apps/web/**'
-      - 'core/**'
-      - 'requirements.txt'
+    paths: ['apps/server/**', 'apps/web/**', 'core/**', 'requirements.txt']
   pull_request:
-    paths:
-      - 'apps/server/**'
-      - 'apps/web/**'
-      - 'core/**'
-      - 'requirements.txt'
+    paths: ['apps/server/**', 'apps/web/**', 'core/**', 'requirements.txt']
 
 jobs:
   validate-server:
@@ -25,12 +17,18 @@ jobs:
         with:
           python-version: '3.11'
       - run: python -m pip install -r requirements.txt
-      - run: python -m compileall -q core apps/server
-      - name: Validate standalone entry point
+      - run: python -m compileall -q apps/server core
+      - name: Validate migrated backend entry point
         run: |
           python - <<'PY'
+          import importlib
           from apps.server.main import configure_web_assets
+          backend = importlib.import_module('apps.server.server')
+          legacy = importlib.import_module('core.server')
+          assert backend is legacy
+          assert 'apps/server/server.py' in backend.__file__.replace('\\', '/')
           path = configure_web_assets()
           assert (path / 'index.html').is_file()
+          print(backend.__file__)
           print(path)
           PY

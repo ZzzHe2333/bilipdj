@@ -6,14 +6,32 @@ import logging
 import threading
 import unittest
 
-from core.queue_rank_query import attach_queue_rank_query, install_queue_rank_query_hook
+from apps.server import queue_rank_query as rank_query
+
+attach_queue_rank_query = rank_query.attach_queue_rank_query
+install_queue_rank_query_hook = rank_query.install_queue_rank_query_hook
 
 
 class QueueRankSafetyTests(unittest.TestCase):
+    def _without_discoverable_server_modules(self):
+        class _Guard:
+            def __enter__(_self):
+                _self.previous = rank_query._SERVER_MODULE_NAMES
+                rank_query._SERVER_MODULE_NAMES = frozenset()
+                return _self
+
+            def __exit__(_self, exc_type, exc, tb):
+                rank_query._SERVER_MODULE_NAMES = _self.previous
+                rank_query._restore_build_class_hook()
+                return False
+
+        return _Guard()
+
     def test_standalone_install_does_not_patch_global_builder(self) -> None:
-        before = builtins.__build_class__
-        self.assertFalse(install_queue_rank_query_hook())
-        self.assertIs(builtins.__build_class__, before)
+        with self._without_discoverable_server_modules():
+            before = builtins.__build_class__
+            self.assertFalse(install_queue_rank_query_hook())
+            self.assertIs(builtins.__build_class__, before)
 
     def test_unrelated_main_queue_manager_is_not_patched(self) -> None:
         import __main__
@@ -30,10 +48,11 @@ class QueueRankSafetyTests(unittest.TestCase):
         try:
             __main__.QueueManager = UnrelatedQueueManager
             __main__.__file__ = "/tmp/other_app.py"
-            before = builtins.__build_class__
-            self.assertFalse(install_queue_rank_query_hook())
-            self.assertFalse(hasattr(UnrelatedQueueManager, "query_queue_rank"))
-            self.assertIs(builtins.__build_class__, before)
+            with self._without_discoverable_server_modules():
+                before = builtins.__build_class__
+                self.assertFalse(install_queue_rank_query_hook())
+                self.assertFalse(hasattr(UnrelatedQueueManager, "query_queue_rank"))
+                self.assertIs(builtins.__build_class__, before)
         finally:
             if previous_class is None:
                 delattr(__main__, "QueueManager")
@@ -83,8 +102,9 @@ class QueueRankSafetyTests(unittest.TestCase):
             "install_queue_rank_query_hook": install_queue_rank_query_hook,
             "threading": threading,
         }
-        exec(
-            """
+        with self._without_discoverable_server_modules():
+            exec(
+                """
 installed = install_queue_rank_query_hook()
 class QueueManager:
     def __init__(self):
@@ -96,11 +116,11 @@ class QueueManager:
     def _process(self, *args):
         return False, None
 """,
-            namespace,
-        )
-        self.assertTrue(namespace["installed"])
-        self.assertTrue(namespace["QueueManager"]._queue_rank_query_installed)
-        self.assertIs(builtins.__build_class__, original)
+                namespace,
+            )
+            self.assertTrue(namespace["installed"])
+            self.assertTrue(namespace["QueueManager"]._queue_rank_query_installed)
+            self.assertIs(builtins.__build_class__, original)
 
 
 if __name__ == "__main__":

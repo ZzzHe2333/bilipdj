@@ -1,0 +1,3 @@
+from apps.windows.overlay_bootstrap import install_overlay_class_hook
+
+install_overlay_class_hook()

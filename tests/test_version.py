@@ -4,7 +4,7 @@ import re
 import unittest
 from pathlib import Path
 
-from core.version import APP_VERSION, load_app_version
+from apps.windows.version import APP_VERSION, load_app_version
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -19,7 +19,7 @@ class VersionSourceTests(unittest.TestCase):
         self.assertRegex(APP_VERSION, re.compile(r"^\d+(?:\.\d+){2,}$"))
 
     def test_desktop_title_is_corrected_from_version_module(self) -> None:
-        source = (ROOT / "core" / "update_ui.py").read_text(encoding="utf-8")
+        source = (ROOT / "apps" / "windows" / "update_ui.py").read_text(encoding="utf-8")
         self.assertIn("from .version import APP_VERSION", source)
         self.assertIn(
             'app.root.title(f"{app_name} 控制台 v{current_version}")',
