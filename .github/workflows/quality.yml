@@ -39,6 +39,8 @@ jobs:
         run: python apps/server/huya_protocol_guard.py
       - name: Validate red TV chat parser
         run: python apps/server/youtube_protocol_guard.py
+      - name: Validate purple mouse chat parser
+        run: python apps/server/twitch_protocol_guard.py
       - name: Validate packaging entry syntax
         run: |
           bash -n apps/windows/package-macos.sh
