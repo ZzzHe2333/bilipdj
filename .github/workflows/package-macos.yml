@@ -72,7 +72,7 @@ jobs:
           mkdir _package
           cp -R dist/bilipdj/* _package/
           [[ -f README.md ]] && cp README.md _package/
-          [[ -f RELEASE_NOTES.md ]] && cp RELEASE_NOTES.md _package/
+          [[ -f core/RELEASE_NOTES.md ]] && cp core/RELEASE_NOTES.md _package/RELEASE_NOTES.md
           [[ -f core/quanxian.yaml ]] && cp core/quanxian.yaml _package/
           [[ -f core/kaiguan.yaml ]] && cp core/kaiguan.yaml _package/
           tar -czf "${{ steps.resolve_tag.outputs.asset_name }}" -C _package .
@@ -93,5 +93,5 @@ jobs:
           artifactErrorsFailBuild: true
           allowUpdates: true
           replacesArtifacts: true
-          bodyFile: RELEASE_NOTES.md
+          bodyFile: core/RELEASE_NOTES.md
           generateReleaseNotes: false

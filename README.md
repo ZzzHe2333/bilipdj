@@ -4,7 +4,7 @@
 
 **面向 Bilibili / 抖音直播间的本地化弹幕排队、权限控制、队列存档与 OBS 展示工具。**
 
-[下载发行版](https://github.com/ZzzHe2333/bilipdj/releases) · [使用教程](./GUIDE.md) · [更新日志](./UPDATE.md) · [API 契约](./packages/shared/api-contract.md) · [问题反馈](https://github.com/ZzzHe2333/bilipdj/issues)
+[下载发行版](https://github.com/ZzzHe2333/bilipdj/releases) · [使用教程](./core/GUIDE.md) · [更新日志](./core/UPDATE.md) · [API 契约](./packages/shared/api-contract.md) · [问题反馈](https://github.com/ZzzHe2333/bilipdj/issues)
 
 </div>
 
@@ -56,7 +56,7 @@ bilipdj/
 │     ├─ main.py
 │     └─ *.spec
 ├─ packages/shared/           # 前端/第三方客户端共享契约
-├─ core/                      # 旧导入/旧命令兼容层 + 兼容运行数据位置
+├─ core/                      # 旧兼容层、兼容运行数据 + 项目文档中心
 ├─ scripts/                   # 必要构建、API 文档与安全检查脚本
 └─ .github/workflows/
 ```
@@ -64,6 +64,8 @@ bilipdj/
 ### `core/` 的定位
 
 `core/` 已不再承载 Server 或 Windows 的主业务实现。迁移后的同名 Python 文件仅保留轻量转发，以兼容旧代码中的 `import core.server`、`import core.control_panel` 等入口；业务实现位于 `apps/server` 与 `apps/windows`。
+
+项目的使用教程、更新日志、发行说明、贡献者说明和 AI 上下文也统一放在 `core/`，入口见 [core/README.md](./core/README.md)。
 
 源码模式下的 `config.yaml`、`quanxian.yaml`、`kaiguan.yaml`、`style.json` 与 `core/cd/` 暂时继续使用兼容位置。Web 静态资源只有 `apps/web/static/` 一套。
 
@@ -187,9 +189,12 @@ python scripts/generate_api_docs.py
 
 ## 文档
 
-- [GUIDE.md](./GUIDE.md)：使用教程
-- [UPDATE.md](./UPDATE.md)：更新日志
-- [RELEASE_NOTES.md](./RELEASE_NOTES.md)：发行说明
+- [core/README.md](./core/README.md)：文档与兼容层总索引
+- [core/GUIDE.md](./core/GUIDE.md)：使用教程
+- [core/UPDATE.md](./core/UPDATE.md)：更新日志
+- [core/RELEASE_NOTES.md](./core/RELEASE_NOTES.md)：发行说明
+- [core/CONTRIBUTORS.md](./core/CONTRIBUTORS.md)：贡献者说明
+- [core/ai.md](./core/ai.md)：AI / 自动化工具仓库上下文
 - [packages/shared/api-contract.md](./packages/shared/api-contract.md)：共享 API 契约、访问边界与第三方客户端说明
 - [Issues](https://github.com/ZzzHe2333/bilipdj/issues)：Bug、建议和任务跟踪
 
