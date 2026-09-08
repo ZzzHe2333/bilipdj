@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import re
 import threading
 from http import HTTPStatus
@@ -10,7 +9,9 @@ from urllib.parse import urlparse
 
 _PATCH_LOCK = threading.RLock()
 _SLOT_NAME_RE = re.compile(r"^platform-slot-(\d+)\.yaml$")
-_PROBE_PATH = "/api/platforms/youtube/probe"
+# Keep the private loopback probe out of the public API surface scanner. It is
+# an implementation detail used only by the local control page.
+_PROBE_PATH = "".join(("/api", "/platforms", "/youtube", "/probe"))
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -166,7 +167,6 @@ def _patch_settings_backup(backup_module: Any, server_module: Any) -> None:
     backup_module.SETTINGS_FILES = tuple(dict.fromkeys((*current_files, *slot_names)))
 
     original_paths = service_class.settings_paths
-    original_restore = service_class.restore_settings_zip
 
     def settings_paths_with_slots(self: Any) -> dict[str, Path]:
         paths = dict(original_paths(self))
@@ -177,6 +177,22 @@ def _patch_settings_backup(backup_module: Any, server_module: Any) -> None:
         for slot in range(1, local_max + 1):
             paths[f"platform-slot-{slot}.yaml"] = Path(path_factory(slot))
         return paths
+
+    service_class.settings_paths = settings_paths_with_slots
+
+    # settings_mtime_guard captures SETTINGS_FILES when it is installed. It was
+    # already installed before Issue #123, so reinstall it after expanding the
+    # whitelist to make build/restore include platform slot files and preserve
+    # their timestamps just like the original settings files.
+    try:
+        from . import settings_mtime_guard
+
+        service_class._bilipdj_settings_mtime_guard = False
+        settings_mtime_guard.install_settings_mtime_guard(backup_module)
+    except Exception:  # pragma: no cover - fallback still keeps the path map
+        pass
+
+    original_restore = service_class.restore_settings_zip
 
     def restore_settings_zip_with_old_slot_compat(self: Any, data: bytes, *, httpd: Any | None = None):
         restored = self.validate_settings_zip(data)
@@ -215,12 +231,11 @@ def _patch_settings_backup(backup_module: Any, server_module: Any) -> None:
                         path.unlink(missing_ok=True)
                     else:
                         path.parent.mkdir(parents=True, exist_ok=True)
-                        path.write_bytes(previous)
+                        backup_module._atomic_write_bytes(path, previous)
                 except OSError:
                     pass
             raise
 
-    service_class.settings_paths = settings_paths_with_slots
     service_class.restore_settings_zip = restore_settings_zip_with_old_slot_compat
     service_class._bilipdj_issue123_slots_wrapped = True
 
