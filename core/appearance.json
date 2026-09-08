@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "design": "aurora",
+  "mode": "dark",
+  "font_family": "Microsoft YaHei UI",
+  "font_size": 10,
+  "radius": 10,
+  "dark": {
+    "background": "#090E1A",
+    "sidebar": "#0D1424",
+    "surface": "#111A2C",
+    "surface_alt": "#18233A",
+    "input": "#0D1424",
+    "border": "#26334D",
+    "text": "#E6EDF7",
+    "muted": "#8A9AB3",
+    "accent": "#7C6CF2",
+    "accent_hover": "#9184FF",
+    "selection": "#7C6CF2",
+    "success": "#32D583",
+    "warning": "#F5B942",
+    "danger": "#F97066"
+  },
+  "light": {
+    "background": "#F4F6FB",
+    "sidebar": "#EAEDF5",
+    "surface": "#FFFFFF",
+    "surface_alt": "#F0EFFF",
+    "input": "#FBFBFE",
+    "border": "#D5D9E7",
+    "text": "#20263A",
+    "muted": "#687089",
+    "accent": "#6757D9",
+    "accent_hover": "#5142BC",
+    "selection": "#6757D9",
+    "success": "#007A40",
+    "warning": "#B57600",
+    "danger": "#D92D20"
+  }
+}
