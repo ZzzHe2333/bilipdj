@@ -107,6 +107,7 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
                 from .portable_autostart import patch_control_panel_portable_autostart
                 from .style_save_transport import install_style_save_transport
                 from .support_us import patch_control_panel_support_us
+                from .unified_theme import patch_control_panel_unified_theme
                 from .webdav_backup_ui import patch_control_panel_webdav_backup
 
                 install_style_save_transport()
@@ -119,10 +120,10 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
                 patch_control_panel_support_us(cls)
                 patch_control_panel_ui_finish(cls)
                 patch_control_panel_logging(cls)
-                # This patch intentionally runs last for navigation and queue-dialog
-                # normalization. The support renderer below then redraws only the
-                # final “支持我们” page from the canonical support_us implementation.
+                # Navigation/queue normalization stays before the final shared
+                # theme layer so the theme can style the final widget tree.
                 patch_control_panel_issue79(cls)
+                patch_control_panel_unified_theme(cls)
                 _install_final_support_renderer(cls, module)
             finally:
                 _restore_hook()
