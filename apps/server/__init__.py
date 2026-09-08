@@ -95,7 +95,9 @@ def configure_runtime_paths(module: Any = server) -> Any:
 configure_runtime_paths()
 
 from . import settings_backup as _settings_backup  # noqa: E402
+from . import settings_mtime_guard as _settings_mtime_guard  # noqa: E402
 
 _settings_backup.install_settings_backup(server)
+_settings_mtime_guard.install_settings_mtime_guard(_settings_backup)
 
 __all__ = ["REPO_ROOT", "configure_runtime_paths", "server"]
