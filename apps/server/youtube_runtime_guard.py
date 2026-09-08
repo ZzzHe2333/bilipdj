@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 from . import youtube_protocol
 
 _PATCH_LOCK = threading.RLock()
+_ACTIVE_PLATFORMS_EXTRA_KEY = "active_platforms"
 
 
 def _append_unique(values: Any, item: str) -> tuple[str, ...]:
@@ -102,12 +103,7 @@ def _patch_issue79(issue79_module: Any) -> None:
 
 
 def _patch_runtime_status(server_module: Any) -> None:
-    """Keep `/api/runtime-status` compatible with string room identifiers.
-
-    The legacy endpoint coerces relay_status['roomid'] to int. YouTube uses an
-    11-character Video ID, so intercept only this endpoint and emit the same
-    payload shape with a safe numeric compatibility field plus `danmu_room_id`.
-    """
+    """Keep `/api/runtime-status` compatible with string room identifiers."""
     handler_class = getattr(server_module, "ApiHandler", None)
     if not isinstance(handler_class, type):
         return
@@ -149,6 +145,8 @@ def _patch_runtime_status(server_module: Any) -> None:
                 "danmu_last_disconnect_at": str(relay_status.get("last_disconnect_at", "") or ""),
                 "danmu_last_disconnect_reason": str(relay_status.get("last_disconnect_reason", "") or ""),
                 "danmu_idle_seconds": relay_status.get("idle_seconds"),
+                # Legacy numeric field remains for existing clients. Platforms
+                # with non-numeric IDs use 0 and expose the exact value below.
                 "danmu_roomid": roomid_compat,
                 "danmu_room_id": room_id,
                 "danmu_host": str(relay_status.get("host", "") or ""),
@@ -166,86 +164,168 @@ def _patch_runtime_status(server_module: Any) -> None:
     handler_class.do_GET = do_GET_with_redtv_status
 
 
-def _patch_active_platform_persistence(server_module: Any, issue79_module: Any) -> None:
-    """Persist active platform selection without changing the legacy YAML writer.
+def _decode_stored_active_platforms(value: Any, supported: Any) -> list[str] | None:
+    decoded: Any = value
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(decoded, (list, tuple)):
+        return None
 
-    Store the active list in the active platform slot's `youtube.extra` section.
-    This keeps existing config-schema compatibility while making the selection
-    survive save -> reload -> restart. The issue79 normalizer is wrapped to read
-    that stored value when the transient top-level key is absent.
+    allowed = {
+        str(item or "").strip().lower()
+        for item in supported if str(item or "").strip()
+    }
+    result: list[str] = []
+    for item in decoded:
+        name = str(item or "").strip().lower()
+        if name in allowed and name not in result:
+            result.append(name)
+    # Explicit [] is significant: it means disable all relays.
+    return result
+
+
+def _active_platforms_from_youtube_section(config: Any, supported: Any) -> list[str] | None:
+    if not isinstance(config, dict):
+        return None
+    youtube = config.get("youtube", {})
+    if not isinstance(youtube, dict):
+        return None
+    extra = youtube.get("extra", {})
+    if not isinstance(extra, dict):
+        return None
+    return _decode_stored_active_platforms(extra.get(_ACTIVE_PLATFORMS_EXTRA_KEY), supported)
+
+
+def _patch_active_platform_persistence(server_module: Any, issue79_module: Any) -> None:
+    """Persist issue79's top-level active list in the active platform slot.
+
+    `server.save_config()` historically does not serialize `active_platforms`.
+    Platform-slot reserved `extra` data *is* serialized, so keep a compact JSON
+    copy there and restore it through `load_config()`. This preserves an
+    explicit empty list as well as multi-platform selections across reloads.
     """
     if issue79_module is None:
         return
+
     original_normalize = getattr(issue79_module, "_normalize_active_platforms", None)
-    if not callable(original_normalize) or bool(getattr(original_normalize, "_bilipdj_redtv_persist_wrapped", False)):
+    if callable(original_normalize) and not bool(
+        getattr(original_normalize, "_bilipdj_redtv_persist_wrapped", False)
+    ):
+        def normalize_active_platforms_with_persist(module: Any, config: Any) -> tuple[str, ...]:
+            cfg = config if isinstance(config, dict) else {}
+            if not isinstance(cfg.get("active_platforms"), (list, tuple)):
+                restored = _active_platforms_from_youtube_section(
+                    cfg,
+                    getattr(issue79_module, "SUPPORTED_ACTIVE_PLATFORMS", ()),
+                )
+                if restored is not None:
+                    cfg = dict(cfg)
+                    cfg["active_platforms"] = restored
+            return original_normalize(module, cfg)
+
+        normalize_active_platforms_with_persist._bilipdj_redtv_persist_wrapped = True  # type: ignore[attr-defined]
+        issue79_module._normalize_active_platforms = normalize_active_platforms_with_persist
+
+    original_load = getattr(server_module, "load_config", None)
+    original_save = getattr(server_module, "save_config", None)
+    if not callable(original_load) or not callable(original_save):
+        return
+    if bool(getattr(original_load, "_bilipdj_redtv_active_wrapped", False)):
         return
 
-    def normalize_active_platforms_with_persist(module: Any, config: Any) -> tuple[str, ...]:
-        cfg = config if isinstance(config, dict) else {}
-        if not isinstance(cfg.get("active_platforms"), (list, tuple)):
-            youtube = cfg.get("youtube", {})
-            if isinstance(youtube, dict):
-                extra = youtube.get("extra", {})
-                if isinstance(extra, dict):
-                    stored = extra.get("active_platforms")
-                    if isinstance(stored, str):
-                        try:
-                            decoded = json.loads(stored)
-                        except json.JSONDecodeError:
-                            decoded = None
-                        if isinstance(decoded, list):
-                            cfg = dict(cfg)
-                            cfg["active_platforms"] = decoded
-        return original_normalize(module, cfg)
+    def load_config_with_active_platforms(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        config = original_load(*args, **kwargs)
+        if not isinstance(config, dict):
+            return config
+        if isinstance(config.get("active_platforms"), (list, tuple)):
+            config["active_platforms"] = list(config["active_platforms"])
+            return config
+        restored = _active_platforms_from_youtube_section(
+            config,
+            getattr(issue79_module, "SUPPORTED_ACTIVE_PLATFORMS", ()),
+        )
+        if restored is not None:
+            config["active_platforms"] = restored
+        return config
 
-    normalize_active_platforms_with_persist._bilipdj_redtv_persist_wrapped = True  # type: ignore[attr-defined]
-    issue79_module._normalize_active_platforms = normalize_active_platforms_with_persist
+    def save_config_with_active_platforms(config: Any, *args: Any, **kwargs: Any) -> Any:
+        if not isinstance(config, dict):
+            return original_save(config, *args, **kwargs)
 
-    handler_class = getattr(server_module, "ApiHandler", None)
-    original_post = getattr(handler_class, "do_POST", None) if isinstance(handler_class, type) else None
-    if not callable(original_post) or bool(getattr(original_post, "_bilipdj_redtv_active_wrapped", False)):
+        updated = copy.deepcopy(config)
+        explicit = updated.get("active_platforms")
+        active = _decode_stored_active_platforms(
+            explicit,
+            getattr(issue79_module, "SUPPORTED_ACTIVE_PLATFORMS", ()),
+        )
+        if active is None:
+            return original_save(updated, *args, **kwargs)
+
+        encoded = json.dumps(active, ensure_ascii=False, separators=(",", ":"))
+        youtube = dict(updated.get("youtube", {}) or {})
+        extra = dict(youtube.get("extra", {}) or {})
+        extra[_ACTIVE_PLATFORMS_EXTRA_KEY] = encoded
+        youtube["extra"] = extra
+        updated["youtube"] = youtube
+
+        archive = updated.get("platform_config_archive", {})
+        if not isinstance(archive, dict):
+            archive = {}
+        try:
+            slot = int(archive.get("active_slot", 1) or 1)
+        except (TypeError, ValueError):
+            slot = 1
+        max_slots = max(1, int(getattr(server_module, "MAX_QUEUE_ARCHIVE_SLOTS", 10) or 10))
+        slot = max(1, min(max_slots, slot))
+
+        # The regular config writer does not update platform slot files, while
+        # load_config() overlays those files onto config.yaml. Persist the copy
+        # into the active slot first so the subsequent reload sees it.
+        slot_payload = server_module.load_platform_config_slot(slot)
+        if not isinstance(slot_payload, dict):
+            slot_payload = {}
+        slot_youtube = dict(slot_payload.get("youtube", {}) or {})
+        slot_extra = dict(slot_youtube.get("extra", {}) or {})
+        slot_extra[_ACTIVE_PLATFORMS_EXTRA_KEY] = encoded
+        slot_youtube["extra"] = slot_extra
+        slot_payload["youtube"] = slot_youtube
+        server_module.save_platform_config_slot(slot, slot_payload)
+
+        return original_save(updated, *args, **kwargs)
+
+    load_config_with_active_platforms._bilipdj_redtv_active_wrapped = True  # type: ignore[attr-defined]
+    save_config_with_active_platforms._bilipdj_redtv_active_wrapped = True  # type: ignore[attr-defined]
+    server_module.load_config = load_config_with_active_platforms
+    server_module.save_config = save_config_with_active_platforms
+
+
+def _patch_continuation_exhaustion() -> None:
+    """Never poll the same YouTube continuation after the server stops advancing it."""
+    session_class = getattr(youtube_protocol, "YoutubeChatSession", None)
+    original_fetch = getattr(session_class, "fetch_once", None) if isinstance(session_class, type) else None
+    if not callable(original_fetch) or bool(getattr(original_fetch, "_bilipdj_no_repeat_continuation", False)):
         return
 
-    def do_POST_with_active_persistence(self: Any) -> None:  # noqa: N802
-        path = urlparse(self.path).path
-        if path != "/api/platforms/active":
-            return original_post(self)
-        if not self._require_loopback():
-            return
+    def fetch_once_without_stale_continuation(self: Any) -> tuple[list[Any], int]:
+        if bool(getattr(self, "_bilipdj_continuation_exhausted", False)):
+            raise youtube_protocol.YoutubeProtocolError("红色小电视聊天已结束")
+        previous = str(getattr(self, "continuation", "") or "")
+        events, timeout_ms = original_fetch(self)
+        current = str(getattr(self, "continuation", "") or "")
+        if previous and current == previous:
+            # The response had no next continuation. Deliver any final actions
+            # once, then make the next call fail before issuing another HTTP
+            # request with the same token.
+            self.continuation = ""
+            self._bilipdj_continuation_exhausted = True
+            return events, min(int(timeout_ms or 250), 250)
+        return events, timeout_ms
 
-        payload = issue79_module._read_json_body(self)
-        raw = payload.get("active", [])
-        active: list[str] = []
-        supported = tuple(getattr(issue79_module, "SUPPORTED_ACTIVE_PLATFORMS", ()))
-        if isinstance(raw, (list, tuple)):
-            for value in raw:
-                name = str(value or "").strip().lower()
-                if name in supported and name not in active:
-                    active.append(name)
-
-        config = server_module.load_config()
-        config["active_platforms"] = active
-        if active:
-            config["platform"] = active[0]
-        douyin = dict(config.get("douyin", {}) or {})
-        douyin["enabled"] = "douyin" in active
-        config["douyin"] = douyin
-
-        youtube = dict(config.get("youtube", {}) or {})
-        youtube_extra = dict(youtube.get("extra", {}) or {})
-        youtube_extra["active_platforms"] = json.dumps(active, ensure_ascii=False, separators=(",", ":"))
-        youtube["extra"] = youtube_extra
-        config["youtube"] = youtube
-
-        server_module.save_config(config)
-        self.server.runtime_config = server_module.load_config()
-        # Keep the in-memory explicit value too, including the intentionally empty list.
-        self.server.runtime_config["active_platforms"] = list(active)
-        server_module._ensure_danmu_relay(self.server, reconnect=True)
-        self._write_json(issue79_module._platform_payload(server_module, self.server))
-
-    do_POST_with_active_persistence._bilipdj_redtv_active_wrapped = True  # type: ignore[attr-defined]
-    handler_class.do_POST = do_POST_with_active_persistence
+    fetch_once_without_stale_continuation._bilipdj_no_repeat_continuation = True  # type: ignore[attr-defined]
+    session_class.fetch_once = fetch_once_without_stale_continuation
 
 
 def install_youtube_runtime_guard(server_module: Any, issue79_module: Any | None = None) -> bool:
@@ -281,6 +361,7 @@ def install_youtube_runtime_guard(server_module: Any, issue79_module: Any | None
         _patch_issue79(issue79_module)
         _patch_runtime_status(server_module)
         _patch_active_platform_persistence(server_module, issue79_module)
+        _patch_continuation_exhaustion()
 
         server_module.youtube_protocol = youtube_protocol
         server_module.YoutubeDanmuRelay = youtube_protocol.YoutubeDanmuRelay
