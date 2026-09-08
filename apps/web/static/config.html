@@ -19,10 +19,10 @@
         .step { display:grid; place-items:center; width:38px; height:38px; border:1px solid rgba(0,229,255,.4); color:var(--cyan); font-weight:800; flex:0 0 auto; }
         .heading h2 { margin:0; color:#f4fbff; font-size:18px; }
         .heading p { margin:3px 0 0; color:rgba(126,200,227,.7); font-size:13px; }
-        .row { display:grid; grid-template-columns:160px 1fr; gap:12px; align-items:start; margin:12px 0; }
+        .row { display:grid; grid-template-columns:160px minmax(0,1fr); gap:12px; align-items:start; margin:12px 0; }
         .row label { padding-top:8px; color:var(--muted); font-size:13px; font-weight:700; }
         .row small { display:block; margin-top:3px; color:rgba(126,200,227,.55); font-weight:400; line-height:1.5; }
-        input,textarea,select { width:100%; padding:9px 11px; border:1px solid rgba(0,229,255,.3); background:rgba(0,10,22,.9); color:#dff5ff; font:inherit; outline:none; }
+        input,textarea,select { width:100%; min-width:0; padding:9px 11px; border:1px solid rgba(0,229,255,.3); background:rgba(0,10,22,.9); color:#dff5ff; font:inherit; outline:none; }
         input:focus,textarea:focus,select:focus { border-color:var(--cyan); box-shadow:0 0 0 2px rgba(0,229,255,.12); }
         textarea { min-height:105px; resize:vertical; }
         input[type=checkbox] { width:auto; margin-right:7px; }
@@ -31,12 +31,12 @@
         button { padding:9px 16px; border:1px solid #00b8d9; background:rgba(0,40,60,.9); color:var(--cyan); font:inherit; font-weight:700; cursor:pointer; }
         button:hover:not(:disabled) { background:rgba(0,229,255,.13); color:#fff; }
         button:disabled { opacity:.45; cursor:wait; }
-        .status,.hint { margin-top:12px; color:rgba(204,232,255,.7); font-size:13px; line-height:1.65; }
+        .status,.hint { margin-top:12px; color:rgba(204,232,255,.7); font-size:13px; line-height:1.65; overflow-wrap:anywhere; }
         .hint { color:rgba(126,200,227,.65); }
         .backend-panel[hidden] { display:none; }
-        .backup-list { min-height:145px; }
+        .backup-list { min-height:145px; font-variant-numeric:tabular-nums; }
         code { color:#8feaff; }
-        @media(max-width:680px){ body{padding:12px}.card{padding:16px}.row{grid-template-columns:1fr;gap:6px}.row label{padding-top:0}.checks{margin-left:0} }
+        @media(max-width:680px){ body{padding:12px}.card{padding:16px}.row{grid-template-columns:1fr;gap:6px}.row label{padding-top:0}.checks{margin-left:0}button{flex:1 1 180px} }
     </style>
 </head>
 <body>
@@ -101,22 +101,31 @@
     // Legacy compatibility endpoints remain supported by Server: /api/backup/webdav/run /api/backup/webdav/restore
     const backend=document.getElementById("backup-backend"),webdav=document.getElementById("backend-webdav"),local=document.getElementById("backend-local"),smb=document.getElementById("backend-smb"),note=document.getElementById("backend-note");
     const url=document.getElementById("webdav-url"),user=document.getElementById("webdav-user"),password=document.getElementById("webdav-password"),passwordNote=document.getElementById("webdav-password-note"),remoteDir=document.getElementById("webdav-dir"),localDir=document.getElementById("local-dir"),smbPath=document.getElementById("smb-path"),keep=document.getElementById("backup-keep"),autoStart=document.getElementById("backup-auto-start"),autoExit=document.getElementById("backup-auto-exit"),list=document.getElementById("backup-list"),status=document.getElementById("backup-status");
-    const buttons=["backup-save","backup-test","backup-run","backup-refresh","backup-restore"].map(id=>document.getElementById(id));let busy=false;
-    function switchBackend(){webdav.hidden=backend.value!=="webdav";local.hidden=backend.value!=="local";smb.hidden=backend.value!=="smb";note.textContent=backend.value==="local"?"本地模式会在所选目录下创建 BiliPDJ_Backup 子目录。":backend.value==="smb"?"SMB/NAS 模式直接使用填写的共享或挂载目录；认证由操作系统负责。":"WebDAV 模式沿用现有远程备份方式。"}
+    const buttons=["backup-save","backup-test","backup-run","backup-refresh","backup-restore"].map(id=>document.getElementById(id));
+    let busy=false,listSignature="",applying=false;
+
+    function targetSignature(){if(backend.value==="webdav")return ["webdav",url.value.trim(),remoteDir.value.trim()||"BiliPDJ_Backup"].join("|");if(backend.value==="local")return ["local",localDir.value.trim()].join("|");return ["smb",smbPath.value.trim()].join("|")}
+    function clearList(message){list.replaceChildren();listSignature="";if(message)status.textContent=message}
+    function switchBackend(clearHistory){webdav.hidden=backend.value!=="webdav";local.hidden=backend.value!=="local";smb.hidden=backend.value!=="smb";note.textContent=backend.value==="local"?"本地模式会在所选目录下创建 BiliPDJ_Backup 子目录。":backend.value==="smb"?"SMB/NAS 模式直接使用填写的共享或挂载目录；认证由操作系统负责。":"WebDAV 模式沿用现有远程备份方式。";if(clearHistory)clearList("备份目标已变化，请刷新备份列表。")}
     function setBusy(v){busy=v;buttons.forEach(b=>b.disabled=v)}
     async function api(path,options){const r=await fetch(API+path,options||{cache:"no-store"});let out={};try{out=await r.json()}catch(_){ }if(!r.ok||out.status==="error")throw new Error(out.message||("HTTP "+r.status));return out}
     function collect(){const cfg={backend:backend.value,url:(url.value||"").trim(),username:(user.value||"").trim(),remote_dir:(remoteDir.value||"").trim()||"BiliPDJ_Backup",local_dir:(localDir.value||"").trim(),smb_path:(smbPath.value||"").trim(),keep_last:Number(keep.value||10),auto_on_start:autoStart.checked,auto_on_exit:autoExit.checked};if(password.value)cfg.password=password.value;return cfg}
-    function apply(result){const cfg=result.config||{};backend.value=cfg.backend||"webdav";url.value=cfg.url||"";user.value=cfg.username||"";remoteDir.value=cfg.remote_dir||"BiliPDJ_Backup";localDir.value=cfg.local_dir||"";smbPath.value=cfg.smb_path||"";keep.value=String(cfg.keep_last||10);autoStart.checked=Boolean(cfg.auto_on_start);autoExit.checked=Boolean(cfg.auto_on_exit);password.value="";passwordNote.textContent=cfg.password_set?"已保存密码；留空表示保持不变":"尚未保存密码";switchBackend()}
-    async function saveConfig(silent){const out=await api("/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({config:collect()})});apply(out);if(!silent)status.textContent="备份设置已保存。";return out}
-    async function refresh(){const out=await api("/list",{cache:"no-store"});list.replaceChildren();(out.backups||[]).forEach(item=>{const o=document.createElement("option");o.value=item.name;const modified=item.modified?"   "+item.modified:"";o.textContent=item.name+"   "+(Number(item.size||0)/1024).toFixed(1)+" KB"+modified;list.appendChild(o)});status.textContent="找到 "+list.options.length+" 份设置备份。"}
+    function apply(result){const cfg=result.config||{};applying=true;backend.value=cfg.backend||"webdav";url.value=cfg.url||"";user.value=cfg.username||"";remoteDir.value=cfg.remote_dir||"BiliPDJ_Backup";localDir.value=cfg.local_dir||"";smbPath.value=cfg.smb_path||"";keep.value=String(cfg.keep_last||10);autoStart.checked=Boolean(cfg.auto_on_start);autoExit.checked=Boolean(cfg.auto_on_exit);password.value="";passwordNote.textContent=cfg.password_set?"已保存密码；留空表示保持不变":"尚未保存密码";applying=false;switchBackend(false)}
+    async function saveConfig(silent){const out=await api("/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({config:collect()})});apply(out);if(!silent)status.textContent="备份设置已保存，请刷新历史备份。";return out}
+    function formatModified(value){if(!value)return"";const d=new Date(value);if(Number.isNaN(d.getTime()))return String(value);const p=n=>String(n).padStart(2,"0");return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+" "+p(d.getHours())+":"+p(d.getMinutes())+":"+p(d.getSeconds())}
+    async function refresh(syncConfig=true){if(syncConfig)await saveConfig(true);const out=await api("/list",{cache:"no-store"});list.replaceChildren();(out.backups||[]).forEach(item=>{const o=document.createElement("option");o.value=item.name;const modified=formatModified(item.modified);o.textContent=item.name+"   "+(Number(item.size||0)/1024).toFixed(1)+" KB"+(modified?"   "+modified:"");list.appendChild(o)});listSignature=targetSignature();status.textContent="找到 "+list.options.length+" 份设置备份。"}
     async function task(label,fn){if(busy)return;setBusy(true);status.textContent=label;try{await fn()}catch(e){status.textContent="操作失败："+e.message}finally{setBusy(false)}}
-    backend.addEventListener("change",switchBackend);
-    document.getElementById("backup-save").addEventListener("click",()=>void task("正在保存备份设置……",()=>saveConfig(false)));
-    document.getElementById("backup-test").addEventListener("click",()=>void task("正在测试备份目标……",async()=>{await saveConfig(true);const out=await api("/test",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});status.textContent=out.message||"备份目标可用"}));
-    document.getElementById("backup-run").addEventListener("click",()=>void task("正在备份设置……",async()=>{await saveConfig(true);const out=await api("/run",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});status.textContent="设置备份完成："+out.name;await refresh()}));
-    document.getElementById("backup-refresh").addEventListener("click",()=>void task("正在读取备份列表……",refresh));
-    document.getElementById("backup-restore").addEventListener("click",()=>{const name=list.value;if(!name){status.textContent="请先选择要恢复的备份。";return}if(!confirm("确定恢复 "+name+" 吗？\n\n只恢复四个设置文件，队列、黑名单和日志不会改变。"))return;void task("正在恢复 "+name+"……",async()=>{const out=await api("/restore",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name})});status.textContent="设置恢复完成："+(out.restored||[]).join(", ")})});
-    switchBackend();void (async()=>{try{const out=await api("/config",{cache:"no-store"});apply(out);status.textContent="备份设置已加载。"}catch(e){status.textContent="读取备份设置失败："+e.message}})();
+
+    backend.addEventListener("change",()=>switchBackend(true));
+    [url,remoteDir,localDir,smbPath].forEach(el=>el.addEventListener("input",()=>{if(!applying)clearList("备份目标参数已变化，请刷新备份列表。")}));
+    document.getElementById("backup-save").addEventListener("click",()=>void task("正在保存备份设置……",async()=>{await saveConfig(false);clearList("备份设置已保存，请刷新历史备份。")}));
+    document.getElementById("backup-test").addEventListener("click",()=>void task("正在测试备份目标……",async()=>{await saveConfig(true);const out=await api("/test",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});clearList(out.message||"备份目标可用")}));
+    document.getElementById("backup-run").addEventListener("click",()=>void task("正在备份设置……",async()=>{await saveConfig(true);const out=await api("/run",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});status.textContent="设置备份完成："+out.name;await refresh(false)}));
+    document.getElementById("backup-refresh").addEventListener("click",()=>void task("正在读取备份列表……",()=>refresh(true)));
+    document.getElementById("backup-restore").addEventListener("click",()=>{const name=list.value;if(!name){status.textContent="请先选择要恢复的备份。";return}if(listSignature!==targetSignature()){clearList("备份目标或路径已变化，请先刷新备份列表再恢复。");return}if(!confirm("确定恢复 "+name+" 吗？\n\n只恢复四个设置文件，队列、黑名单和日志不会改变。"))return;void task("正在恢复 "+name+"……",async()=>{await saveConfig(true);const out=await api("/restore",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name})});status.textContent="设置恢复完成："+(out.restored||[]).join(", ");await refresh(false)})});
+
+    switchBackend(false);
+    void (async()=>{try{const out=await api("/config",{cache:"no-store"});apply(out);clearList("备份设置已加载，请刷新历史备份。")}catch(e){status.textContent="读取备份设置失败："+e.message}})();
 })();
 </script>
 </body>
