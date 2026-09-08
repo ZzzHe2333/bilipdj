@@ -2,6 +2,7 @@
   'use strict';
 
   const SUPPORT_URL = 'https://m.sdyuntuo.cn/ProductEn/Index/01929ef4362a8858';
+  const SUPPORT_COPY = '项目免费开源使用，申请流量卡给开发者回回血。';
   const GUANGGAO_LEVEL = 'GUANGGAO';
   const GUANGGAO_TEXT = '【打扰一下】如果有需要正规大流量电话卡的，可以点击 支持我们-申请流量卡，自助申请哦。你的每张正常申请使用，都能给本项目带来持续的支持！';
   const INITIAL_DELAY_RANGE_MS = [45000, 150000];
@@ -55,6 +56,39 @@
   let promotionTimer = 0;
   let applyingLogOverlay = false;
 
+  function ensureSupportPage() {
+    const sidebar = document.querySelector('.sidebar');
+    const content = document.querySelector('.content');
+    if (!sidebar || !content) return;
+
+    if (!sidebar.querySelector('[data-view="support"]')) {
+      const button = document.createElement('button');
+      button.className = 'nav';
+      button.dataset.view = 'support';
+      button.textContent = '支持我们';
+      const about = sidebar.querySelector('[data-view="about"]');
+      sidebar.insertBefore(button, about || null);
+    }
+
+    if (!document.getElementById('view-support')) {
+      const section = document.createElement('section');
+      section.className = 'view';
+      section.id = 'view-support';
+      section.innerHTML = `
+        <div class="page-head"><div><h1>支持我们</h1><p>项目本体免费开源，流量卡申请会给项目带来持续支持。</p></div></div>
+        <div class="card" style="max-width:760px;text-align:center;margin:0 auto;padding:32px 24px;">
+          <h2 style="margin:0 0 12px;">流量卡推广</h2>
+          <p style="margin:0 0 22px;line-height:1.8;">${SUPPORT_COPY}</p>
+          <canvas id="support-qr" width="246" height="246" aria-label="申请流量卡二维码" style="width:246px;max-width:80vw;height:auto;background:#fff;padding:0;border-radius:8px;margin-bottom:20px;"></canvas>
+          <div style="margin-bottom:12px;"><a id="support-apply" class="button" href="${SUPPORT_URL}" target="_blank" rel="noopener noreferrer">申请流量卡</a></div>
+          <p class="hint" style="margin-top:12px;">可点击按钮跳转，也可以使用手机扫描二维码申请。</p>
+          <p class="hint" style="margin-top:8px;word-break:break-all;">${SUPPORT_URL}</p>
+        </div>`;
+      const about = document.getElementById('view-about');
+      content.insertBefore(section, about || null);
+    }
+  }
+
   function randomDelay([low, high]) {
     return Math.floor(low + Math.random() * (high - low + 1));
   }
@@ -79,8 +113,8 @@
   }
 
   function promotionLine() {
-    const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
-    return `${time}  ${GUANGGAO_LEVEL.padEnd(7, ' ')}  ${GUANGGAO_TEXT}`;
+    const localTime = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    return `${localTime}  ${GUANGGAO_LEVEL.padEnd(7, ' ')}  ${GUANGGAO_TEXT}`;
   }
 
   function applyPromotionOverlay() {
@@ -122,6 +156,8 @@
       schedulePromotion(REPEAT_DELAY_RANGE_MS);
     }, randomDelay(range));
   }
+
+  ensureSupportPage();
 
   const logOutput = document.getElementById('log-output');
   if (logOutput) {
