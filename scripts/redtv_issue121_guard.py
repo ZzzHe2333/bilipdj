@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import copy
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-from apps.server import youtube_protocol
-from apps.server import youtube_runtime_guard as guard
-
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from apps.server import youtube_protocol  # noqa: E402
+from apps.server import youtube_runtime_guard as guard  # noqa: E402
+
 VIDEO_ID = "xKtKV9wSPQk"
 
 
