@@ -15,6 +15,7 @@ DEFAULT_UPDATE_NETWORK: dict[str, Any] = {
     "proxy_host": "",
     "proxy_port": "",
     "use_mirrorchyan": False,
+    "mirrorchyan_cdk": "",
 }
 TEST_URL = "https://api.github.com/repos/ZzzHe2333/bilipdj/releases/latest"
 
@@ -34,6 +35,7 @@ def normalize_update_network(payload: Any) -> dict[str, Any]:
     raw = payload if isinstance(payload, dict) else {}
     host = str(raw.get("proxy_host", "") or "").strip()
     port_text = str(raw.get("proxy_port", "") or "").strip()
+    mirrorchyan_cdk = str(raw.get("mirrorchyan_cdk", "") or "").strip()
     if port_text:
         try:
             port = int(port_text)
@@ -51,7 +53,10 @@ def normalize_update_network(payload: Any) -> dict[str, Any]:
         "use_third_party_proxy": third_party,
         "proxy_host": host,
         "proxy_port": port_text,
+        # MirrorChyan execution is intentionally still disabled until the update
+        # path is integrated.  The CDK is only persisted now for future use.
         "use_mirrorchyan": False,
+        "mirrorchyan_cdk": mirrorchyan_cdk,
     }
 
 
