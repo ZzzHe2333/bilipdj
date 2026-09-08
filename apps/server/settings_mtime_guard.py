@@ -113,6 +113,7 @@ def install_settings_mtime_guard(backup_module: Any) -> bool:
             written: list[str] = []
 
             safety_path = self.config_path.parent / ".settings-restore-safety.zip"
+            safety_created = False
             with self._lock:
                 for name, path in paths.items():
                     if path.is_file():
@@ -121,8 +122,10 @@ def install_settings_mtime_guard(backup_module: Any) -> bool:
                     else:
                         before[name] = (None, None, None)
 
-                safety_data, _ = self.build_settings_zip()
-                backup_module._atomic_write_bytes(safety_path, safety_data)
+                if any(snapshot[0] is not None for snapshot in before.values()):
+                    safety_data, _ = self.build_settings_zip()
+                    backup_module._atomic_write_bytes(safety_path, safety_data)
+                    safety_created = True
                 try:
                     for name, content in restored.items():
                         path = paths[name]
@@ -151,16 +154,18 @@ def install_settings_mtime_guard(backup_module: Any) -> bool:
                             self._reload_runtime(httpd)
                         except Exception:
                             pass
-                    try:
-                        safety_path.unlink(missing_ok=True)
-                    except OSError:
-                        pass
+                    if safety_created:
+                        try:
+                            safety_path.unlink(missing_ok=True)
+                        except OSError:
+                            pass
                     raise
                 else:
-                    try:
-                        safety_path.unlink(missing_ok=True)
-                    except OSError:
-                        pass
+                    if safety_created:
+                        try:
+                            safety_path.unlink(missing_ok=True)
+                        except OSError:
+                            pass
             return list(restored)
 
         service_class.build_settings_zip = build_settings_zip
