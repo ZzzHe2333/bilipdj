@@ -1,6 +1,6 @@
 """BiliPDJ backend package.
 
-The implementation now lives in :mod:`apps.server`.  Runtime paths are kept
+The implementation now lives in :mod:`apps.server`. Runtime paths are kept
 compatible with existing installs while code is migrated out of ``core``.
 """
 from __future__ import annotations
@@ -13,9 +13,8 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _SERVER_MODULE_NAMES = frozenset({"apps.server.server", "core.server", "server", "__main__"})
 
-# The legacy guards predate the monorepo layout and recognize ``core.server``.
-# Patch only their module-name predicates before importing the real server so
-# the same safety/performance hooks apply to ``apps.server.server``.
+# These guards predate the Monorepo layout. Teach their discovery helpers about
+# the new canonical module name before the real server module is imported.
 from . import queue_rank_query as _queue_rank_query
 from . import server_runtime_guard as _server_runtime_guard
 from . import style_option_guard as _style_option_guard
@@ -50,13 +49,23 @@ _web_queue_layout.install_web_queue_layout_guard(_style_option_guard)
 
 from . import server as server  # noqa: E402
 
+# The historical build-class wrappers match ``core.server`` internally. The
+# package-level discovery above is sufficient to install the wrappers, but the
+# class-name predicate inside those wrappers cannot see ``apps.server.server``.
+# Patch the newly-created classes explicitly, then unwind the temporary hooks in
+# reverse installation order (WebSocket was layered on top of QueueManager).
+_queue_rank_query.attach_queue_rank_query(server.QueueManager)
+_websocket_performance_guard.patch_websocket_hub(server.WebSocketHub)
+_websocket_performance_guard._restore_build_class_hook()
+_queue_rank_query._restore_build_class_hook()
+
 
 def configure_runtime_paths(module: Any = server) -> Any:
     """Apply source/frozen runtime paths after the physical code migration.
 
     User configuration/data paths intentionally remain compatible in this
-    migration phase.  Web assets, however, now have a single canonical source
-    under ``apps/web/static``.
+    migration phase. Web assets have a single canonical source under
+    ``apps/web/static``.
     """
     frozen = bool(getattr(sys, "frozen", False))
     bundle_root = Path(getattr(sys, "_MEIPASS", REPO_ROOT)).resolve()
