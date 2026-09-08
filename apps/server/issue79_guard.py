@@ -3,7 +3,6 @@ from __future__ import annotations
 import copy
 import json
 import threading
-import urllib.error
 import urllib.request
 from http import HTTPStatus
 from pathlib import Path
@@ -21,13 +20,14 @@ _PATCH_LOCK = threading.RLock()
 def _normalize_active_platforms(server_module: Any, config: Any) -> tuple[str, ...]:
     cfg = config if isinstance(config, dict) else {}
     raw = cfg.get("active_platforms")
-    result: list[str] = []
     if isinstance(raw, (list, tuple)):
+        result: list[str] = []
         for value in raw:
             name = str(value or "").strip().lower()
             if name in SUPPORTED_ACTIVE_PLATFORMS and name not in result:
                 result.append(name)
-    if result:
+        # An explicit empty list means “disable all relays”. Old configurations
+        # without active_platforms continue to fall back to the single platform.
         return tuple(result)
 
     try:
@@ -39,18 +39,26 @@ def _normalize_active_platforms(server_module: Any, config: Any) -> tuple[str, .
     return ("bilibili",)
 
 
+def _runtime_for_platform(server: Any, platform: str) -> dict[str, Any]:
+    runtime = copy.deepcopy(getattr(server, "runtime_config", {}) or {})
+    runtime["platform"] = platform
+    if platform == "douyin":
+        douyin = dict(runtime.get("douyin", {}) or {})
+        douyin["enabled"] = True
+        runtime["douyin"] = douyin
+    return runtime
+
+
 class _RelayServerProxy:
     """Give each relay its own platform view while sharing one backend state."""
 
     def __init__(self, server: Any, platform: str) -> None:
         self._server = server
-        runtime = copy.deepcopy(getattr(server, "runtime_config", {}) or {})
-        runtime["platform"] = platform
-        if platform == "douyin":
-            douyin = dict(runtime.get("douyin", {}) or {})
-            douyin["enabled"] = True
-            runtime["douyin"] = douyin
-        self.runtime_config = runtime
+        self.platform = platform
+        self.runtime_config = _runtime_for_platform(server, platform)
+
+    def refresh_runtime_config(self) -> None:
+        self.runtime_config = _runtime_for_platform(self._server, self.platform)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._server, name)
@@ -66,6 +74,7 @@ class MultiPlatformRelayManager:
         self.server = server
         self.active_platforms = tuple(active_platforms)
         self._relays: dict[str, Any] = {}
+        self._proxies: dict[str, _RelayServerProxy] = {}
         self._lock = threading.RLock()
         self._started = False
 
@@ -77,9 +86,12 @@ class MultiPlatformRelayManager:
             for platform in self.active_platforms:
                 proxy = _RelayServerProxy(self.server, platform)
                 relay = self.server_module._create_danmu_relay(proxy)
+                self._proxies[platform] = proxy
                 self._relays[platform] = relay
                 relay.start()
                 self.server.logger.info("Danmu relay started platform=%s (multi-platform)", platform)
+            if not self.active_platforms:
+                self.server.logger.info("All danmu relays are disabled by active_platforms")
 
     def stop(self) -> None:
         with self._lock:
@@ -104,9 +116,11 @@ class MultiPlatformRelayManager:
 
     def request_reconnect(self) -> None:
         with self._lock:
-            relays = list(self._relays.values())
-        for relay in relays:
+            items = [(name, relay, self._proxies.get(name)) for name, relay in self._relays.items()]
+        for _name, relay, proxy in items:
             try:
+                if proxy is not None:
+                    proxy.refresh_runtime_config()
                 callback = getattr(relay, "request_reconnect", None)
                 if callable(callback):
                     callback()
@@ -253,13 +267,13 @@ def _update_payload(server_module: Any) -> dict[str, Any]:
     }
 
 
-def _write_control_html(self: Any, server_module: Any) -> bool:
+def _write_control_html(self: Any, server_module: Any) -> None:
     if not self._require_loopback():
-        return True
+        return
     file_path = Path(server_module.UI_DIR) / "control.html"
     if not file_path.is_file():
         self._write_json({"status": "error", "message": "Web control panel is missing"}, status=404)
-        return True
+        return
     text = file_path.read_text(encoding="utf-8")
     css_tag = '<link rel="stylesheet" href="/control_issue79.css">'
     js_tag = '<script src="/control_issue79.js"></script>'
@@ -274,7 +288,6 @@ def _write_control_html(self: Any, server_module: Any) -> bool:
     self.send_header("Content-Length", str(len(body)))
     self.end_headers()
     self.wfile.write(body)
-    return True
 
 
 def _read_json_body(self: Any) -> dict[str, Any]:
