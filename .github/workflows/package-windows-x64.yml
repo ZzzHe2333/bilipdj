@@ -29,7 +29,6 @@ on:
       - 'apps/windows/**'
       - 'apps/web/**'
       - 'update-manifest.json'
-      - 'tests/**'
       - 'RELEASE_NOTES.md'
       - '.github/workflows/package-windows-x64.yml'
 
