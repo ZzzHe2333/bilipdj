@@ -5,3 +5,4 @@ protobuf>=4.25,<7
 psutil>=5.9,<8
 pystray>=0.19,<1
 qrcode[pil]>=7.4,<9
+websocket-client>=1.8,<2
