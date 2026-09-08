@@ -7,6 +7,7 @@ import time
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from apps.server import log_manager
 from apps.server.style_option_guard import STYLE_OPTION_DEFAULTS, patch_style_module
@@ -31,9 +32,13 @@ class UpdateNetworkTests(unittest.TestCase):
             self.assertEqual(update_network.settings_path(root), root / "core" / "cd" / "update_settings.json")
 
     def test_bypass_opener_does_not_use_system_proxy_mapping(self) -> None:
-        opener = update_network.build_opener({"bypass_system_proxy": True})
-        handlers = [handler for handler in opener.handlers if handler.__class__.__name__ == "ProxyHandler"]
-        self.assertEqual(len(handlers), 1); self.assertEqual(getattr(handlers[0], "proxies", {}), {})
+        with mock.patch.object(
+            update_network.urllib.request,
+            "ProxyHandler",
+            wraps=update_network.urllib.request.ProxyHandler,
+        ) as proxy_handler:
+            update_network.build_opener({"bypass_system_proxy": True})
+        proxy_handler.assert_called_once_with({})
 
 
 class CategorizedLogTests(unittest.TestCase):
