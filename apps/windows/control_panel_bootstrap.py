@@ -46,6 +46,36 @@ def _restore_hook() -> None:
             timer.cancel()
 
 
+def _install_final_support_renderer(panel_class: type[Any], module: Any) -> None:
+    """Render the canonical support page after legacy navigation patches finish."""
+    current = getattr(panel_class, "_build_ui", None)
+    if not callable(current) or bool(getattr(current, "_bilipdj_support_final", False)):
+        return
+
+    from .support_us import _render_support_content
+
+    @functools.wraps(current)
+    def build_ui_with_final_support(self: Any, *args: Any, **kwargs: Any) -> Any:
+        result = current(self, *args, **kwargs)
+        items = list(getattr(self, "_nav_items", []) or [])
+        pages = list(getattr(self, "_content_pages", []) or [])
+        for index, item in enumerate(items):
+            try:
+                label = str(item[1].cget("text") or "").strip()
+            except Exception:
+                continue
+            if label == "支持我们" and index < len(pages):
+                try:
+                    _render_support_content(self, pages[index], module)
+                except Exception:
+                    pass
+                break
+        return result
+
+    setattr(build_ui_with_final_support, "_bilipdj_support_final", True)
+    setattr(panel_class, "_build_ui", build_ui_with_final_support)
+
+
 def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
     """Patch ``ControlPanelApp`` immediately after Python creates the class."""
 
@@ -89,10 +119,11 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
                 patch_control_panel_support_us(cls)
                 patch_control_panel_ui_finish(cls)
                 patch_control_panel_logging(cls)
-                # This patch intentionally runs last: it fixes the final nav/page
-                # ordering after support/about/update patches and adds the active
-                # platform page plus the two-field manual queue dialog.
+                # This patch intentionally runs last for navigation and queue-dialog
+                # normalization. The support renderer below then redraws only the
+                # final “支持我们” page from the canonical support_us implementation.
                 patch_control_panel_issue79(cls)
+                _install_final_support_renderer(cls, module)
             finally:
                 _restore_hook()
             return cls
