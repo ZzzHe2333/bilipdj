@@ -32,7 +32,6 @@ jobs:
         shell: bash
         run: |
           TAG_NAME="${{ inputs.tag_name }}"
-
           if [[ ! "$TAG_NAME" =~ ^v[0-9A-Za-z._-]+$ ]]; then
             echo "标签格式不合法：$TAG_NAME（需以 v 开头，例如 v1.0.0）"
             exit 1
@@ -50,9 +49,8 @@ jobs:
 
           ARCH="${{ inputs.arch }}"
           ASSET_NAME="bilibili-danmuji-macos-${ARCH}-${TAG_NAME}.tar.gz"
-
-          echo "tag_name=$TAG_NAME"     >> "$GITHUB_OUTPUT"
-          echo "arch=$ARCH"             >> "$GITHUB_OUTPUT"
+          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "arch=$ARCH" >> "$GITHUB_OUTPUT"
           echo "asset_name=$ASSET_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
@@ -60,35 +58,23 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Debug Python env
-        run: |
-          python3 -V
-          python3 -c "import sys; print(sys.executable)"
-          python3 -c "import tkinter; print('tkinter OK')"
-          pip list | grep -i "^http " && echo "WARNING: http package installed" || echo "http package not installed (OK)"
-
       - name: Scan tracked files for secrets
         run: python3 scripts/scan_secrets.py
 
       - name: Build macOS executable (${{ inputs.arch }})
         run: |
-          chmod +x package-macos-local.sh
-          chmod +x scripts/package-arm64.sh scripts/package-amd64.sh
-          if [[ "${{ inputs.arch }}" == "arm64" ]]; then
-            ./scripts/package-arm64.sh --install-deps
-          else
-            ./scripts/package-amd64.sh --install-deps
-          fi
+          chmod +x apps/windows/package-macos.sh
+          ./apps/windows/package-macos.sh --install-deps --arch "${{ inputs.arch }}"
 
       - name: Create release tarball
         run: |
           rm -rf _package
           mkdir _package
           cp -R dist/bilipdj/* _package/
-          [[ -f README.md ]]          && cp README.md          _package/
-          [[ -f RELEASE_NOTES.md ]]   && cp RELEASE_NOTES.md   _package/
+          [[ -f README.md ]] && cp README.md _package/
+          [[ -f RELEASE_NOTES.md ]] && cp RELEASE_NOTES.md _package/
           [[ -f core/quanxian.yaml ]] && cp core/quanxian.yaml _package/
-          [[ -f core/kaiguan.yaml  ]] && cp core/kaiguan.yaml  _package/
+          [[ -f core/kaiguan.yaml ]] && cp core/kaiguan.yaml _package/
           tar -czf "${{ steps.resolve_tag.outputs.asset_name }}" -C _package .
 
       - name: Upload artifact
