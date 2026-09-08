@@ -11,6 +11,7 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 from tkinter import messagebox, ttk
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -65,6 +66,24 @@ def _backend_command() -> list[str]:
     return [sys.executable, str(Path(__file__).resolve()), "--backend"]
 
 
+def _hidden_backend_process_options() -> dict[str, Any]:
+    """Return Windows child-process options that never allocate/show a console."""
+    if sys.platform != "win32":
+        return {"creationflags": 0}
+
+    options: dict[str, Any] = {
+        "creationflags": int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
+    }
+    try:
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= int(getattr(subprocess, "STARTF_USESHOWWINDOW", 0))
+        startupinfo.wShowWindow = int(getattr(subprocess, "SW_HIDE", 0))
+        options["startupinfo"] = startupinfo
+    except (AttributeError, OSError):
+        pass
+    return options
+
+
 def _run_backend_mode() -> None:
     server_main.main([])
 
@@ -72,52 +91,73 @@ def _run_backend_mode() -> None:
 class WebPortableLauncher:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title(f"{APP_NAME} v{APP_VERSION}")
-        self.root.geometry("520x220")
-        self.root.minsize(520, 220)
+        self.root.title(f"{APP_NAME} 服务管理器 v{APP_VERSION}")
+        self.root.geometry("500x250")
+        self.root.minsize(470, 230)
         self.backend_proc: subprocess.Popen[bytes] | None = None
         self.owns_backend = False
         self.port = _runtime_port()
+        self.ready = False
         self.status_var = tk.StringVar(value="准备启动内置后端…")
-        self.detail_var = tk.StringVar(value=f"本地地址：http://127.0.0.1:{self.port}")
+        self.detail_var = tk.StringVar(value=f"本地服务：http://127.0.0.1:{self.port}")
+        self.hint_var = tk.StringVar(value="启动完成后本窗口会自动最小化，不影响浏览器控制台使用。")
         self._build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self.close)
 
     def _build_ui(self) -> None:
-        frame = ttk.Frame(self.root, padding=22)
+        frame = ttk.Frame(self.root, padding=(22, 18, 22, 18))
         frame.pack(fill="both", expand=True)
-        ttk.Label(frame, text=f"弹幕排队姬 Web v{APP_VERSION}", font=("Microsoft YaHei UI", 16, "bold")).pack(anchor="w")
-        ttk.Label(frame, textvariable=self.status_var, font=("Microsoft YaHei UI", 10)).pack(anchor="w", pady=(18, 4))
-        ttk.Label(frame, textvariable=self.detail_var).pack(anchor="w")
+
+        title_row = ttk.Frame(frame)
+        title_row.pack(fill="x")
+        ttk.Label(
+            title_row,
+            text=f"弹幕排队姬 Web v{APP_VERSION}",
+            font=("Microsoft YaHei UI", 15, "bold"),
+        ).pack(side="left")
+        ttk.Label(title_row, text="后台服务管理").pack(side="right")
+
+        self.progress = ttk.Progressbar(frame, mode="indeterminate")
+        self.progress.pack(fill="x", pady=(18, 12))
+
+        ttk.Label(frame, textvariable=self.status_var, font=("Microsoft YaHei UI", 10, "bold")).pack(anchor="w")
+        ttk.Label(frame, textvariable=self.detail_var).pack(anchor="w", pady=(5, 0))
+        ttk.Label(frame, textvariable=self.hint_var, wraplength=450).pack(anchor="w", pady=(5, 0))
 
         buttons = ttk.Frame(frame)
-        buttons.pack(fill="x", pady=(22, 0))
+        buttons.pack(fill="x", pady=(20, 0))
         self.config_btn = ttk.Button(buttons, text="打开 Web 控制台", command=self.open_config, state="disabled")
         self.config_btn.pack(side="left", padx=(0, 8))
         self.index_btn = ttk.Button(buttons, text="打开队列看板", command=self.open_index, state="disabled")
         self.index_btn.pack(side="left", padx=(0, 8))
+        self.minimize_btn = ttk.Button(buttons, text="最小化", command=self.minimize)
+        self.minimize_btn.pack(side="left")
         ttk.Button(buttons, text="停止并退出", command=self.close).pack(side="right")
 
     def start(self) -> None:
+        self.progress.start(12)
         if _is_backend_ready(self.port):
             self.status_var.set("检测到后端已在运行，直接使用现有服务。")
+            self.detail_var.set(f"服务地址：http://127.0.0.1:{self.port} · 使用现有后端")
             self._mark_ready(open_browser=True)
             return
 
-        self.status_var.set("正在启动内置后端…")
-        creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        self.status_var.set("正在后台启动内置后端…")
+        self.detail_var.set(f"服务地址：http://127.0.0.1:{self.port} · 正在等待健康检查")
         try:
             self.backend_proc = subprocess.Popen(
                 _backend_command(),
                 cwd=str(APP_DIR),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                creationflags=creationflags,
                 env=os.environ.copy(),
+                **_hidden_backend_process_options(),
             )
             self.owns_backend = True
         except OSError as exc:
             self.status_var.set("后端启动失败。")
+            self.progress.stop()
+            self.detail_var.set(str(exc))
             messagebox.showerror("启动失败", str(exc), parent=self.root)
             return
 
@@ -140,15 +180,40 @@ class WebPortableLauncher:
         self.root.after(0, lambda text=error: self._mark_failed(text))
 
     def _mark_ready(self, *, open_browser: bool) -> None:
-        self.status_var.set("后端已启动，Web 控制台可以使用。")
+        self.ready = True
+        self.progress.stop()
+        self.progress.configure(mode="determinate", maximum=100, value=100)
+        self.status_var.set("后端运行正常，Web 控制台可以使用。")
+        owner = "本程序管理" if self.owns_backend else "外部服务"
+        self.detail_var.set(f"服务地址：http://127.0.0.1:{self.port} · {owner}")
+        self.hint_var.set("浏览器关闭不会停止后端；需要彻底退出时恢复本窗口并点击“停止并退出”。")
         self.config_btn.configure(state="normal")
         self.index_btn.configure(state="normal")
         if open_browser:
             self.open_config()
+            self.root.after(1200, self._auto_minimize)
+
+    def _auto_minimize(self) -> None:
+        if self.ready:
+            self.minimize()
+
+    def minimize(self) -> None:
+        try:
+            self.root.iconify()
+        except tk.TclError:
+            pass
 
     def _mark_failed(self, error: str) -> None:
+        self.ready = False
+        self.progress.stop()
         self.status_var.set("后端启动失败。")
         self.detail_var.set(error)
+        self.hint_var.set("请检查端口占用或运行目录权限，然后重新启动 BiliPDJ-Web。")
+        try:
+            self.root.deiconify()
+            self.root.lift()
+        except tk.TclError:
+            pass
         messagebox.showerror("启动失败", error, parent=self.root)
 
     def open_config(self) -> None:
