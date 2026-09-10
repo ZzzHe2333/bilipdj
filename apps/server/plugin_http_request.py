@@ -10,7 +10,9 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 from urllib.parse import urlparse
 
-MAX_HTTP_REQUEST_BODY_BYTES = 1024 * 1024
+# The QuickJS Host JSON envelope is capped at 1 MiB. Keep request bodies small
+# enough that Base64 and JSON escaping still fit inside that existing boundary.
+MAX_HTTP_REQUEST_BODY_BYTES = 128 * 1024
 MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 MAX_HTTP_REQUEST_HEADERS = 64
 MAX_HTTP_HEADER_NAME_BYTES = 128
