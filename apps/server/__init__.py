@@ -108,6 +108,7 @@ from . import danmu_plugins as _danmu_plugins  # noqa: E402
 from . import plugin_manager as _plugin_manager  # noqa: E402
 from . import plugin_runtime_dual as _plugin_runtime_dual  # noqa: E402
 from . import plugin_secret_guard as _plugin_secret_guard  # noqa: E402
+from . import plugin_api_security_guard as _plugin_api_security_guard  # noqa: E402
 from . import appearance_guard as _appearance_guard  # noqa: E402
 from . import issue123_guard as _issue123_guard  # noqa: E402
 from . import security_hardening_guard as _security_hardening_guard  # noqa: E402
@@ -153,5 +154,9 @@ _issue123_guard.install_issue123_guard(
     _settings_backup,
 )
 _security_hardening_guard.install_security_hardening(server)
+
+# Keep this outermost: all plugin-management POST requests must pass the browser
+# origin/content-type/body-size safety boundary before any management handler.
+_plugin_api_security_guard.install_plugin_api_security_guard(server, _plugin_manager)
 
 __all__ = ["REPO_ROOT", "configure_runtime_paths", "server"]
