@@ -147,6 +147,5 @@ _issue123_guard.install_issue123_guard(
     _settings_backup,
 )
 _security_hardening_guard.install_security_hardening(server)
-_danmu_plugins.install_danmu_plugin_api(server, _issue79_guard)
 
 __all__ = ["REPO_ROOT", "configure_runtime_paths", "server"]
