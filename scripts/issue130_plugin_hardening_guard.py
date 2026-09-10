@@ -5,6 +5,7 @@ import copy
 import hashlib
 import io
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -189,6 +190,64 @@ def test_javascript_reports_host_enforced_permissions() -> None:
         assert info["permission_enforcement"] == "host-enforced"
 
 
+def test_plugin_config_secrets_are_recursively_redacted() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        manager = pm.PluginManager(fake_module(root), DanmuPluginRegistry())
+        base = manifest(
+            runtime="javascript",
+            plugin_id="example.secret.danmu",
+            platform="secret_test",
+            permissions=[],
+        )
+        record = pm.InstalledPluginRecord(
+            plugin_id="example.secret.danmu",
+            root=root,
+            manifest=base,
+            enabled=True,
+            package_sha256="0" * 64,
+            signature_status="unsigned-approved",
+            verified=True,
+        )
+        active = SimpleNamespace(
+            runtime_config={
+                "secret_test": {
+                    "roomid": "safe-room",
+                    "endpoint": "https://example.invalid/live",
+                    "refresh_token": "top-secret-refresh",
+                    "nested": {
+                        "Authorization": "Bearer top-secret",
+                        "client_token": "top-secret-client",
+                        "safe": "visible",
+                    },
+                    "items": [{"password": "top-secret-password", "name": "visible-item"}],
+                }
+            },
+            logger=logging.getLogger("plugin-secret-test"),
+        )
+        config = pm.PluginContext(manager, active, record).get_config()
+        assert config["roomid"] == "safe-room"
+        assert config["endpoint"] == "https://example.invalid/live"
+        assert "refresh_token" not in config
+        assert config["nested"] == {"safe": "visible"}
+        assert config["items"] == [{"name": "visible-item"}]
+
+        privileged_manifest = copy.deepcopy(base)
+        privileged_manifest["permissions"] = ["secrets"]
+        privileged = pm.InstalledPluginRecord(
+            plugin_id="example.secret.danmu",
+            root=root,
+            manifest=privileged_manifest,
+            enabled=True,
+            package_sha256="0" * 64,
+            signature_status="unsigned-approved",
+            verified=True,
+        )
+        raw = pm.PluginContext(manager, active, privileged).get_config()
+        assert raw["refresh_token"] == "top-secret-refresh"
+        assert raw["nested"]["Authorization"] == "Bearer top-secret"
+
+
 def test_ui_reports_runtime_trust_model() -> None:
     web = (ROOT / "apps/web/static/control_plugins.js").read_text(encoding="utf-8")
     assert "Host 权限强制" in web
@@ -202,6 +261,7 @@ def main() -> None:
         test_noncanonical_signature_fields_are_rejected,
         test_installed_tree_rejects_undeclared_files_and_symlinks,
         test_javascript_reports_host_enforced_permissions,
+        test_plugin_config_secrets_are_recursively_redacted,
         test_ui_reports_runtime_trust_model,
     ]
     for test in tests:
