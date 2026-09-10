@@ -26,6 +26,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from . import danmu_plugins as _plugin_core
+from .danmu_event import DanmuEvent
 from .danmu_plugins import PLUGIN_API_VERSION, PLUGIN_TYPE, DanmuPlugin, DanmuPluginRegistry
 
 MANIFEST_SCHEMA = 1
@@ -283,7 +284,22 @@ class PluginContext:
         if hub is not None and hasattr(hub, "broadcast_json"):
             hub.broadcast_json(None, dict(payload))
 
+    def process_danmu_event(self, event: DanmuEvent | dict[str, Any]) -> None:
+        if isinstance(event, DanmuEvent):
+            normalized = event
+        elif isinstance(event, dict):
+            normalized = DanmuEvent.from_mapping(event, default_platform=self.platform)
+        else:
+            raise TypeError("event must be a DanmuEvent or dict")
+        if normalized.platform != self.platform:
+            raise ValueError("plugin cannot emit a danmu event for another platform")
+        manager = getattr(self._server, "queue_manager", None)
+        if manager is None or not hasattr(manager, "process_danmu_event"):
+            raise RuntimeError("queue manager is unavailable")
+        manager.process_danmu_event(normalized)
+
     def process_danmu_json(self, payload: dict[str, Any]) -> None:
+        """Deprecated Bilibili-shaped compatibility API; use process_danmu_event()."""
         if not isinstance(payload, dict):
             raise TypeError("payload must be a dict")
         manager = getattr(self._server, "queue_manager", None)

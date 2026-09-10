@@ -28,6 +28,7 @@ const __bilipdjHost = Object.freeze({
   getSecret(key) { return __host_get_secret(String(key)); },
   emit(payload) { return __host_emit(JSON.stringify(payload ?? {})); },
   processDanmu(payload) { return __host_process_danmu(JSON.stringify(payload ?? {})); },
+  processDanmuEvent(payload) { return __host_process_danmu_event(JSON.stringify(payload ?? {})); },
   setStatus(payload) { return __host_set_status(JSON.stringify(payload ?? {})); },
   httpRequest(url, options = {}) {
     return JSON.parse(__host_http_request(String(url), JSON.stringify(options ?? {})));
@@ -171,6 +172,13 @@ def _javascript_worker_main(
         if not isinstance(payload, dict):
             raise TypeError("danmu payload must be an object")
         _send(conn, {"type": "danmu", "payload": payload})
+        return True
+
+    def process_danmu_event(raw: str) -> bool:
+        payload = _parse_host_json(raw, "danmu event")
+        if not isinstance(payload, dict):
+            raise TypeError("danmu event must be an object")
+        _send(conn, {"type": "danmu_event", "payload": payload})
         return True
 
     def set_status(raw: str) -> bool:
@@ -330,6 +338,7 @@ def _javascript_worker_main(
     ctx.add_callable("__host_get_secret", get_secret)
     ctx.add_callable("__host_emit", emit)
     ctx.add_callable("__host_process_danmu", process_danmu)
+    ctx.add_callable("__host_process_danmu_event", process_danmu_event)
     ctx.add_callable("__host_set_status", set_status)
     ctx.add_callable("__host_http_request", http_request)
     ctx.add_callable("__host_read_data", read_data)
@@ -496,6 +505,11 @@ class JavascriptRelay:
             payload = message.get("payload")
             if isinstance(payload, dict):
                 self.context.process_danmu_json(payload)
+            return "message", None
+        if kind == "danmu_event":
+            payload = message.get("payload")
+            if isinstance(payload, dict):
+                self.context.process_danmu_event(payload)
             return "message", None
         if kind == "running":
             self._set_status({"state": "running"})
