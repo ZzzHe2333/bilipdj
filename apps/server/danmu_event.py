@@ -17,9 +17,17 @@ MAX_METADATA_BYTES = 64 * 1024
 MAX_LEGACY_UID = (1 << 63) - 1
 
 
-def _bounded_text(value: Any, *, label: str, max_chars: int, required: bool = False) -> str:
-    text = str(value or "").strip()
-    if required and not text:
+def _bounded_text(
+    value: Any,
+    *,
+    label: str,
+    max_chars: int,
+    required: bool = False,
+    trim: bool = True,
+) -> str:
+    raw = str(value or "")
+    text = raw.strip() if trim else raw
+    if required and not text.strip():
         raise ValueError(f"{label} is required")
     if len(text) > max_chars:
         raise ValueError(f"{label} exceeds {max_chars} characters")
@@ -72,7 +80,15 @@ class DanmuEvent:
             raise ValueError("platform contains unsupported characters")
         self.user_id = _bounded_text(self.user_id, label="user_id", max_chars=MAX_USER_ID_CHARS)
         self.username = _bounded_text(self.username, label="username", max_chars=MAX_USERNAME_CHARS, required=True)
-        self.content = _bounded_text(self.content, label="content", max_chars=MAX_CONTENT_CHARS, required=True)
+        # Preserve message bytes-as-text semantics from the legacy Bilibili path.
+        # Required validation ignores surrounding whitespace, but the stored value does not.
+        self.content = _bounded_text(
+            self.content,
+            label="content",
+            max_chars=MAX_CONTENT_CHARS,
+            required=True,
+            trim=False,
+        )
         self.is_room_admin = bool(self.is_room_admin)
         self.is_anchor = bool(self.is_anchor)
         self.is_guard = bool(self.is_guard)
@@ -112,6 +128,8 @@ class DanmuEvent:
     def identity_dict(self) -> dict[str, Any]:
         base = self.metadata.get("identity")
         identity = deepcopy(base) if isinstance(base, dict) else {}
+        had_fan_medal_flag = "has_fan_medal" in identity
+        original_has_fan_medal = identity.get("has_fan_medal")
         identity.update(
             {
                 "uid": self.legacy_uid(),
@@ -124,8 +142,10 @@ class DanmuEvent:
                 "guard_level": self.guard_level,
                 "guard_name": self.guard_name,
                 "fan_medal": deepcopy(self.fan_medal),
-                "has_fan_medal": bool(self.fan_medal),
             }
+        )
+        identity["has_fan_medal"] = (
+            bool(original_has_fan_medal) if had_fan_medal_flag else bool(self.fan_medal)
         )
         return identity
 
