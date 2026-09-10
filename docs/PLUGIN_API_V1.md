@@ -199,19 +199,33 @@ host.base64ToBytes(base64)
 
 ## 弹幕进入 BiliPDJ
 
-为了复用现有 QueueManager，外部插件可以把解析后的弹幕转换成 Bilibili 兼容弹幕 JSON，再调用：
+新插件应把平台消息规范化为平台无关 `DanmuEvent`，不要伪造 Bilibili `DANMU_MSG/info`：
 
 ```javascript
-host.processDanmu(payload)
+host.processDanmuEvent({
+  user_id: "platform-native-id",
+  username: "Alice",
+  content: "排队",
+  is_room_admin: false
+})
 ```
 
 或 Python：
 
 ```python
-context.process_danmu_json(payload)
+context.process_danmu_event({
+    "user_id": "platform-native-id",
+    "username": "Alice",
+    "content": "排队",
+    "is_room_admin": False,
+})
 ```
 
-平台自己的状态/原始事件可通过 `emit()` 广播给 Web/Windows/OBS。
+旧 `host.processDanmu(payload)` / `context.process_danmu_json(payload)` 仅作为 Bilibili `DANMU_MSG` 兼容接口保留。平台自己的状态/原始事件仍可通过 `emit()` 广播给 Web/Windows/OBS。
+
+### 插件私有数据限额
+
+`filesystem_read` / `filesystem_write` 访问的插件独立 data 目录实行统一资源限制：单文件最多 **4 MiB**、每个插件常规文件总大小最多 **64 MiB**、最多 **1024** 个常规文件；路径最多 12 层且最长 240 字符。Python `context.read_data/write_data` 与 JavaScript `host.readData/writeData` 使用相同限制。超限会拒绝操作，不会静默截断。拥有 `subprocess` 权限的插件仍属于高权限插件，该权限不是 OS 沙箱。
 
 ## SHA-256 与完整性
 

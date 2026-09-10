@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: '手动输入要发布的标签（示例：v2.0.1）'
+        description: '手动输入要发布的标签（示例：v3.0.0）'
         required: true
         type: string
   push:
@@ -57,7 +57,7 @@ jobs:
         run: |
           VERSION="$(tr -d '[:space:]' < VERSION)"
           if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+){2,}$ ]]; then
-            echo "VERSION 文件格式不合法：$VERSION（应为 2.0.1 形式）"
+            echo "VERSION 文件格式不合法：$VERSION（应为 3.0.0 形式）"
             exit 1
           fi
 
@@ -76,7 +76,7 @@ jobs:
 
           if [ "$EXPLICIT_RELEASE" = "true" ]; then
             if [[ ! "$TAG_NAME" =~ ^v[0-9A-Za-z._-]+$ ]]; then
-              echo "发布标签格式不合法：$TAG_NAME（需以 v 开头，例如 v2.0.1）"
+              echo "发布标签格式不合法：$TAG_NAME（需以 v 开头，例如 v3.0.0）"
               exit 1
             fi
             if [ "$TAG_NAME" != "v$VERSION" ]; then
@@ -124,6 +124,14 @@ jobs:
           $webConfig = Get-ChildItem "dist\web-portable\bilipdj-web" -Recurse -Filter "config.html" | Select-Object -First 1
           if (-not $tkConfig) { throw "Tk portable bundle does not contain Web assets" }
           if (-not $webConfig) { throw "Web portable bundle does not contain Web assets" }
+
+          $tkExe = (Resolve-Path "dist\bilipdj\main.exe").Path
+          $tkProbe = Start-Process -FilePath $tkExe -ArgumentList "--plugin-runtime-self-test" -Wait -PassThru
+          if ($tkProbe.ExitCode -ne 0) { throw "Tk frozen JavaScript plugin self-test failed: $($tkProbe.ExitCode)" }
+
+          $webExe = (Resolve-Path "dist\web-portable\bilipdj-web\BiliPDJ-Web.exe").Path
+          $webProbe = Start-Process -FilePath $webExe -ArgumentList "--plugin-runtime-self-test" -Wait -PassThru
+          if ($webProbe.ExitCode -ne 0) { throw "Web frozen JavaScript plugin self-test failed: $($webProbe.ExitCode)" }
 
       - name: Create portable zips, checksums and update manifest
         shell: pwsh

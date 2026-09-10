@@ -242,14 +242,15 @@ def fetch_latest_release(*, timeout: float = 15.0) -> ReleaseInfo:
 
     Order:
     1. update-manifest.json attached to the latest GitHub Release;
-    2. raw ``now/update-manifest.json`` compatibility copy;
-    3. GitHub Release API, using the asset's native ``digest`` when available.
+    2. GitHub Release API, using the asset's native ``digest`` when available;
+    3. raw ``now/update-manifest.json`` compatibility copy as the last resort.
 
-    The third path also keeps old releases and existing tests compatible.
+    Release metadata must win over the raw branch copy because the latter can
+    temporarily be stale while a release is being prepared or mirrored.
     """
 
     errors: list[str] = []
-    for source_url in (LATEST_MANIFEST_URL, RAW_MANIFEST_URL, LATEST_RELEASE_API):
+    for source_url in (LATEST_MANIFEST_URL, LATEST_RELEASE_API, RAW_MANIFEST_URL):
         try:
             with _request(source_url, timeout=timeout) as response:
                 payload = _decode_json_response(response, "更新清单" if source_url != LATEST_RELEASE_API else "GitHub Release")

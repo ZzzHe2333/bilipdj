@@ -1,0 +1,56 @@
+name: Validate 3.0.0 release audit
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'apps/server/plugin_data_quota.py'
+      - 'apps/server/plugin_manager.py'
+      - 'apps/server/javascript_plugin_runtime.py'
+      - 'apps/server/issue79_guard.py'
+      - 'apps/windows/update_client.py'
+      - 'apps/windows/frozen_plugin_probe.py'
+      - 'apps/windows/main.py'
+      - 'apps/web/portable_launcher.py'
+      - 'docs/PLUGIN_API_V1.md'
+      - 'scripts/issue144_release_audit_guard.py'
+      - '.github/workflows/release-audit.yml'
+      - 'requirements.txt'
+  push:
+    branches: [now]
+    paths:
+      - 'apps/server/plugin_data_quota.py'
+      - 'apps/server/plugin_manager.py'
+      - 'apps/server/javascript_plugin_runtime.py'
+      - 'apps/server/issue79_guard.py'
+      - 'apps/windows/update_client.py'
+      - 'apps/windows/frozen_plugin_probe.py'
+      - 'apps/windows/main.py'
+      - 'apps/web/portable_launcher.py'
+      - 'docs/PLUGIN_API_V1.md'
+      - 'scripts/issue144_release_audit_guard.py'
+      - '.github/workflows/release-audit.yml'
+      - 'requirements.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  release-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install project dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Compile release-audit sources
+        run: python -m py_compile apps/server/plugin_data_quota.py apps/server/plugin_manager.py apps/server/javascript_plugin_runtime.py apps/server/issue79_guard.py apps/windows/update_client.py apps/windows/frozen_plugin_probe.py apps/windows/main.py apps/web/portable_launcher.py scripts/issue144_release_audit_guard.py
+      - name: Run 3.0.0 release-audit guard
+        run: python scripts/issue144_release_audit_guard.py
+      - name: Run JavaScript runtime regressions
+        run: |
+          python scripts/issue130_js_runtime_probe.py
+          python scripts/issue140_http_request_guard.py
+          python scripts/issue142_danmu_event_guard.py
