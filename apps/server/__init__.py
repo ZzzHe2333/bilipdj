@@ -110,6 +110,7 @@ from . import plugin_runtime_dual as _plugin_runtime_dual  # noqa: E402
 from . import plugin_secret_guard as _plugin_secret_guard  # noqa: E402
 from . import plugin_mutation_guard as _plugin_mutation_guard  # noqa: E402
 from . import plugin_api_security_guard as _plugin_api_security_guard  # noqa: E402
+from . import plugin_config_schema as _plugin_config_schema  # noqa: E402
 from . import appearance_guard as _appearance_guard  # noqa: E402
 from . import issue123_guard as _issue123_guard  # noqa: E402
 from . import security_hardening_guard as _security_hardening_guard  # noqa: E402
@@ -157,8 +158,10 @@ _issue123_guard.install_issue123_guard(
 )
 _security_hardening_guard.install_security_hardening(server)
 
-# Keep this outermost: all plugin-management POST requests must pass the browser
-# origin/content-type/body-size safety boundary before any management handler.
+# Keep this outermost for the original plugin-management routes.
 _plugin_api_security_guard.install_plugin_api_security_guard(server, _plugin_manager)
+# Issue #136 adds its own guarded /api/plugins/config route after the existing
+# plugin-management stack, while patching manifest/runtime behavior in one place.
+_plugin_config_schema.install_plugin_config_schema(server, _plugin_manager, _plugin_api_security_guard)
 
 __all__ = ["REPO_ROOT", "configure_runtime_paths", "server"]
