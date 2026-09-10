@@ -1,0 +1,43 @@
+name: Validate Plugin Config Schema
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'apps/server/plugin_config_schema.py'
+      - 'apps/server/plugin_config_web.py'
+      - 'apps/server/__init__.py'
+      - 'apps/web/static/control.html'
+      - 'scripts/issue136_plugin_config_guard.py'
+      - '.github/workflows/plugin-config-schema.yml'
+      - 'requirements.txt'
+  push:
+    branches: [now]
+    paths:
+      - 'apps/server/plugin_config_schema.py'
+      - 'apps/server/plugin_config_web.py'
+      - 'apps/server/__init__.py'
+      - 'apps/web/static/control.html'
+      - 'scripts/issue136_plugin_config_guard.py'
+      - '.github/workflows/plugin-config-schema.yml'
+      - 'requirements.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-plugin-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install project dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Compile Issue 136 sources
+        run: python -m py_compile apps/server/plugin_config_schema.py apps/server/plugin_config_web.py scripts/issue136_plugin_config_guard.py
+      - name: Run Issue 136 regression guard
+        run: python scripts/issue136_plugin_config_guard.py
+      - name: Validate Web source build
+        run: python apps/web/build.py
