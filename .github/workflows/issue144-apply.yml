@@ -5,6 +5,7 @@ on:
     branches: [release/3.0.0-audit-144]
     paths:
       - 'scripts/issue144_apply.py'
+      - 'scripts/issue144_fix_apply.py'
       - '.github/workflows/issue144-apply.yml'
 
 permissions:
@@ -20,6 +21,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Repair audit guard import path
+        run: python scripts/issue144_fix_apply.py
       - name: Apply exact audit patch
         run: python scripts/issue144_apply.py
       - name: Install dependencies
@@ -36,7 +39,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git restore --source=HEAD -- scripts/issue144_apply.py .github/workflows/issue144-apply.yml
+          git restore --source=HEAD -- scripts/issue144_apply.py scripts/issue144_fix_apply.py .github/workflows/issue144-apply.yml
           git add -A
           git diff --cached --check
           git commit -m "fix: harden plugin data and update fallback before 3.0.0 (#144)"
