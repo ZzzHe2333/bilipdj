@@ -160,7 +160,7 @@ jobs:
           $tkHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $tkZip).Hash.ToLowerInvariant()
           $webHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $webZip).Hash.ToLowerInvariant()
           "$tkHash  $tkZip" | Set-Content -LiteralPath "$tkZip.sha256" -Encoding ascii
-          "$webHash  $webZip" | Set-Content -LiteralPath "$webZip.sha256" -Encoding ascii
+          "$webHash  $webZip.sha256" | Set-Content -LiteralPath "$webZip.sha256" -Encoding ascii
 
           $version = "${{ steps.resolve_tag.outputs.version }}"
           $tagName = "${{ steps.resolve_tag.outputs.tag_name }}"
@@ -203,7 +203,7 @@ jobs:
             update-manifest.json
 
       - name: Create GitHub Release
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
         uses: ncipollo/release-action@v1
         with:
           tag: ${{ steps.resolve_tag.outputs.tag_name }}
