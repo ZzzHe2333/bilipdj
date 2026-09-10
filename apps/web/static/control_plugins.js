@@ -175,7 +175,7 @@
         <div class="issue79-section-title"><div><h3>插件管理器</h3><p class="hint">安装 .bilipdj-plugin 本地包。安装阶段不会执行插件代码；插件只有启用后才会加载。</p></div></div>
         <div class="form-grid">
           <label class="wide"><span>插件包</span><input id="plugin-package-file" type="file" accept=".bilipdj-plugin,application/zip"></label>
-          <label class="wide"><input id="plugin-allow-unsigned" type="checkbox"> 允许安装未签名的本地插件（需要你明确确认来源可信）</label>
+          <label class="wide"><input id="plugin-allow-unsigned" type="checkbox"> 允许安装未签名的本地插件（每次安装都需要重新确认来源可信）</label>
         </div>
         <div class="toolbar"><button id="plugin-install" class="button">安装插件</button><button id="plugin-manager-refresh" class="button ghost">刷新</button></div>
         <p class="hint">JavaScript 插件在独立 QuickJS 工作进程中运行，权限由 Host 强制执行；第三方 Python 插件与 BiliPDJ 同进程运行，属于全信任代码。未知来源插件不要启用。</p>
@@ -309,23 +309,49 @@
   }
 
   async function installPackage() {
+    const unsignedCheckbox = $('plugin-allow-unsigned');
+    const clearUnsignedApproval = () => {
+      if (unsignedCheckbox) unsignedCheckbox.checked = false;
+    };
     const file = $('plugin-package-file')?.files?.[0];
-    if (!file) { setManagerStatus('请选择 .bilipdj-plugin 文件。', false); return; }
-    if (!file.name.toLowerCase().endsWith('.bilipdj-plugin')) { setManagerStatus('文件扩展名必须为 .bilipdj-plugin。', false); return; }
-    if (file.size > 1024 * 1024) { setManagerStatus('插件包不能超过 1 MiB。', false); return; }
+    if (!file) {
+      clearUnsignedApproval();
+      setManagerStatus('请选择 .bilipdj-plugin 文件。', false);
+      return;
+    }
+    if (!file.name.toLowerCase().endsWith('.bilipdj-plugin')) {
+      clearUnsignedApproval();
+      setManagerStatus('文件扩展名必须为 .bilipdj-plugin。', false);
+      return;
+    }
+    if (file.size > 1024 * 1024) {
+      clearUnsignedApproval();
+      setManagerStatus('插件包不能超过 1 MiB。', false);
+      return;
+    }
+    const allowUnsigned = Boolean(unsignedCheckbox?.checked);
+    if (allowUnsigned && !window.confirm(
+      `你正在允许安装未签名插件 ${file.name}。\n\n未签名插件无法验证发布者身份；Python 插件属于本机全信任代码。仅当你确认文件来源可信时继续。\n\n本次授权只用于这一次安装。`
+    )) {
+      clearUnsignedApproval();
+      setManagerStatus('已取消未签名插件安装。', false);
+      return;
+    }
     setManagerStatus('正在校验并安装插件……');
     try {
       const dataBase64 = await fileToBase64(file);
       const response = await post('/api/plugins/install', {
         filename: file.name,
         data_base64: dataBase64,
-        allow_unsigned: Boolean($('plugin-allow-unsigned')?.checked),
+        allow_unsigned: allowUnsigned,
       });
       setManagerStatus(`已安装 ${response.plugin?.name || response.plugin?.id || file.name}；默认保持禁用，请检查权限后再启用。`);
       if ($('plugin-package-file')) $('plugin-package-file').value = '';
       await refreshManager();
     } catch (error) {
       setManagerStatus(`安装失败：${error.message}`, false);
+    } finally {
+      clearUnsignedApproval();
     }
   }
 
