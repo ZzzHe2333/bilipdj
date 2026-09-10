@@ -1,4 +1,5 @@
 brotli>=1.1,<2
+cryptography>=42,<47
 openai>=2.0,<3
 Pillow>=10,<13
 protobuf>=4.25,<7
