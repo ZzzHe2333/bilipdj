@@ -20,6 +20,11 @@ text, js_count = re.subn(
 )
 if js_count != 1:
     raise SystemExit(f"JS_SOURCE leading backslash anchor matched {js_count} times")
+old_docs = '    write("docs/PLUGIN_API_V1.md", docs.rstrip() + DOC_SECTION + "\\n")'
+new_docs = '    write("docs/PLUGIN_API_V1.md", docs.rstrip() + DOC_SECTION.rstrip() + "\\n")'
+if text.count(old_docs) != 1:
+    raise SystemExit("docs EOF normalization anchor not found exactly once")
+text = text.replace(old_docs, new_docs, 1)
 path.write_text(text, encoding="utf-8")
 Path(__file__).unlink()
-print("Issue #142 staging delimiters and JS probe source fixed")
+print("Issue #142 staging fixes applied")
