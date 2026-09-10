@@ -32,10 +32,12 @@ jobs:
           python -m py_compile apps/server/danmu_event.py apps/server/server.py apps/server/douyin_protocol.py apps/server/huya_protocol.py apps/server/twitch_protocol.py apps/server/youtube_protocol.py apps/server/plugin_manager.py apps/server/javascript_plugin_runtime.py scripts/issue142_danmu_event_guard.py
           python scripts/issue142_danmu_event_guard.py
           python scripts/issue130_js_runtime_probe.py
-      - name: Commit generated refactor
+      - name: Commit validated source refactor
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git restore --source=HEAD -- .github/workflows/issue142-apply.yml scripts/issue142_apply.py scripts/issue142_fix_apply.py
+          rm -f .github/workflows/danmu-event.yml
           git add -A
           git diff --cached --check
           git commit -m "refactor: introduce platform-independent DanmuEvent (#142)"
