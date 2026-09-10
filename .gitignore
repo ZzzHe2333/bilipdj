@@ -9,6 +9,7 @@ core/platform_config_archive*.json
 core/*cookie*
 core/*token*
 core/cd/
+plugins/
 log/
 tmp*
 
