@@ -2,11 +2,27 @@
 from __future__ import annotations
 
 import copy
+import zipfile
+from pathlib import PurePosixPath
 from typing import Any
 
 from . import plugin_manager as pm
 
 SUPPORTED_RUNTIMES = frozenset({"python", "javascript"})
+_RESERVED_PLUGIN_IDS = frozenset({"data", "state", "trusted_keys", "plugins"})
+_WINDOWS_RESERVED = frozenset(
+    {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
+)
+
+
+def _safe_member_name(name: str) -> str:
+    raw = str(name or "").replace("\\", "/")
+    path = PurePosixPath(raw)
+    for part in path.parts:
+        base = part.rstrip(" .").split(".", 1)[0].lower()
+        if ":" in part or part.endswith((" ", ".")) or base in _WINDOWS_RESERVED:
+            raise pm.PluginError(f"archive contains Windows-unsafe path: {raw}")
+    return pm._issue130_original_safe_member_name(name)
 
 
 def _validate_javascript_manifest(manifest: dict[str, Any], current_version: str) -> dict[str, Any]:
@@ -21,7 +37,7 @@ def _validate_javascript_manifest(manifest: dict[str, Any], current_version: str
         raise pm.PluginError(f"unsupported manifest schema: {manifest.get('schema')}")
     plugin_id = str(manifest.get("id", "") or "").strip().lower()
     platform = str(manifest.get("platform", "") or "").strip().lower()
-    if not pm._ID_RE.fullmatch(plugin_id) or plugin_id.startswith("builtin."):
+    if not pm._ID_RE.fullmatch(plugin_id) or plugin_id.startswith("builtin.") or plugin_id in _RESERVED_PLUGIN_IDS:
         raise pm.PluginError("invalid/reserved plugin id")
     if not pm._PLATFORM_RE.fullmatch(platform):
         raise pm.PluginError("invalid platform id")
@@ -76,6 +92,10 @@ def install_dual_runtime_support() -> None:
     original_validate = pm.validate_manifest
     original_loader = pm.PluginManager._load_external_plugin
     original_public_info = pm.InstalledPluginRecord.public_info
+    original_verify_installed = pm.PluginManager._verify_installed
+    original_safe_member_name = pm._safe_member_name
+    pm._issue130_original_safe_member_name = original_safe_member_name
+    pm._safe_member_name = _safe_member_name
 
     def validate_manifest(manifest: Any, current_version: str) -> dict[str, Any]:
         if not isinstance(manifest, dict):
@@ -83,6 +103,9 @@ def install_dual_runtime_support() -> None:
         runtime = str(manifest.get("runtime", "") or "").strip().lower()
         if runtime not in SUPPORTED_RUNTIMES:
             raise pm.PluginError("runtime must be 'python' or 'javascript'")
+        plugin_id = str(manifest.get("id", "") or "").strip().lower()
+        if plugin_id in _RESERVED_PLUGIN_IDS:
+            raise pm.PluginError("invalid/reserved plugin id")
         if runtime == "javascript":
             return _validate_javascript_manifest(manifest, current_version)
         normalized = original_validate(manifest, current_version)
@@ -99,6 +122,22 @@ def install_dual_runtime_support() -> None:
             return create_javascript_danmu_plugin(self, record)
         return original_loader(self, record)
 
+    def verify_installed(self: Any, root: Any, manifest: dict[str, Any], meta: dict[str, Any]) -> tuple[str, str]:
+        result = original_verify_installed(self, root, manifest, meta)
+        package_path = root / ".package.bilipdj-plugin"
+        try:
+            with zipfile.ZipFile(package_path, "r") as archive:
+                packaged_manifest = archive.read("manifest.json")
+        except (OSError, KeyError, zipfile.BadZipFile) as exc:
+            raise pm.PluginError("installed package snapshot is invalid") from exc
+        try:
+            installed_manifest = (root / "manifest.json").read_bytes()
+        except OSError as exc:
+            raise pm.PluginError("installed manifest is missing") from exc
+        if installed_manifest != packaged_manifest:
+            raise pm.PluginError("installed manifest integrity check failed")
+        return result
+
     def public_info(self: Any) -> dict[str, Any]:
         payload = original_public_info(self)
         payload["runtime"] = str(self.manifest.get("runtime", "python") or "python")
@@ -107,6 +146,7 @@ def install_dual_runtime_support() -> None:
     pm.validate_manifest = validate_manifest
     pm.PluginManager.create_context = create_context
     pm.PluginManager._load_external_plugin = load_external_plugin
+    pm.PluginManager._verify_installed = verify_installed
     pm.InstalledPluginRecord.public_info = public_info
     pm.SUPPORTED_RUNTIMES = SUPPORTED_RUNTIMES
     pm._issue130_dual_runtime_installed = True
