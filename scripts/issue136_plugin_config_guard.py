@@ -97,7 +97,7 @@ def test_persistence_defaults_secret_redaction_and_runtime_isolation() -> None:
             "room_id": "12345",
             "retry": 5,
             "access_token": "alpha-secret",
-        })
+        }, [])
         assert public["values"]["room_id"] == "12345"
         assert public["values"]["retry"] == 5
         assert public["values"]["mode"] == "live"
@@ -105,11 +105,11 @@ def test_persistence_defaults_secret_redaction_and_runtime_isolation() -> None:
         assert "access_token" not in public["values"]
         assert public["secret_fields"]["access_token"] is True
 
-        preserved = manager.save_plugin_config(a.plugin_id, {"room_id": "12345", "access_token": ""})
+        preserved = manager.save_plugin_config(a.plugin_id, {"room_id": "12345", "access_token": ""}, [])
         assert preserved["secret_fields"]["access_token"] is True
         assert manager.get_plugin_config(a.plugin_id)["access_token"] == "alpha-secret"
 
-        manager.save_plugin_config(b.plugin_id, {"room_id": "999", "access_token": "beta-secret"})
+        manager.save_plugin_config(b.plugin_id, {"room_id": "999", "access_token": "beta-secret"}, [])
         active_server = SimpleNamespace(runtime_config={a.platform: {"legacy": "wrong"}})
         context_a = pm.PluginContext(manager, active_server, a)
         context_b = pm.PluginContext(manager, active_server, b)
@@ -140,7 +140,7 @@ def test_validation_and_required_fields() -> None:
             ({"room_id": "1", "unknown": True}, "unknown"),
         ]:
             try:
-                manager.save_plugin_config(record.plugin_id, values)
+                manager.save_plugin_config(record.plugin_id, values, [])
             except pm.PluginError as exc:
                 assert expected in str(exc).lower(), str(exc)
             else:
@@ -154,7 +154,7 @@ def test_uninstall_removes_config_but_upgrade_preserves_it() -> None:
         record = record_from(manifest(), root)
         record.root.mkdir(parents=True)
         manager._records = {record.plugin_id: record}
-        manager.save_plugin_config(record.plugin_id, {"room_id": "upgrade-me", "access_token": "keep"})
+        manager.save_plugin_config(record.plugin_id, {"room_id": "upgrade-me", "access_token": "keep"}, [])
         record.manifest["version"] = "1.1.0"
         assert manager.get_plugin_config(record.plugin_id)["room_id"] == "upgrade-me"
         manager.uninstall(record.plugin_id)
