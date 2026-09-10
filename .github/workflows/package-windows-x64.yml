@@ -32,12 +32,20 @@ on:
       - 'core/RELEASE_NOTES.md'
       - '.github/workflows/package-windows-x64.yml'
 
+# Build/validation runs never need repository write access. The release job below
+# elevates contents permission only for an explicit dispatch or v* tag push.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-portable-bundles:
     runs-on: windows-2022
+    outputs:
+      version: ${{ steps.resolve_tag.outputs.version }}
+      tag_name: ${{ steps.resolve_tag.outputs.tag_name }}
+      tk_zip: ${{ steps.resolve_tag.outputs.tk_zip }}
+      web_zip: ${{ steps.resolve_tag.outputs.web_zip }}
+      artifact_name: ${{ steps.resolve_tag.outputs.artifact_name }}
 
     steps:
       - name: Checkout
@@ -53,19 +61,22 @@ jobs:
             exit 1
           fi
 
+          EXPLICIT_RELEASE=false
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             TAG_NAME="pr-${{ github.event.pull_request.number }}"
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TAG_NAME="${{ inputs.tag_name }}"
-          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            EXPLICIT_RELEASE=true
+          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             TAG_NAME="${{ github.ref_name }}"
+            EXPLICIT_RELEASE=true
           else
-            TAG_NAME="v$VERSION"
+            TAG_NAME="build-now-${GITHUB_SHA:0:8}"
           fi
 
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
+          if [ "$EXPLICIT_RELEASE" = "true" ]; then
             if [[ ! "$TAG_NAME" =~ ^v[0-9A-Za-z._-]+$ ]]; then
-              echo "标签格式不合法：$TAG_NAME（需以 v 开头，例如 v2.0.1）"
+              echo "发布标签格式不合法：$TAG_NAME（需以 v 开头，例如 v2.0.1）"
               exit 1
             fi
             if [ "$TAG_NAME" != "v$VERSION" ]; then
@@ -74,10 +85,12 @@ jobs:
             fi
           fi
 
+          ARTIFACT_NAME="BiliPDJ-portable-bundles-$TAG_NAME"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
           echo "tk_zip=BiliPDJ-v$VERSION-Windows-Tk-Portable-x64.zip" >> "$GITHUB_OUTPUT"
           echo "web_zip=BiliPDJ-v$VERSION-Web-Portable-x64.zip" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -194,7 +207,7 @@ jobs:
       - name: Upload portable artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: BiliPDJ-portable-bundles-${{ steps.resolve_tag.outputs.tag_name }}
+          name: ${{ steps.resolve_tag.outputs.artifact_name }}
           path: |
             ${{ steps.resolve_tag.outputs.tk_zip }}
             ${{ steps.resolve_tag.outputs.tk_zip }}.sha256
@@ -202,14 +215,31 @@ jobs:
             ${{ steps.resolve_tag.outputs.web_zip }}.sha256
             update-manifest.json
 
+  release-portable-bundles:
+    name: Publish explicit GitHub Release
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    needs: build-portable-bundles
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout release notes
+        uses: actions/checkout@v4
+
+      - name: Download validated portable artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build-portable-bundles.outputs.artifact_name }}
+          path: release-assets
+
       - name: Create GitHub Release
-        if: github.event_name != 'pull_request'
         uses: ncipollo/release-action@v1
         with:
-          tag: ${{ steps.resolve_tag.outputs.tag_name }}
+          tag: ${{ needs.build-portable-bundles.outputs.tag_name }}
           commit: ${{ github.sha }}
-          name: 弹幕排队姬 ${{ steps.resolve_tag.outputs.tag_name }}
-          artifacts: ${{ steps.resolve_tag.outputs.tk_zip }},${{ steps.resolve_tag.outputs.tk_zip }}.sha256,${{ steps.resolve_tag.outputs.web_zip }},${{ steps.resolve_tag.outputs.web_zip }}.sha256,update-manifest.json
+          name: 弹幕排队姬 ${{ needs.build-portable-bundles.outputs.tag_name }}
+          artifacts: release-assets/${{ needs.build-portable-bundles.outputs.tk_zip }},release-assets/${{ needs.build-portable-bundles.outputs.tk_zip }}.sha256,release-assets/${{ needs.build-portable-bundles.outputs.web_zip }},release-assets/${{ needs.build-portable-bundles.outputs.web_zip }}.sha256,release-assets/update-manifest.json
           artifactErrorsFailBuild: true
           allowUpdates: true
           replacesArtifacts: true
