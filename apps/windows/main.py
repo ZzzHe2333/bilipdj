@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import multiprocessing as mp
 import os
 import sys
 from pathlib import Path
+
+if __name__ == "__main__":
+    # Required by PyInstaller when JavaScript plugins spawn their isolated worker.
+    mp.freeze_support()
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:

@@ -1,8 +1,10 @@
 brotli>=1.1,<2
+cryptography>=42,<47
 openai>=2.0,<3
 Pillow>=10,<13
 protobuf>=4.25,<7
 psutil>=5.9,<8
 pystray>=0.19,<1
 qrcode[pil]>=7.4,<9
+quickjs-ng>=0.16.2.1,<0.17
 websocket-client>=1.8,<2

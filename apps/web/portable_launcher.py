@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import multiprocessing as mp
 import os
 import subprocess
 import sys
@@ -12,6 +13,10 @@ import webbrowser
 from pathlib import Path
 from tkinter import messagebox, ttk
 from typing import Any
+
+if __name__ == "__main__":
+    # Required by PyInstaller when JavaScript plugins spawn their isolated worker.
+    mp.freeze_support()
 
 try:
     import pystray
