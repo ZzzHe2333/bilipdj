@@ -147,13 +147,13 @@ _danmu_plugins.install_danmu_plugin_system(server, _issue79_guard)
 _plugin_runtime_dual.install_dual_runtime_support()
 _plugin_secret_guard.install_plugin_secret_guard(_plugin_manager)
 _plugin_manager.install_plugin_manager(server, _issue79_guard)
-_plugin_mutation_guard.install_plugin_mutation_guard(_plugin_manager)
 _issue79_guard.install_issue79_guard(server)
 
-# Issue #136 must install before the generic security wrappers so the final
-# ApiHandler keeps their hardened marker/behavior. Its JSON POST route also calls
-# the plugin-management request guard directly.
+# Issue #136 defines the final config-aware PluginManager mutation methods first.
+# Issue #134 then wraps those final methods with the shared RLock so config-aware
+# enable/uninstall cannot bypass the existing mutation serialization guarantee.
 _plugin_config_schema.install_plugin_config_schema(server, _plugin_manager, _plugin_api_security_guard)
+_plugin_mutation_guard.install_plugin_mutation_guard(_plugin_manager)
 _plugin_config_web.install_plugin_config_web(server, _plugin_manager)
 
 _appearance_guard.install_appearance_guard(server)
