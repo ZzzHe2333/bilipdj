@@ -294,3 +294,37 @@ POST /api/plugins/trusted-keys/delete
 ```
 
 Web 控制台的“设置 → 插件管理”使用同一组 API。
+
+## 平台无关 DanmuEvent（Issue #142）
+
+新的获取弹幕插件应把平台消息规范化后交给统一事件入口，不再伪造 Bilibili `DANMU_MSG/info`：
+
+Python：
+
+```python
+context.process_danmu_event({
+    "user_id": "platform-native-user-id",
+    "username": "Alice",
+    "content": "排队",
+    "is_room_admin": False,
+    "metadata": {"message_id": "abc"},
+})
+```
+
+`platform` 可以省略，`PluginContext` 会绑定为插件 manifest 自己声明的平台；插件不能替其他平台发事件。也可以直接传入 `apps.server.danmu_event.DanmuEvent`。
+
+JavaScript：
+
+```javascript
+host.processDanmuEvent({
+  user_id: "platform-native-user-id",
+  username: "Alice",
+  content: "排队",
+  is_room_admin: false,
+  metadata: {message_id: "abc"}
+});
+```
+
+规范字段包括 `platform`、`user_id`、`username`、`content`、`is_room_admin`、`is_anchor`、`is_guard`、`guard_level`、`guard_name`、`fan_medal`、`received_at`、`metadata`。`user_id` 是字符串，可安全保存非数字平台 ID。
+
+旧 Python `context.process_danmu_json(payload)` 和 JavaScript `host.processDanmu(payload)` 继续支持，但它们仅作为 Bilibili `DANMU_MSG` 兼容接口；新插件应使用 `process_danmu_event` / `processDanmuEvent`。

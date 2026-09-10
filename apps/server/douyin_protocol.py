@@ -14,6 +14,11 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
 
+try:
+    from .danmu_event import DanmuEvent
+except ImportError:  # standalone compatibility
+    from danmu_event import DanmuEvent
+
 if __package__:
     from . import douyin_live_pb2
 else:
@@ -640,19 +645,6 @@ class DouyinDanmuRelay(threading.Thread):
             }
         )
 
-    @staticmethod
-    def _to_bilibili_like_danmu_payload(event: DouyinChatEvent) -> dict[str, Any]:
-        is_admin_flag = 1 if event.user_role >= 3 else 0
-        return {
-            "cmd": "DANMU_MSG",
-            "info": [
-                [],
-                event.content,
-                [int(event.uid), event.nickname, is_admin_flag],
-                [],
-            ],
-        }
-
     def _forward_chat_event(self, event: DouyinChatEvent) -> None:
         self.server.ws_hub.mark_message()
         self._last_chat_seen_at = event.recv_time
@@ -669,8 +661,16 @@ class DouyinDanmuRelay(threading.Thread):
             },
         )
         if hasattr(self.server, "queue_manager"):
-            self.server.queue_manager.process_danmu_json(
-                self._to_bilibili_like_danmu_payload(event)
+            self.server.queue_manager.process_danmu_event(
+                DanmuEvent(
+                    platform="douyin",
+                    user_id=event.sec_uid or str(event.uid),
+                    username=event.nickname,
+                    content=event.content,
+                    is_room_admin=event.user_role >= 3,
+                    received_at=event.recv_time,
+                    metadata={"numeric_uid": int(event.uid), "sec_uid": event.sec_uid, "user_role": int(event.user_role)},
+                )
             )
 
     def _connect_and_stream(self) -> None:

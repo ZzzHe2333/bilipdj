@@ -29,10 +29,12 @@ from urllib.parse import urlparse
 if __package__:
     from . import bilibili_protocol, douyin_protocol
     from .bilibili_gifts import GIFT_BATTERIES, batteries_for_gift
+    from .danmu_event import DanmuEvent
 else:
     import bilibili_protocol
     import douyin_protocol
     from bilibili_gifts import GIFT_BATTERIES, batteries_for_gift
+    from danmu_event import DanmuEvent
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 9816
@@ -2401,11 +2403,56 @@ class QueueManager:
         self._ws_hub.broadcast_json(None, event)
         self._logger.info("[礼物] %s(%s) %s x%s", uname, uid, gift_name, count)
 
+    def process_danmu_event(self, event: DanmuEvent | dict[str, Any]) -> None:
+        if isinstance(event, dict):
+            event = DanmuEvent.from_mapping(event)
+        if not isinstance(event, DanmuEvent):
+            raise TypeError("event must be a DanmuEvent or dict")
+
+        identity = event.identity_dict()
+        msg = event.content
+        uid = event.legacy_uid()
+        uname = event.username
+        is_admin_flag = event.is_room_admin
+        is_anchor = event.is_anchor
+        guard_level = event.guard_level
+        is_guard = event.is_guard
+
+        event_payload = {
+            "type": "DANMU_EVENT",
+            "platform": event.platform,
+            "message": msg,
+            "identity": identity,
+            "received_at": event.received_at,
+        }
+        with self._lock:
+            is_blacklisted = uname in self._blacklist
+            self._last_danmu_event = copy.deepcopy(event_payload)
+        self._ws_hub.broadcast_json(None, event_payload)
+
+        guard_name = event.guard_name
+        medal = event.fan_medal if isinstance(event.fan_medal, dict) else {}
+        medal_text = f" 粉丝牌={medal.get('name')}Lv.{medal.get('level')}" if medal else ""
+        perm = "黑名单" if is_blacklisted else ("主播" if is_anchor else ("super_admin" if uname in self._super_admins else ("房管" if is_admin_flag else (guard_name or ("管理员" if uname in self._admins else "普通用户")))))
+        self._logger.info("[弹幕][%s] %s(%s%s): %s", event.platform, uname, perm, medal_text, msg)
+
+        modified, note = self._process(uid, uname, msg, is_anchor, is_admin_flag, is_guard, guard_level)
+        if modified:
+            self._broadcast_and_archive(uname, msg)
+            self._logger.info(
+                "[触发指令] platform=%s uname=%s 权限=%s msg=%r → 队列变更，当前 %s 人",
+                event.platform, uname, perm, msg, len(self._persons),
+            )
+        elif note:
+            self._logger.info("[提示][%s] %s(%s): %s", event.platform, uname, perm, note)
+
     def process_danmu_json(self, payload: dict[str, Any]) -> None:
+        """Bilibili DANMU_MSG compatibility adapter for legacy callers/plugins."""
+        if not isinstance(payload, dict):
+            raise TypeError("payload must be a dict")
         cmd = str(payload.get("cmd", "") or "").strip()
         if not cmd.startswith("DANMU_MSG"):
             return
-
         info = payload.get("info", [])
         if not isinstance(info, list) or len(info) < 3:
             return
@@ -2414,44 +2461,25 @@ class QueueManager:
             anchor_uid = self._anchor_uid
         identity = bilibili_protocol.parse_bilibili_danmu_identity(payload, anchor_uid=anchor_uid)
         msg = str(info[1]) if len(info) > 1 else ""
-        uid = _to_int(identity.get("uid", 0))
         uname = str(identity.get("uname", "") or "")
-        is_admin_flag = bool(identity.get("is_room_admin", False))
-        is_anchor = bool(identity.get("is_anchor", False))
-        guard_level = _to_int(identity.get("guard_level", 0))
-        is_guard = bool(identity.get("is_guard", False))
-
         if not uname or not msg:
             return
-
-        event = {
-            "type": "DANMU_EVENT",
-            "platform": "bilibili",
-            "message": msg,
-            "identity": identity,
-            "received_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-        }
-        with self._lock:
-            is_blacklisted = uname in self._blacklist
-            self._last_danmu_event = copy.deepcopy(event)
-        self._ws_hub.broadcast_json(None, event)
-
-        # 所有弹幕打印到 INFO
-        guard_name = str(identity.get("guard_name", "") or "")
         medal = identity.get("fan_medal", {})
-        medal_text = f" 粉丝牌={medal.get('name')}Lv.{medal.get('level')}" if identity.get("has_fan_medal") else ""
-        perm = "黑名单" if is_blacklisted else ("主播" if is_anchor else ("super_admin" if uname in self._super_admins else ("房管" if is_admin_flag else (guard_name or ("管理员" if uname in self._admins else "普通用户")))))
-        self._logger.info("[弹幕] %s(%s%s): %s", uname, perm, medal_text, msg)
-
-        modified, note = self._process(uid, uname, msg, is_anchor, is_admin_flag, is_guard, guard_level)
-        if modified:
-            self._broadcast_and_archive(uname, msg)
-            self._logger.info(
-                "[触发指令] uname=%s 权限=%s msg=%r → 队列变更，当前 %s 人",
-                uname, perm, msg, len(self._persons),
+        self.process_danmu_event(
+            DanmuEvent(
+                platform="bilibili",
+                user_id=str(identity.get("uid", "") or ""),
+                username=uname,
+                content=msg,
+                is_room_admin=bool(identity.get("is_room_admin", False)),
+                is_anchor=bool(identity.get("is_anchor", False)),
+                is_guard=bool(identity.get("is_guard", False)),
+                guard_level=_to_int(identity.get("guard_level", 0)),
+                guard_name=str(identity.get("guard_name", "") or ""),
+                fan_medal=dict(medal) if isinstance(medal, dict) else {},
+                metadata={"identity": identity, "bilibili_cmd": cmd},
             )
-        elif note:
-            self._logger.info("[提示] %s(%s): %s", uname, perm, note)
+        )
 
     # 判断弹幕是否属于"排队类指令"（不含管理员专属指令）
     _JOIN_CMD_PATTERNS = (

@@ -12,6 +12,11 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Iterator
 
+try:
+    from .danmu_event import DanmuEvent
+except ImportError:  # standalone compatibility
+    from danmu_event import DanmuEvent
+
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"
@@ -580,10 +585,6 @@ class YoutubeDanmuRelay(threading.Thread):
             "timeout_seconds": timeout,
         }
 
-    @staticmethod
-    def _to_bilibili_like_danmu_payload(event: YoutubeChatEvent) -> dict[str, Any]:
-        return {"cmd": "DANMU_MSG", "info": [[], event.content, [int(event.uid), event.nickname, 0], []]}
-
     def _forward_chat_event(self, event: YoutubeChatEvent) -> None:
         fingerprint = event.event_id or f"{event.uid}:{event.nickname}:{event.content}"
         if fingerprint in self._seen:
@@ -609,7 +610,16 @@ class YoutubeDanmuRelay(threading.Thread):
             },
         )
         if hasattr(self.server, "queue_manager"):
-            self.server.queue_manager.process_danmu_json(self._to_bilibili_like_danmu_payload(event))
+            self.server.queue_manager.process_danmu_event(
+                DanmuEvent(
+                    platform="youtube",
+                    user_id=str(event.uid),
+                    username=event.nickname,
+                    content=event.content,
+                    received_at=event.recv_time,
+                    metadata={"event_id": event.event_id, "kind": event.kind, "room_id": self._video_id},
+                )
+            )
 
     def _connect_once(self, cfg: dict[str, Any]) -> None:
         if cfg["platform"] != "youtube":

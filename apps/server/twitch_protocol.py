@@ -11,6 +11,11 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
+try:
+    from .danmu_event import DanmuEvent
+except ImportError:  # standalone compatibility
+    from danmu_event import DanmuEvent
+
 TWITCH_WS_URL = "wss://irc-ws.chat.twitch.tv:443"
 TWITCH_ROOM_URL = "https://www.twitch.tv/{channel}"
 TWITCH_WS_HOST = "irc-ws.chat.twitch.tv"
@@ -390,10 +395,6 @@ class TwitchDanmuRelay(threading.Thread):
             runtime["twitch"] = section
         section.update({"room_id": info.channel, "room_url": info.room_url})
 
-    @staticmethod
-    def _to_bilibili_like_danmu_payload(event: TwitchChatEvent) -> dict[str, Any]:
-        return {"cmd": "DANMU_MSG", "info": [[], event.content, [int(event.uid), event.nickname, 0], []]}
-
     def _forward_chat_event(self, event: TwitchChatEvent) -> None:
         self.server.ws_hub.mark_message()
         self._last_chat_seen_at = event.recv_time
@@ -419,7 +420,28 @@ class TwitchDanmuRelay(threading.Thread):
             },
         )
         if hasattr(self.server, "queue_manager"):
-            self.server.queue_manager.process_danmu_json(self._to_bilibili_like_danmu_payload(event))
+            self.server.queue_manager.process_danmu_event(
+                DanmuEvent(
+                    platform="twitch",
+                    user_id=event.user_id or str(event.uid),
+                    username=event.nickname,
+                    content=event.content,
+                    is_room_admin=event.is_mod,
+                    is_anchor="broadcaster/1" in event.badges,
+                    received_at=event.recv_time,
+                    metadata={
+                        "numeric_uid": int(event.uid),
+                        "login": event.login,
+                        "badges": event.badges,
+                        "color": event.color,
+                        "emotes": event.emotes,
+                        "message_id": event.message_id,
+                        "is_subscriber": event.is_subscriber,
+                        "first_msg": event.first_msg,
+                        "room_id": self._current_channel,
+                    },
+                )
+            )
 
     @staticmethod
     def _send_irc(ws: Any, text: str) -> None:

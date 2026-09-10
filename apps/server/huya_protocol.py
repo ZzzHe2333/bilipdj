@@ -12,6 +12,11 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
+try:
+    from .danmu_event import DanmuEvent
+except ImportError:  # standalone compatibility
+    from danmu_event import DanmuEvent
+
 if __package__:
     from .huya_tars import TarsReader, TarsType, TarsWriter, tars_parse
 else:
@@ -478,10 +483,6 @@ class HuyaDanmuRelay(threading.Thread):
             runtime["huya"] = huya
         huya.update({"room_id": info.room_id, "room_url": info.room_url, "anchor_id": info.anchor_uid})
 
-    @staticmethod
-    def _to_bilibili_like_danmu_payload(event: HuyaChatEvent) -> dict[str, Any]:
-        return {"cmd": "DANMU_MSG", "info": [[], event.content, [int(event.uid), event.nickname, 0], []]}
-
     def _forward_chat_event(self, event: HuyaChatEvent) -> None:
         if is_huya_system_chat(event):
             self.logger.debug("Huya system notice filtered: %s: %s", event.nickname, event.content[:120])
@@ -502,7 +503,16 @@ class HuyaDanmuRelay(threading.Thread):
             },
         )
         if hasattr(self.server, "queue_manager"):
-            self.server.queue_manager.process_danmu_json(self._to_bilibili_like_danmu_payload(event))
+            self.server.queue_manager.process_danmu_event(
+                DanmuEvent(
+                    platform="huya",
+                    user_id=str(event.uid),
+                    username=event.nickname,
+                    content=event.content,
+                    received_at=event.recv_time,
+                    metadata={"numeric_uid": int(event.uid), "color": event.color, "room_id": self._current_room_id},
+                )
+            )
 
     @staticmethod
     def _send_binary(ws: Any, payload: bytes) -> None:
