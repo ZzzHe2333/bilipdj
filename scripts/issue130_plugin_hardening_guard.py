@@ -189,12 +189,20 @@ def test_javascript_reports_host_enforced_permissions() -> None:
         assert info["permission_enforcement"] == "host-enforced"
 
 
+def test_ui_reports_runtime_trust_model() -> None:
+    web = (ROOT / "apps/web/static/control_plugins.js").read_text(encoding="utf-8")
+    assert "Host 权限强制" in web
+    assert "Python 全信任" in web
+    assert "permission_enforcement" in web
+
+
 def main() -> None:
     tests = [
         test_signature_preserves_permission_array_order,
         test_noncanonical_signature_fields_are_rejected,
         test_installed_tree_rejects_undeclared_files_and_symlinks,
         test_javascript_reports_host_enforced_permissions,
+        test_ui_reports_runtime_trust_model,
     ]
     for test in tests:
         test()
