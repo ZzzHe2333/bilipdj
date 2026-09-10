@@ -25,6 +25,10 @@ hiddenimports = [
     "apps.server.style_option_guard",
     "apps.server.web_queue_layout",
     "apps.server.websocket_performance_guard",
+    "apps.server.danmu_plugins",
+    "apps.server.plugin_manager",
+    "apps.server.plugin_runtime_dual",
+    "apps.server.javascript_plugin_runtime",
     "apps.windows.control_panel",
     "apps.windows.update_client",
     "apps.windows.update_ui",
@@ -48,6 +52,8 @@ hiddenimports = [
     "brotli",
     "psutil",
     "google.protobuf",
+    "quickjs",
+    "_quickjs",
 ]
 
 a = Analysis(
