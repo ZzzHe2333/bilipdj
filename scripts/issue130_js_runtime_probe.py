@@ -90,14 +90,24 @@ def main() -> None:
         )
         relay = registry.create_relay("js_probe", active)
         relay.start()
-        deadline = time.monotonic() + 1.0
+        deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline and relay.get_runtime_status().get("state") not in {"running", "error"}:
             time.sleep(0.02)
-        print("JS_PROBE_STATUS", json.dumps(relay.get_runtime_status(), ensure_ascii=False, sort_keys=True))
+        status = relay.get_runtime_status()
+        print("JS_PROBE_STATUS", json.dumps(status, ensure_ascii=False, sort_keys=True))
         print("JS_PROBE_EVENTS", json.dumps(events, ensure_ascii=False))
         print("JS_PROBE_DANMU", json.dumps(danmu, ensure_ascii=False))
+        assert status.get("state") == "running", status
+        assert status.get("connected") is True, status
+        assert status.get("roomid") == "room-test", status
+        assert any(item.get("type") == "PLUGIN_TEST" for item in events), events
+        assert danmu and danmu[0].get("cmd") == "DANMU_MSG", danmu
         relay.stop()
-        relay.join(timeout=1)
+        relay.join(timeout=2)
+        stopped = relay.get_runtime_status()
+        assert stopped.get("state") == "stopped", stopped
+        assert stopped.get("connected") is False, stopped
+        print("issue #130 JavaScript runtime probe: OK")
 
 
 if __name__ == "__main__":
