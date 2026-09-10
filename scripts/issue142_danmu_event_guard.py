@@ -1,4 +1,3 @@
-\
 from __future__ import annotations
 
 import hashlib
@@ -41,6 +40,18 @@ def check_model_and_queue() -> None:
     assert first.legacy_uid() == second.legacy_uid() > 0
     assert first.identity_dict()["user_id"] == "ks:user:abc"
 
+    spaced = DanmuEvent(platform="kuaishou", user_id="space-id", username="Alice", content="  hello  ")
+    assert spaced.content == "  hello  ", "DanmuEvent must preserve message whitespace"
+    preserved_identity = DanmuEvent(
+        platform="bilibili",
+        user_id="123",
+        username="MedalUser",
+        content="medal",
+        fan_medal={"level": 0, "name": ""},
+        metadata={"identity": {"has_fan_medal": False}},
+    ).identity_dict()
+    assert preserved_identity["has_fan_medal"] is False
+
     hub = Hub()
     manager = server.QueueManager(hub, Archive(), logging.getLogger("issue142"))
     calls = []
@@ -52,10 +63,10 @@ def check_model_and_queue() -> None:
     assert public["platform"] == "kuaishou"
     assert public["identity"]["user_id"] == "ks:user:abc"
 
-    manager.process_danmu_json({"cmd": "DANMU_MSG", "info": [[], "legacy", [12345, "LegacyUser", 0], []]})
+    manager.process_danmu_json({"cmd": "DANMU_MSG", "info": [[], " legacy ", [12345, "LegacyUser", 0], []]})
     legacy = manager.get_last_danmu_event()
     assert legacy["platform"] == "bilibili"
-    assert legacy["message"] == "legacy"
+    assert legacy["message"] == " legacy "
     assert legacy["identity"]["uid"] == 12345
 
 
