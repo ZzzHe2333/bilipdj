@@ -13,6 +13,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .danmu_plugins import DanmuPlugin, PLUGIN_API_VERSION, PLUGIN_TYPE
+from .plugin_data_quota import read_plugin_data, write_plugin_data
 from .plugin_http_request import perform_plugin_http_request, prepare_plugin_http_request
 
 JS_MEMORY_LIMIT = 16 * 1024 * 1024
@@ -122,6 +123,8 @@ def _safe_data_path(data_root: str, relative: str) -> Path:
         or path.is_absolute()
         or ":" in raw
         or any(part in {"", ".", ".."} for part in path.parts)
+        or len(path.parts) > 12
+        or len(raw) > 240
     ):
         raise PermissionError("invalid plugin data path")
     reserved = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
@@ -205,19 +208,17 @@ def _javascript_worker_main(
 
     def read_data(relative: str) -> str:
         _require_permission(permissions, "filesystem_read")
-        data = _safe_data_path(data_root, str(relative)).read_bytes()
-        if len(data) > 4 * 1024 * 1024:
-            raise ValueError("plugin data file exceeds safety limit")
+        root = Path(data_root).resolve()
+        target = _safe_data_path(data_root, str(relative))
+        data = read_plugin_data(root, target)
         return base64.b64encode(data).decode("ascii")
 
     def write_data(relative: str, encoded: str) -> bool:
         _require_permission(permissions, "filesystem_write")
         data = base64.b64decode(str(encoded), validate=True)
-        if len(data) > 4 * 1024 * 1024:
-            raise ValueError("plugin data write exceeds safety limit")
+        root = Path(data_root).resolve()
         target = _safe_data_path(data_root, str(relative))
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(data)
+        write_plugin_data(root, target, data)
         return True
 
     def run_process(argv_raw: str, timeout: float) -> str:

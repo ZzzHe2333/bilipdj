@@ -28,6 +28,7 @@ from urllib.parse import urlparse
 from . import danmu_plugins as _plugin_core
 from .danmu_event import DanmuEvent
 from .danmu_plugins import PLUGIN_API_VERSION, PLUGIN_TYPE, DanmuPlugin, DanmuPluginRegistry
+from .plugin_data_quota import read_plugin_data, write_plugin_data
 
 MANIFEST_SCHEMA = 1
 PACKAGE_SUFFIX = ".bilipdj-plugin"
@@ -326,15 +327,15 @@ class PluginContext:
 
     def read_data(self, relative: str) -> bytes:
         self._require("filesystem_read")
-        return self._data_path(relative).read_bytes()
+        base = self._manager.data_root / self.plugin_id
+        return read_plugin_data(base, self._data_path(relative))
 
     def write_data(self, relative: str, data: bytes) -> None:
         self._require("filesystem_write")
         if not isinstance(data, (bytes, bytearray)):
             raise TypeError("data must be bytes")
-        target = self._data_path(relative)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(bytes(data))
+        base = self._manager.data_root / self.plugin_id
+        write_plugin_data(base, self._data_path(relative), bytes(data))
 
     def run_process(self, argv: list[str], *, timeout: float = 15.0) -> subprocess.CompletedProcess[str]:
         self._require("subprocess")

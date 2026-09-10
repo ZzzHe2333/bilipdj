@@ -396,6 +396,11 @@ def main() -> None:
     if "--backend" in sys.argv[1:]:
         _run_backend_mode()
         return
+    if "--plugin-runtime-self-test" in sys.argv[1:]:
+        from apps.windows.frozen_plugin_probe import run_frozen_plugin_probe
+
+        run_frozen_plugin_probe()
+        return
 
     root = tk.Tk()
     app = WebPortableLauncher(root)

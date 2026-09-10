@@ -214,18 +214,17 @@ def _manifest_from_release(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _load_update_manifest() -> dict[str, Any]:
     errors: list[str] = []
-    for url in (MANIFEST_URL, RAW_MANIFEST_URL):
+    for url in (MANIFEST_URL, LATEST_RELEASE_API, RAW_MANIFEST_URL):
         try:
             payload = _read_json_url(url)
+            if url == LATEST_RELEASE_API:
+                payload = _manifest_from_release(payload)
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{url}: {exc}")
             continue
         if isinstance(payload.get("packages"), dict) and str(payload.get("version", "") or "").strip():
             return payload
-    try:
-        return _manifest_from_release(_read_json_url(LATEST_RELEASE_API))
-    except Exception as exc:  # noqa: BLE001
-        errors.append(f"{LATEST_RELEASE_API}: {exc}")
+        errors.append(f"{url}: 内容不是有效更新清单")
     raise RuntimeError("无法获取更新清单：" + " | ".join(errors[-3:]))
 
 

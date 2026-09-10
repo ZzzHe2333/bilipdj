@@ -62,6 +62,11 @@ patch_control_panel_issue79(control_panel.ControlPanelApp)
 
 
 def main() -> None:
+    if "--plugin-runtime-self-test" in sys.argv[1:]:
+        from apps.windows.frozen_plugin_probe import run_frozen_plugin_probe
+
+        run_frozen_plugin_probe()
+        return
     control_panel.main()
 
 
