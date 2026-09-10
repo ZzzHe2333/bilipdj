@@ -8,12 +8,12 @@ import socket
 import subprocess
 import threading
 import time
-import urllib.request
 from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import urlparse
 
 from .danmu_plugins import DanmuPlugin, PLUGIN_API_VERSION, PLUGIN_TYPE
+from .plugin_http_request import perform_plugin_http_request, prepare_plugin_http_request
 
 JS_MEMORY_LIMIT = 16 * 1024 * 1024
 JS_TIME_LIMIT_SECONDS = 0.5
@@ -186,25 +186,14 @@ def _javascript_worker_main(
 
     def http_request(url: str, options_raw: str) -> str:
         _require_permission(permissions, "network")
-        parsed = urlparse(str(url or ""))
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-            raise ValueError("only http/https URLs are allowed")
         options = _parse_host_json(options_raw or "{}", "http options")
-        headers = options.get("headers", {}) if isinstance(options, dict) else {}
-        timeout = max(1.0, min(30.0, float(options.get("timeout", 10) if isinstance(options, dict) else 10)))
-        request = urllib.request.Request(
-            str(url),
-            headers={str(k): str(v) for k, v in headers.items()} if isinstance(headers, dict) else {},
-        )
-        _blocking(conn, "start", timeout + 1.0)
+        prepared = prepare_plugin_http_request(str(url or ""), options)
+        _blocking(conn, "start", prepared.timeout + 1.0)
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                data = response.read(4 * 1024 * 1024 + 1)
+            result = perform_plugin_http_request(prepared)
         finally:
             _blocking(conn, "end")
-        if len(data) > 4 * 1024 * 1024:
-            raise ValueError("HTTP response exceeds plugin safety limit")
-        return _json({"data_base64": base64.b64encode(data).decode("ascii")})
+        return _json(result)
 
     def read_data(relative: str) -> str:
         _require_permission(permissions, "filesystem_read")
