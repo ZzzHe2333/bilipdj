@@ -125,10 +125,13 @@ jobs:
           if (-not $tkConfig) { throw "Tk portable bundle does not contain Web assets" }
           if (-not $webConfig) { throw "Web portable bundle does not contain Web assets" }
 
-          & "dist\bilipdj\main.exe" --plugin-runtime-self-test
-          if ($LASTEXITCODE -ne 0) { throw "Tk frozen JavaScript plugin self-test failed: $LASTEXITCODE" }
-          & "dist\web-portable\bilipdj-web\BiliPDJ-Web.exe" --plugin-runtime-self-test
-          if ($LASTEXITCODE -ne 0) { throw "Web frozen JavaScript plugin self-test failed: $LASTEXITCODE" }
+          $tkExe = (Resolve-Path "dist\bilipdj\main.exe").Path
+          $tkProbe = Start-Process -FilePath $tkExe -ArgumentList "--plugin-runtime-self-test" -Wait -PassThru
+          if ($tkProbe.ExitCode -ne 0) { throw "Tk frozen JavaScript plugin self-test failed: $($tkProbe.ExitCode)" }
+
+          $webExe = (Resolve-Path "dist\web-portable\bilipdj-web\BiliPDJ-Web.exe").Path
+          $webProbe = Start-Process -FilePath $webExe -ArgumentList "--plugin-runtime-self-test" -Wait -PassThru
+          if ($webProbe.ExitCode -ne 0) { throw "Web frozen JavaScript plugin self-test failed: $($webProbe.ExitCode)" }
 
       - name: Create portable zips, checksums and update manifest
         shell: pwsh
