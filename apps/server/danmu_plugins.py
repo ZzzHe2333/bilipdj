@@ -7,13 +7,11 @@ through one registry instead of a chain of platform-specific wrappers.
 from __future__ import annotations
 
 import copy
-import functools
 import threading
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import urlparse
 
 PLUGIN_API_VERSION = 1
 PLUGIN_TYPE = "danmu_source"
@@ -327,54 +325,10 @@ def install_danmu_plugin_system(server_module: Any, issue79_module: Any = None) 
         return registry
 
 
-def install_danmu_plugin_api(server_module: Any, issue79_module: Any = None) -> bool:
-    """Expose local-only plugin metadata after all handler guards are installed."""
-    handler_class = getattr(server_module, "ApiHandler", None)
-    registry = getattr(server_module, "danmu_plugin_registry", None)
-    if not isinstance(handler_class, type) or not isinstance(registry, DanmuPluginRegistry):
-        return False
-    original_get = getattr(handler_class, "do_GET", None)
-    if not callable(original_get) or bool(getattr(original_get, "_bilipdj_plugin_api", False)):
-        return True
-
-    @functools.wraps(original_get)
-    def do_GET_with_plugins(self: Any) -> None:  # noqa: N802
-        path = urlparse(self.path).path
-        if path not in {"/api/plugins/danmu", "/api/danmu/plugins"}:
-            return original_get(self)
-        if not self._require_loopback():
-            return
-        active: list[str] = []
-        if issue79_module is not None:
-            try:
-                active = list(
-                    issue79_module._normalize_active_platforms(
-                        server_module,
-                        getattr(self.server, "runtime_config", {}),
-                    )
-                )
-            except Exception:
-                active = []
-        self._write_json(
-            {
-                "status": "ok",
-                "plugin_api": PLUGIN_API_VERSION,
-                "type": PLUGIN_TYPE,
-                "plugins": registry.list_public(),
-                "active": active,
-            }
-        )
-
-    do_GET_with_plugins._bilipdj_plugin_api = True  # type: ignore[attr-defined]
-    handler_class.do_GET = do_GET_with_plugins
-    return True
-
-
 __all__ = [
     "PLUGIN_API_VERSION",
     "PLUGIN_TYPE",
     "DanmuPlugin",
     "DanmuPluginRegistry",
     "install_danmu_plugin_system",
-    "install_danmu_plugin_api",
 ]
