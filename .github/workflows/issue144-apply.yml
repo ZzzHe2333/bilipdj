@@ -1,0 +1,43 @@
+name: Apply Issue 144 release audit fixes
+
+on:
+  push:
+    branches: [release/3.0.0-audit-144]
+    paths:
+      - 'scripts/issue144_apply.py'
+      - '.github/workflows/issue144-apply.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/3.0.0-audit-144
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply exact audit patch
+        run: python scripts/issue144_apply.py
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Validate audit fixes before commit
+        run: |
+          python -m py_compile apps/server/plugin_data_quota.py apps/server/plugin_manager.py apps/server/javascript_plugin_runtime.py apps/server/issue79_guard.py apps/windows/update_client.py apps/windows/frozen_plugin_probe.py apps/windows/main.py apps/web/portable_launcher.py scripts/issue144_release_audit_guard.py
+          python scripts/issue144_release_audit_guard.py
+          python scripts/issue130_js_runtime_probe.py
+          python scripts/issue136_plugin_config_guard.py
+          python scripts/issue140_plugin_http_request_guard.py
+          python scripts/issue142_danmu_event_guard.py
+      - name: Commit validated audit fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git restore --source=HEAD -- scripts/issue144_apply.py .github/workflows/issue144-apply.yml
+          git add -A
+          git diff --cached --check
+          git commit -m "fix: harden plugin data and update fallback before 3.0.0 (#144)"
+          git push origin HEAD:release/3.0.0-audit-144
