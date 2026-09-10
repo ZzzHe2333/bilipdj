@@ -150,6 +150,12 @@ _plugin_manager.install_plugin_manager(server, _issue79_guard)
 _plugin_mutation_guard.install_plugin_mutation_guard(_plugin_manager)
 _issue79_guard.install_issue79_guard(server)
 
+# Issue #136 must install before the generic security wrappers so the final
+# ApiHandler keeps their hardened marker/behavior. Its JSON POST route also calls
+# the plugin-management request guard directly.
+_plugin_config_schema.install_plugin_config_schema(server, _plugin_manager, _plugin_api_security_guard)
+_plugin_config_web.install_plugin_config_web(server, _plugin_manager)
+
 _appearance_guard.install_appearance_guard(server)
 _issue123_guard.install_issue123_guard(
     server,
@@ -159,10 +165,8 @@ _issue123_guard.install_issue123_guard(
 )
 _security_hardening_guard.install_security_hardening(server)
 
-# Keep this outermost for the original plugin-management routes.
+# Keep this outermost: original plugin-management POST requests must pass the
+# browser origin/content-type/body-size safety boundary before their handlers.
 _plugin_api_security_guard.install_plugin_api_security_guard(server, _plugin_manager)
-# Issue #136 adds guarded dynamic config APIs and a server-rendered settings page.
-_plugin_config_schema.install_plugin_config_schema(server, _plugin_manager, _plugin_api_security_guard)
-_plugin_config_web.install_plugin_config_web(server, _plugin_manager)
 
 __all__ = ["REPO_ROOT", "configure_runtime_paths", "server"]
