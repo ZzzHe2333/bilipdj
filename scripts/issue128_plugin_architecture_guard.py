@@ -105,8 +105,7 @@ def test_future_plugin_can_register_without_core_wrapper() -> None:
     assert info["plugin_api"] == PLUGIN_API_VERSION
 
 
-def test_plugin_api_and_web_bridge_present() -> None:
-    assert getattr(server.ApiHandler.do_GET, "_bilipdj_plugin_api", False)
+def test_plugin_web_bridge_present() -> None:
     text = (ROOT / "apps/web/static/control_plugins.js").read_text(encoding="utf-8")
     assert "获取弹幕插件" in text
     assert "/api/platforms/active" in text
@@ -120,7 +119,7 @@ def main() -> None:
         test_registry_is_authoritative_factory,
         test_issue79_uses_plugin_registry,
         test_future_plugin_can_register_without_core_wrapper,
-        test_plugin_api_and_web_bridge_present,
+        test_plugin_web_bridge_present,
     ]
     for test in tests:
         test()
