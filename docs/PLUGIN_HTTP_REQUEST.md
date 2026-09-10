@@ -96,7 +96,7 @@ DNS 失败、连接失败、TLS/网络错误、超时等传输层错误仍会作
 
 - 方法仅允许 `GET`、`POST`。
 - GET 不允许 body。
-- 请求 body 最大 1 MiB。
+- 请求 body 最大 128 KiB；该值特意低于 1 MiB Host JSON 信封限制，确保 Base64 和 JSON 转义后仍有安全余量。
 - 响应 body 最大 4 MiB。
 - 最多 64 个请求头。
 - 单个请求头名称最大 128 UTF-8 字节。
