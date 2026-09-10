@@ -178,7 +178,7 @@
           <label class="wide"><input id="plugin-allow-unsigned" type="checkbox"> 允许安装未签名的本地插件（需要你明确确认来源可信）</label>
         </div>
         <div class="toolbar"><button id="plugin-install" class="button">安装插件</button><button id="plugin-manager-refresh" class="button ghost">刷新</button></div>
-        <p class="hint">第三方 Python 插件在当前版本中与 BiliPDJ 同进程运行。权限清单用于安装审批和 Host API 能力控制，不等同于操作系统沙箱；未知来源插件不要启用。</p>
+        <p class="hint">JavaScript 插件在独立 QuickJS 工作进程中运行，权限由 Host 强制执行；第三方 Python 插件与 BiliPDJ 同进程运行，属于全信任代码。未知来源插件不要启用。</p>
         <div id="plugin-manager-status" class="status"></div>
         <div id="plugin-manager-list" style="display:grid;gap:10px;margin-top:14px"></div>
       </div>
@@ -226,7 +226,13 @@
       details.className = 'hint';
       const permissionText = Array.isArray(plugin.permissions) && plugin.permissions.length ? plugin.permissions.join(', ') : '无';
       const integrity = plugin.verified === false ? '校验失败' : '已校验';
-      details.textContent = `${plugin.source === 'builtin' ? '内置' : '外部'} · ${plugin.id || ''} · 平台 ${plugin.platform || ''} · v${plugin.version || 'builtin'} · ${integrity} · 权限：${permissionText}`;
+      const runtime = plugin.runtime ? ` · 运行时 ${plugin.runtime}` : '';
+      const enforcement = plugin.permission_enforcement === 'host-enforced'
+        ? 'Host 权限强制'
+        : plugin.permission_enforcement === 'python-full-trust'
+          ? 'Python 全信任'
+          : '';
+      details.textContent = `${plugin.source === 'builtin' ? '内置' : '外部'} · ${plugin.id || ''} · 平台 ${plugin.platform || ''} · v${plugin.version || 'builtin'}${runtime} · ${integrity}${enforcement ? ` · ${enforcement}` : ''} · 权限：${permissionText}`;
       card.append(title, details);
       if (plugin.signature_status) {
         const sig = document.createElement('div');
@@ -329,11 +335,11 @@
     const id = String(button.dataset.pluginId || '');
     const action = String(button.dataset.pluginAction || '');
     if (!id || !action) return;
-    if (action === 'uninstall' && !confirm(`确定卸载插件 ${id}？插件数据目录会保留。`)) return;
-    setManagerStatus(`正在执行 ${action}：${id}……`);
+    if (action === 'uninstall' && !window.confirm(`确定卸载插件 ${id}？插件自己的数据目录会保留。`)) return;
+    setManagerStatus(`正在${action === 'enable' ? '启用' : action === 'disable' ? '禁用' : action === 'verify' ? '校验' : '卸载'} ${id}……`);
     try {
       await post(`/api/plugins/${action}`, { id });
-      setManagerStatus(`${id}：${action} 完成。`);
+      setManagerStatus(`${id} 操作完成。`);
       await refreshManager();
     } catch (error) {
       setManagerStatus(`${id} 操作失败：${error.message}`, false);
@@ -343,12 +349,12 @@
   async function addTrustedKey() {
     const keyId = String($('plugin-key-id')?.value || '').trim();
     const publicKey = String($('plugin-key-value')?.value || '').trim();
-    if (!keyId || !publicKey) { setManagerStatus('Key ID 和公钥都不能为空。', false); return; }
+    if (!keyId || !publicKey) { setManagerStatus('Key ID 和公钥不能为空。', false); return; }
     try {
       await post('/api/plugins/trusted-keys', { key_id: keyId, public_key: publicKey });
-      if ($('plugin-key-id')) $('plugin-key-id').value = '';
-      if ($('plugin-key-value')) $('plugin-key-value').value = '';
       setManagerStatus(`可信公钥 ${keyId} 已保存。`);
+      $('plugin-key-id').value = '';
+      $('plugin-key-value').value = '';
       await refreshManager();
     } catch (error) {
       setManagerStatus(`保存公钥失败：${error.message}`, false);
@@ -359,7 +365,7 @@
     const button = event.target.closest('[data-key-action="delete"]');
     if (!button) return;
     const keyId = String(button.dataset.keyId || '');
-    if (!keyId || !confirm(`删除可信公钥 ${keyId}？使用该密钥签名的插件下次校验会失败。`)) return;
+    if (!keyId || !window.confirm(`删除可信公钥 ${keyId}？依赖该公钥的签名插件会变为不可用。`)) return;
     try {
       await post('/api/plugins/trusted-keys/delete', { key_id: keyId });
       setManagerStatus(`可信公钥 ${keyId} 已删除。`);
@@ -371,23 +377,35 @@
 
   function boot() {
     renamePluginSettings();
-    bindToolbar();
     ensureManagerPane();
+    bindToolbar();
     refreshPlugins();
     window.setTimeout(() => {
       renamePluginSettings();
-      bindToolbar();
       ensureManagerPane();
+      bindToolbar();
       refreshPlugins();
     }, 80);
     document.querySelector('[data-settings="active-platforms"]')?.addEventListener('click', () => {
-      window.setTimeout(() => { renamePluginSettings(); bindToolbar(); refreshPlugins(); }, 30);
+      window.setTimeout(() => {
+        renamePluginSettings();
+        ensureManagerPane();
+        bindToolbar();
+        refreshPlugins();
+      }, 30);
     });
     document.querySelector('[data-view="settings"]')?.addEventListener('click', () => {
-      window.setTimeout(() => { renamePluginSettings(); bindToolbar(); ensureManagerPane(); }, 60);
+      window.setTimeout(() => {
+        renamePluginSettings();
+        ensureManagerPane();
+        bindToolbar();
+      }, 60);
     });
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
-  else boot();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot, { once: true });
+  } else {
+    boot();
+  }
 })();
