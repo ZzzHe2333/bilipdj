@@ -151,7 +151,8 @@ def validate_config_schema(pm: Any, schema: Any, permissions: Any = ()) -> None:
 
 
 def _schema(record: Any) -> dict[str, Any] | None:
-    value = record.manifest.get("config_schema") if isinstance(record.manifest, dict) else None
+    manifest = getattr(record, "manifest", None)
+    value = manifest.get("config_schema") if isinstance(manifest, dict) else None
     return value if isinstance(value, dict) else None
 
 
@@ -265,9 +266,11 @@ def install_plugin_config_schema(server_module: Any, pm: Any, security_guard: An
                 "secret_fields": secret_fields,
             }
 
-    def save_plugin_config(self: Any, plugin_id: str, values: Any, unset: Any = ()) -> dict[str, Any]:
+    def save_plugin_config(self: Any, plugin_id: str, values: Any, unset: Any = None) -> dict[str, Any]:
         if not isinstance(values, dict):
             _fail(pm, "plugin config values must be an object")
+        if unset is None:
+            unset = []
         if not isinstance(unset, list) or any(not isinstance(item, str) for item in unset):
             _fail(pm, "plugin config unset must be a string array")
         with self._lock:
