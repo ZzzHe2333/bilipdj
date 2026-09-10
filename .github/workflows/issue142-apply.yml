@@ -5,6 +5,7 @@ on:
     branches: [refactor/danmu-event-142]
     paths:
       - 'scripts/issue142_apply.py'
+      - 'scripts/issue142_fix_apply.py'
       - '.github/workflows/issue142-apply.yml'
 
 permissions:
@@ -20,6 +21,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Repair staging script delimiter
+        run: python scripts/issue142_fix_apply.py
       - name: Apply exact source refactor
         run: python scripts/issue142_apply.py
       - name: Install project dependencies
