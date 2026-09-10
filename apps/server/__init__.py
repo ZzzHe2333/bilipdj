@@ -108,6 +108,7 @@ from . import danmu_plugins as _danmu_plugins  # noqa: E402
 from . import plugin_manager as _plugin_manager  # noqa: E402
 from . import plugin_runtime_dual as _plugin_runtime_dual  # noqa: E402
 from . import plugin_secret_guard as _plugin_secret_guard  # noqa: E402
+from . import plugin_mutation_guard as _plugin_mutation_guard  # noqa: E402
 from . import plugin_api_security_guard as _plugin_api_security_guard  # noqa: E402
 from . import appearance_guard as _appearance_guard  # noqa: E402
 from . import issue123_guard as _issue123_guard  # noqa: E402
@@ -144,6 +145,7 @@ _danmu_plugins.install_danmu_plugin_system(server, _issue79_guard)
 _plugin_runtime_dual.install_dual_runtime_support()
 _plugin_secret_guard.install_plugin_secret_guard(_plugin_manager)
 _plugin_manager.install_plugin_manager(server, _issue79_guard)
+_plugin_mutation_guard.install_plugin_mutation_guard(_plugin_manager)
 _issue79_guard.install_issue79_guard(server)
 
 _appearance_guard.install_appearance_guard(server)
