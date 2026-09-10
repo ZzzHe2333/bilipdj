@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import multiprocessing as mp
 import os
 import sys
 from pathlib import Path
+
+if __name__ == "__main__":
+    # Required for process-isolated JavaScript plugins in frozen launchers.
+    mp.freeze_support()
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
