@@ -21,8 +21,17 @@ HTTP_ENDPOINTS = [
     ep("GET", "/api/config", "读取完整运行配置", response="完整配置 JSON，包含平台、权限、开关、样式等。"),
     ep("POST", "/api/config", "保存完整运行配置", body='{"platform":"bilibili","bilibili":{"roomid":3049445,"uid":123,"cookie":"..."}}', response='{"status":"ok",...}', notes="高级接口；建议先 GET 后按原结构修改。"),
     ep("GET", "/api/runtime-status", "读取后端/弹幕连接状态", response="平台、房间、连接状态、最近事件时间等。", local=False),
-    ep("GET", "/api/platforms/active", "读取已激活弹幕平台", response='{"status":"ok","supported":["bilibili","douyin"],"active":["bilibili","douyin"],"one_room_per_platform":true,"runtime":{...}}', notes="当前每个平台最多监听一个直播间。"),
-    ep("POST", "/api/platforms/active", "保存已激活弹幕平台并重连", body='{"active":["bilibili","douyin"]}', response='{"status":"ok","active":["bilibili","douyin"],"runtime":{...}}', notes="多个平台共享同一个后端队列；同一平台多个直播间暂不支持。"),
+    ep("GET", "/api/platforms/active", "读取已激活弹幕平台", response='{"status":"ok","supported":[...],"active":[...],"plugins":[...],"plugin_api":1,"runtime":{...}}', notes="supported/plugins 来自 Plugin API v1 注册表；当前每个平台最多监听一个直播间。"),
+    ep("POST", "/api/platforms/active", "保存已激活弹幕平台并重连", body='{"active":["bilibili","douyin"]}', response='{"status":"ok","active":[...],"plugins":[...],"runtime":{...}}', notes="多个获取弹幕插件共享同一个后端队列；同一平台多个直播间暂不支持。"),
+    ep("GET", "/api/plugins/manage", "读取插件管理器状态", response='{"status":"ok","plugin_api":1,"bilipdj_version":"2.0.4","supported_permissions":[...],"plugins":[...]}', notes="仅本机。返回内置/外部插件、启用状态、权限、签名与完整性状态。"),
+    ep("POST", "/api/plugins/install", "安装本地 .bilipdj-plugin", body='{"filename":"kuaishou.bilipdj-plugin","data_base64":"...","allow_unsigned":false}', response='{"status":"ok","plugin":{...}}', notes="仅本机。插件包最大 1 MiB；安装阶段不执行代码。未签名包必须显式 allow_unsigned=true。"),
+    ep("POST", "/api/plugins/enable", "启用外部插件", body='{"id":"example.kuaishou.danmu"}', response='{"status":"ok","plugin":{...}}', notes="启用时才导入第三方 Python 代码；启用后会重新同步平台列表并重连。"),
+    ep("POST", "/api/plugins/disable", "禁用外部插件", body='{"id":"example.kuaishou.danmu"}', response='{"status":"ok","plugin":{...}}'),
+    ep("POST", "/api/plugins/uninstall", "卸载外部插件", body='{"id":"example.kuaishou.danmu"}', response='{"status":"ok","id":"example.kuaishou.danmu"}', notes="插件代码目录会删除，独立数据目录保留。"),
+    ep("POST", "/api/plugins/verify", "重新校验插件完整性/签名", body='{"id":"example.kuaishou.danmu"}', response='{"status":"ok","verified":true,"package_sha256":"...","signature_status":"..."}'),
+    ep("GET", "/api/plugins/trusted-keys", "列出可信插件签名公钥", response='{"status":"ok","keys":[{"key_id":"publisher.example","algorithm":"ed25519"}]}'),
+    ep("POST", "/api/plugins/trusted-keys", "添加或更新可信 Ed25519 公钥", body='{"key_id":"publisher.example","public_key":"BASE64_32_BYTE_KEY"}', response='{"status":"ok","keys":[...]}'),
+    ep("POST", "/api/plugins/trusted-keys/delete", "删除可信插件签名公钥", body='{"key_id":"publisher.example"}', response='{"status":"ok","keys":[...]}'),
     ep("GET", "/api/danmu/identity/latest", "读取最近一条弹幕身份事件", response='{"status":"ok","event":{...}}'),
     ep("GET", "/api/gifts/state", "读取 B站礼物/插队状态", response='{"status":"ok",...}'),
     ep("GET", "/api/queue/state", "读取当前队列", response='{"queue":[...],"entries":[...],"size":1}', local=False),
@@ -155,7 +164,7 @@ def render_readme() -> str:
 - `http.md`：HTTP/JSON 接口、参数、curl 示例和返回说明。
 - `websocket.md`：WebSocket 入口与常见消息。
 
-安全规则：管理配置、登录 Cookie、备份、权限、开关、队列修改、主题/配置导入导出、控制台日志/性能等接口只允许本机访问。只读队列/运行状态/WebSocket 是否可从 LAN 访问取决于 Server 的监听配置和运行时安全保护。
+安全规则：管理配置、登录 Cookie、插件安装/签名信任、备份、权限、开关、队列修改、主题/配置导入导出、控制台日志/性能等接口只允许本机访问。只读队列/运行状态/WebSocket 是否可从 LAN 访问取决于 Server 的监听配置和运行时安全保护。
 
 接口发生变化后重新运行生成器；测试会检查 Server 源码中的开放路由是否存在未登记项。
 """
