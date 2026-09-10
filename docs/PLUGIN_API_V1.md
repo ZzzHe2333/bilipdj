@@ -70,6 +70,8 @@ JavaScript 示例：
 
 可选 `max_bilipdj_version`。`files` 必须列出除 `manifest.json` 外的全部包内文件，且每项必须是 64 位十六进制 SHA-256。
 
+为保证签名验证没有歧义，`id`、`platform`、`entry`、`files` 路径和权限名必须直接使用规范形式：ID/平台使用小写，路径使用 `/`，字段前后不能带空白。BiliPDJ 不会在签名验证前偷偷排序权限数组；`permissions` 的原始数组顺序属于签名内容的一部分。
+
 ## 权限
 
 Plugin API v1 识别以下权限：
@@ -84,11 +86,13 @@ Plugin API v1 识别以下权限：
 
 ### Python 权限边界
 
-Python 插件拿到的是 `PluginContext`，不会拿到完整 BiliPDJ Server 对象；Host API 会检查 manifest 声明的权限。但是 Python 本身仍是原生代码运行时，能自行 import Python/系统模块，因此 **Plugin API 权限不是操作系统级 Python 沙箱**。只应启用来源可信或签名可信的 Python 插件。
+Python 插件拿到的是 `PluginContext`，不会拿到完整 BiliPDJ Server 对象；Host API 会检查 manifest 声明的权限。但是 Python 本身仍是原生代码运行时，能自行 import Python/系统模块，因此 **Plugin API 权限不是操作系统级 Python 沙箱**。管理接口会把这类插件标记为 `permission_enforcement=python-full-trust`。只应启用来源可信或签名可信的 Python 插件。
 
 ### JavaScript 权限边界
 
-JavaScript 插件由内嵌 QuickJS 执行，不依赖系统 Node.js。默认没有 Node/浏览器文件系统、网络、进程 API，只能通过 BiliPDJ 注入的 Host API 使用已声明能力。运行时同时设置内存、CPU 时间和栈大小限制。
+JavaScript 插件由内嵌 QuickJS 执行，不依赖系统 Node.js。默认没有 Node/浏览器文件系统、网络、进程 API，只能通过 BiliPDJ 提供的 Host API 使用 manifest 已声明的能力，管理接口会标记为 `permission_enforcement=host-enforced`。
+
+JavaScript 运行在独立工作进程中。QuickJS 设置内存和栈上限；父进程同时对每次 JavaScript 执行阶段设置 watchdog。默认单次纯 JS 执行超过约 0.5 秒会终止插件工作进程并把该插件标记为错误。HTTP、WebSocket 接收、`sleep()`、子进程等明确的阻塞 Host API 会按各自受限超时时间临时延长 watchdog，因此正常网络等待不会被误杀。插件崩溃、死循环或超时不会直接拖垮 BiliPDJ 主后端。
 
 ## Python 入口
 
@@ -132,7 +136,7 @@ function createRelay(config, host) {
     },
 
     tick() {
-      // 非阻塞/短时处理。可在这里轮询 WebSocket 或 HTTP。
+      // 保持单次纯 JS 处理很短；网络等待请使用 Host API。
     },
 
     stop() {
@@ -149,7 +153,7 @@ function createRelay(config, host) {
 }
 ```
 
-BiliPDJ 在独立插件线程中创建 QuickJS Context，并周期调用 `tick()`。每次 JS 执行都受到 QuickJS 的 CPU/内存/栈限制。
+BiliPDJ 在独立子进程里创建 QuickJS Context，并周期调用 `tick()`。每次纯 JavaScript 执行由父进程 watchdog 限时；QuickJS Context 同时有内存和栈限制。Windows/Web 便携入口已启用 `multiprocessing.freeze_support()`，不要求用户单独安装 Node.js 或额外启动器。
 
 ### JavaScript Host API
 
@@ -218,8 +222,9 @@ context.process_danmu_json(payload)
 3. 计算完整 `.bilipdj-plugin` 包 SHA-256。
 4. 保存原始插件包快照。
 5. 后续加载/手动校验时重新验证文件，并要求已安装 `manifest.json` 与原始包中的 manifest 完全一致。
+6. 检查已安装插件目录，只允许 manifest 声明文件和 BiliPDJ 自己的安装元数据；额外塞入的未声明文件或符号链接会让插件失效。Python 运行产生的 `__pycache__` 会在重新校验时清理。
 
-因此修改入口文件、哈希清单、权限或 manifest 都会使插件失效。
+因此修改入口文件、增加额外代码、替换文件、添加符号链接、修改哈希清单、权限或 manifest 都会使插件失效。
 
 ## Ed25519 签名
 
@@ -241,9 +246,9 @@ ensure_ascii=false
 separators=(",", ":")
 ```
 
-然后直接对这些字节做 Ed25519 签名。
+然后直接对这些字节做 Ed25519 签名。数组顺序保持原样，因此 `permissions`、`capabilities` 等数组的顺序也是签名内容的一部分；发布者应先生成最终 manifest，再签名，不要依赖 BiliPDJ 自动规范化字段。
 
-签名插件必须使用插件管理器中已登记的可信 `key_id`，签名无效或公钥不可信会拒绝安装/加载。
+签名插件必须使用插件管理器中已登记的可信 `key_id`，签名无效或公钥不可信会拒绝安装/加载。删除可信公钥后，重新发现插件时相应签名插件会失去可用状态并从平台注册表移除。
 
 未签名本地插件只能在安装时显式勾选“允许安装未签名的本地插件”，并且仍然经过路径、版本、权限、哈希和完整性校验。
 
@@ -265,12 +270,12 @@ separators=(",", ":")
 
 ```text
 重新校验完整性
-→ 加载 Python / QuickJS 运行时
+→ Python：同进程全信任运行时 / JavaScript：独立 QuickJS 工作进程
 → 注册 DanmuPluginRegistry
 → /api/platforms/active 自动出现平台
 ```
 
-禁用/卸载会从注册表移除插件；通过管理 API 操作时会同步现有 active_platforms 并触发 Relay 重连。
+禁用/卸载会从注册表移除插件；通过管理 API 操作时会同步现有 `active_platforms` 并触发 Relay 重连。
 
 ## 管理 API
 
