@@ -1,9 +1,11 @@
-"""Dual Python/JavaScript runtime support for Issue #130 plugin packages."""
+"""Dual Python/JavaScript runtime support and integrity hardening for Issue #130."""
 from __future__ import annotations
 
 import copy
+import os
+import shutil
 import zipfile
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from . import plugin_manager as pm
@@ -13,6 +15,7 @@ _RESERVED_PLUGIN_IDS = frozenset({"data", "state", "trusted_keys", "plugins"})
 _WINDOWS_RESERVED = frozenset(
     {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
 )
+_INTERNAL_INSTALLED_FILES = frozenset({"manifest.json", ".install.json", ".package.bilipdj-plugin"})
 
 
 def _safe_member_name(name: str) -> str:
@@ -80,9 +83,63 @@ def _validate_javascript_manifest(manifest: dict[str, Any], current_version: str
     normalized["platform"] = platform
     normalized["runtime"] = "javascript"
     normalized["entry"] = entry_path
-    normalized["permissions"] = sorted(permission_set)
+    normalized["permissions"] = list(permissions)
     normalized["files"] = files
     return normalized
+
+
+def _require_canonical_manifest(manifest: dict[str, Any], normalized: dict[str, Any]) -> None:
+    raw_id = str(manifest.get("id", "") or "")
+    raw_platform = str(manifest.get("platform", "") or "")
+    raw_entry = str(manifest.get("entry", "") or "")
+    if raw_id != raw_id.strip() or raw_id != raw_id.lower() or raw_id != normalized.get("id"):
+        raise pm.PluginError("plugin id must already be lowercase canonical text")
+    if raw_platform != raw_platform.strip() or raw_platform != raw_platform.lower() or raw_platform != normalized.get("platform"):
+        raise pm.PluginError("platform id must already be lowercase canonical text")
+    if raw_entry != raw_entry.strip():
+        raise pm.PluginError("entry must not contain surrounding whitespace")
+
+    runtime = str(normalized.get("runtime", "") or "")
+    entry_path = raw_entry if runtime == "javascript" else raw_entry.split(":", 1)[0]
+    if pm._safe_member_name(entry_path) != entry_path:
+        raise pm.PluginError("entry path must use canonical forward-slash form")
+
+    permissions = manifest.get("permissions", [])
+    if not isinstance(permissions, list):
+        raise pm.PluginError("permissions must be a string array")
+    if any(not isinstance(item, str) or not item or item != item.strip() for item in permissions):
+        raise pm.PluginError("permissions must use canonical non-empty names without whitespace")
+    # Preserve the signed array order. Validation is not allowed to silently sort
+    # signature-covered data before Ed25519 verification.
+    normalized["permissions"] = list(permissions)
+
+    raw_files = manifest.get("files", {})
+    if not isinstance(raw_files, dict):
+        raise pm.PluginError("manifest.files must be an object")
+    for raw_name in raw_files:
+        text = str(raw_name)
+        if pm._safe_member_name(text) != text:
+            raise pm.PluginError("manifest file paths must use canonical forward-slash form")
+
+
+def _verify_installed_tree(root: Path, manifest: dict[str, Any]) -> None:
+    allowed = set(str(name) for name in manifest.get("files", {})) | set(_INTERNAL_INSTALLED_FILES)
+    for current, dirs, files in os.walk(root, topdown=True, followlinks=False):
+        current_path = Path(current)
+        for dirname in list(dirs):
+            path = current_path / dirname
+            if path.is_symlink():
+                raise pm.PluginError(f"installed plugin contains symbolic link: {path.relative_to(root).as_posix()}")
+            if dirname == "__pycache__":
+                shutil.rmtree(path, ignore_errors=True)
+                dirs.remove(dirname)
+        for filename in files:
+            path = current_path / filename
+            relative = path.relative_to(root).as_posix()
+            if path.is_symlink():
+                raise pm.PluginError(f"installed plugin contains symbolic link: {relative}")
+            if relative not in allowed:
+                raise pm.PluginError(f"installed plugin contains undeclared file: {relative}")
 
 
 def install_dual_runtime_support() -> None:
@@ -107,9 +164,11 @@ def install_dual_runtime_support() -> None:
         if plugin_id in _RESERVED_PLUGIN_IDS:
             raise pm.PluginError("invalid/reserved plugin id")
         if runtime == "javascript":
-            return _validate_javascript_manifest(manifest, current_version)
-        normalized = original_validate(manifest, current_version)
-        normalized["runtime"] = "python"
+            normalized = _validate_javascript_manifest(manifest, current_version)
+        else:
+            normalized = original_validate(manifest, current_version)
+            normalized["runtime"] = "python"
+        _require_canonical_manifest(manifest, normalized)
         return normalized
 
     def create_context(self: Any, active_server: Any, record: Any) -> Any:
@@ -136,11 +195,14 @@ def install_dual_runtime_support() -> None:
             raise pm.PluginError("installed manifest is missing") from exc
         if installed_manifest != packaged_manifest:
             raise pm.PluginError("installed manifest integrity check failed")
+        _verify_installed_tree(Path(root), manifest)
         return result
 
     def public_info(self: Any) -> dict[str, Any]:
         payload = original_public_info(self)
-        payload["runtime"] = str(self.manifest.get("runtime", "python") or "python")
+        runtime = str(self.manifest.get("runtime", "python") or "python")
+        payload["runtime"] = runtime
+        payload["permission_enforcement"] = "host-enforced" if runtime == "javascript" else "python-full-trust"
         return payload
 
     pm.validate_manifest = validate_manifest
