@@ -105,6 +105,7 @@ from . import huya_runtime_guard as _huya_runtime_guard  # noqa: E402
 from . import youtube_runtime_guard as _youtube_runtime_guard  # noqa: E402
 from . import twitch_runtime_guard as _twitch_runtime_guard  # noqa: E402
 from . import danmu_plugins as _danmu_plugins  # noqa: E402
+from . import plugin_manager as _plugin_manager  # noqa: E402
 from . import appearance_guard as _appearance_guard  # noqa: E402
 from . import issue123_guard as _issue123_guard  # noqa: E402
 from . import security_hardening_guard as _security_hardening_guard  # noqa: E402
@@ -137,6 +138,7 @@ _huya_runtime_guard.install_huya_runtime_guard(server, _issue79_guard)
 _youtube_runtime_guard.install_youtube_runtime_guard(server, _issue79_guard)
 _twitch_runtime_guard.install_twitch_runtime_guard(server, _issue79_guard)
 _danmu_plugins.install_danmu_plugin_system(server, _issue79_guard)
+_plugin_manager.install_plugin_manager(server, _issue79_guard)
 _issue79_guard.install_issue79_guard(server)
 
 _appearance_guard.install_appearance_guard(server)
