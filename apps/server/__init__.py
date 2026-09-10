@@ -110,6 +110,8 @@ from . import plugin_runtime_dual as _plugin_runtime_dual  # noqa: E402
 from . import plugin_secret_guard as _plugin_secret_guard  # noqa: E402
 from . import plugin_mutation_guard as _plugin_mutation_guard  # noqa: E402
 from . import plugin_api_security_guard as _plugin_api_security_guard  # noqa: E402
+from . import plugin_config_schema as _plugin_config_schema  # noqa: E402
+from . import plugin_config_web as _plugin_config_web  # noqa: E402
 from . import appearance_guard as _appearance_guard  # noqa: E402
 from . import issue123_guard as _issue123_guard  # noqa: E402
 from . import security_hardening_guard as _security_hardening_guard  # noqa: E402
@@ -145,8 +147,14 @@ _danmu_plugins.install_danmu_plugin_system(server, _issue79_guard)
 _plugin_runtime_dual.install_dual_runtime_support()
 _plugin_secret_guard.install_plugin_secret_guard(_plugin_manager)
 _plugin_manager.install_plugin_manager(server, _issue79_guard)
-_plugin_mutation_guard.install_plugin_mutation_guard(_plugin_manager)
 _issue79_guard.install_issue79_guard(server)
+
+# Issue #136 defines the final config-aware PluginManager mutation methods first.
+# Issue #134 then wraps those final methods with the shared RLock so config-aware
+# enable/uninstall cannot bypass the existing mutation serialization guarantee.
+_plugin_config_schema.install_plugin_config_schema(server, _plugin_manager, _plugin_api_security_guard)
+_plugin_mutation_guard.install_plugin_mutation_guard(_plugin_manager)
+_plugin_config_web.install_plugin_config_web(server, _plugin_manager)
 
 _appearance_guard.install_appearance_guard(server)
 _issue123_guard.install_issue123_guard(
@@ -157,8 +165,8 @@ _issue123_guard.install_issue123_guard(
 )
 _security_hardening_guard.install_security_hardening(server)
 
-# Keep this outermost: all plugin-management POST requests must pass the browser
-# origin/content-type/body-size safety boundary before any management handler.
+# Keep this outermost: original plugin-management POST requests must pass the
+# browser origin/content-type/body-size safety boundary before their handlers.
 _plugin_api_security_guard.install_plugin_api_security_guard(server, _plugin_manager)
 
 __all__ = ["REPO_ROOT", "configure_runtime_paths", "server"]
