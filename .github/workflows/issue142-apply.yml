@@ -1,0 +1,39 @@
+name: Apply Issue 142 source refactor
+
+on:
+  push:
+    branches: [refactor/danmu-event-142]
+    paths:
+      - 'scripts/issue142_apply.py'
+      - '.github/workflows/issue142-apply.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refactor/danmu-event-142
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply exact source refactor
+        run: python scripts/issue142_apply.py
+      - name: Install project dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Validate generated sources before commit
+        run: |
+          python -m py_compile apps/server/danmu_event.py apps/server/server.py apps/server/douyin_protocol.py apps/server/huya_protocol.py apps/server/twitch_protocol.py apps/server/youtube_protocol.py apps/server/plugin_manager.py apps/server/javascript_plugin_runtime.py scripts/issue142_danmu_event_guard.py
+          python scripts/issue142_danmu_event_guard.py
+          python scripts/issue130_js_runtime_probe.py
+      - name: Commit generated refactor
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "refactor: introduce platform-independent DanmuEvent (#142)"
+          git push origin HEAD:refactor/danmu-event-142
