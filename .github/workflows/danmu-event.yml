@@ -1,0 +1,53 @@
+name: Validate Platform-independent DanmuEvent
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'apps/server/danmu_event.py'
+      - 'apps/server/server.py'
+      - 'apps/server/douyin_protocol.py'
+      - 'apps/server/huya_protocol.py'
+      - 'apps/server/twitch_protocol.py'
+      - 'apps/server/youtube_protocol.py'
+      - 'apps/server/plugin_manager.py'
+      - 'apps/server/javascript_plugin_runtime.py'
+      - 'scripts/issue142_danmu_event_guard.py'
+      - 'docs/PLUGIN_API_V1.md'
+      - '.github/workflows/danmu-event.yml'
+      - 'requirements.txt'
+  push:
+    branches: [now]
+    paths:
+      - 'apps/server/danmu_event.py'
+      - 'apps/server/server.py'
+      - 'apps/server/douyin_protocol.py'
+      - 'apps/server/huya_protocol.py'
+      - 'apps/server/twitch_protocol.py'
+      - 'apps/server/youtube_protocol.py'
+      - 'apps/server/plugin_manager.py'
+      - 'apps/server/javascript_plugin_runtime.py'
+      - 'scripts/issue142_danmu_event_guard.py'
+      - 'docs/PLUGIN_API_V1.md'
+      - '.github/workflows/danmu-event.yml'
+      - 'requirements.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-danmu-event:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install project dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Compile Issue 142 sources
+        run: python -m py_compile apps/server/danmu_event.py apps/server/server.py apps/server/douyin_protocol.py apps/server/huya_protocol.py apps/server/twitch_protocol.py apps/server/youtube_protocol.py apps/server/plugin_manager.py apps/server/javascript_plugin_runtime.py scripts/issue142_danmu_event_guard.py
+      - name: Run Issue 142 DanmuEvent regression guard
+        run: python scripts/issue142_danmu_event_guard.py
+      - name: Run existing QuickJS runtime probe
+        run: python scripts/issue130_js_runtime_probe.py
