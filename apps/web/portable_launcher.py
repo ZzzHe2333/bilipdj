@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import multiprocessing as mp
 import os
 import subprocess
 import sys
@@ -12,6 +13,10 @@ import webbrowser
 from pathlib import Path
 from tkinter import messagebox, ttk
 from typing import Any
+
+if __name__ == "__main__":
+    # Required by PyInstaller when JavaScript plugins spawn their isolated worker.
+    mp.freeze_support()
 
 try:
     import pystray
@@ -96,156 +101,125 @@ def _hidden_backend_process_options() -> dict[str, Any]:
 
 
 def _run_backend_mode() -> None:
-    server_main.main([])
+    configure_runtime_paths(backend)
+    server_main.configure_web_assets()
+    config = backend.load_config()
+    server_cfg = backend.normalize_server_config(config.get("server", {}))
+    host = os.getenv("DANMUJI_BACKEND_HOST") or str(server_cfg["host"])
+    port = int(os.getenv("DANMUJI_BACKEND_PORT", int(server_cfg["port"])))
+    backend.run_server(host=host, port=port)
 
 
-def _tray_image() -> Any | None:
+def _tray_image() -> Any:
     if Image is None or ImageDraw is None:
         return None
-    image = Image.new("RGBA", (64, 64), (32, 24, 74, 255))
+    image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
-    draw.rounded_rectangle((7, 7, 57, 57), radius=13, fill=(108, 92, 231, 255))
-    draw.ellipse((16, 16, 26, 26), fill=(255, 255, 255, 255))
-    draw.ellipse((38, 16, 48, 26), fill=(255, 255, 255, 255))
-    draw.rounded_rectangle((16, 34, 48, 44), radius=5, fill=(255, 255, 255, 255))
+    draw.rounded_rectangle((7, 7, 57, 57), radius=14, fill=(27, 129, 230, 255))
+    draw.ellipse((19, 21, 29, 31), fill=(255, 255, 255, 255))
+    draw.ellipse((35, 21, 45, 31), fill=(255, 255, 255, 255))
+    draw.rounded_rectangle((18, 37, 46, 43), radius=3, fill=(255, 255, 255, 255))
     return image
 
 
 class WebPortableLauncher:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title(WINDOW_TITLE)
-        self.root.geometry("560x310")
-        self.root.minsize(520, 285)
-        self.backend_proc: subprocess.Popen[bytes] | None = None
-        self.owns_backend = False
         self.port = _runtime_port()
+        self.backend_proc: subprocess.Popen[Any] | None = None
+        self.owns_backend = False
         self.ready = False
         self._closing = False
-        self._tray_icon: Any | None = None
+        self._tray_icon: Any = None
         self._tray_thread: threading.Thread | None = None
-        self.status_var = tk.StringVar(value="准备启动后端服务器……")
-        self.detail_var = tk.StringVar(value=f"本地服务：http://127.0.0.1:{self.port}")
-        self.hint_var = tk.StringVar(
-            value="后端服务器必须保持运行。关闭后，Web 控制台、Windows 客户端和第三方客户端将无法使用排队、弹幕和管理功能。"
-        )
-        self._build_ui()
-        self.root.protocol("WM_DELETE_WINDOW", self.request_close)
 
-    def _build_ui(self) -> None:
-        frame = ttk.Frame(self.root, padding=(22, 18, 22, 18))
-        frame.pack(fill="both", expand=True)
+        root.title(WINDOW_TITLE)
+        root.geometry("620x370")
+        root.minsize(560, 330)
+        root.protocol("WM_DELETE_WINDOW", self.request_close)
 
-        title_row = ttk.Frame(frame)
-        title_row.pack(fill="x")
+        try:
+            icon_path = BUNDLE_ROOT / "apps" / "windows" / "assets" / "256x.ico"
+            if icon_path.is_file():
+                root.iconbitmap(default=str(icon_path))
+        except Exception:
+            pass
+
+        container = ttk.Frame(root, padding=24)
+        container.pack(fill="both", expand=True)
+        ttk.Label(container, text=APP_NAME, font=("Microsoft YaHei UI", 20, "bold")).pack(anchor="w")
         ttk.Label(
-            title_row,
-            text=f"弹幕排队姬 后端服务器系统 v{APP_VERSION}",
-            font=("Microsoft YaHei UI", 15, "bold"),
-        ).pack(side="left")
-        ttk.Label(title_row, text="Server").pack(side="right")
+            container,
+            text=f"Web 便携版后端服务器 · v{APP_VERSION}",
+            font=("Microsoft YaHei UI", 10),
+        ).pack(anchor="w", pady=(4, 18))
 
-        self.progress = ttk.Progressbar(frame, mode="indeterminate")
-        self.progress.pack(fill="x", pady=(18, 12))
+        status_frame = ttk.LabelFrame(container, text="Server 状态", padding=16)
+        status_frame.pack(fill="x")
+        self.status_var = tk.StringVar(value="正在检查后端状态……")
+        self.detail_var = tk.StringVar(value=f"监听地址：http://127.0.0.1:{self.port}")
+        ttk.Label(status_frame, textvariable=self.status_var, font=("Microsoft YaHei UI", 11, "bold")).pack(anchor="w")
+        ttk.Label(status_frame, textvariable=self.detail_var).pack(anchor="w", pady=(7, 0))
 
-        ttk.Label(frame, textvariable=self.status_var, font=("Microsoft YaHei UI", 10, "bold")).pack(anchor="w")
-        ttk.Label(frame, textvariable=self.detail_var).pack(anchor="w", pady=(5, 0))
+        button_row = ttk.Frame(container)
+        button_row.pack(fill="x", pady=(20, 0))
+        self.control_button = ttk.Button(button_row, text="打开 Web 控制台", command=self.open_config, state="disabled")
+        self.control_button.pack(side="left")
+        self.queue_button = ttk.Button(button_row, text="打开队列看板", command=self.open_index, state="disabled")
+        self.queue_button.pack(side="left", padx=(10, 0))
+        ttk.Button(button_row, text="隐藏到托盘", command=self.hide_to_tray).pack(side="right")
+
         ttk.Label(
-            frame,
-            textvariable=self.hint_var,
-            wraplength=505,
-            justify="left",
-            foreground="#a24646",
-        ).pack(anchor="w", pady=(8, 0))
-
-        buttons = ttk.Frame(frame)
-        buttons.pack(fill="x", pady=(22, 0))
-        self.config_btn = ttk.Button(buttons, text="打开 Web 控制台", command=self.open_config, state="disabled")
-        self.config_btn.pack(side="left", padx=(0, 8))
-        self.index_btn = ttk.Button(buttons, text="打开队列看板", command=self.open_index, state="disabled")
-        self.index_btn.pack(side="left", padx=(0, 8))
-        self.minimize_btn = ttk.Button(buttons, text="隐藏到右下角", command=self.hide_to_tray)
-        self.minimize_btn.pack(side="left")
-        ttk.Button(buttons, text="停止后端并退出", command=self.confirm_stop_and_exit).pack(side="right")
+            container,
+            text="关闭窗口时可选择停止后端，或隐藏到右下角继续运行。",
+            foreground="#666666",
+        ).pack(anchor="w", pady=(20, 0))
 
     def start(self) -> None:
-        self.progress.start(12)
         if _is_backend_ready(self.port):
-            self.status_var.set("检测到后端服务器已在运行，正在使用现有服务。")
-            self.detail_var.set(f"服务地址：http://127.0.0.1:{self.port} · 外部后端")
-            self._mark_ready(open_browser=True)
+            self.ready = True
+            self.owns_backend = False
+            self._set_ready("检测到已运行的 BiliPDJ 后端；本窗口不会在退出时结束它。")
             return
-
-        self.status_var.set("正在后台启动后端服务器……")
-        self.detail_var.set(f"服务地址：http://127.0.0.1:{self.port} · 正在等待健康检查")
         try:
+            options = _hidden_backend_process_options()
             self.backend_proc = subprocess.Popen(
                 _backend_command(),
                 cwd=str(APP_DIR),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                env=os.environ.copy(),
-                **_hidden_backend_process_options(),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL if FROZEN else None,
+                stderr=subprocess.DEVNULL if FROZEN else None,
+                **options,
             )
             self.owns_backend = True
         except OSError as exc:
-            self.status_var.set("后端服务器启动失败。")
-            self.progress.stop()
+            self.status_var.set("后端启动失败")
             self.detail_var.set(str(exc))
-            messagebox.showerror("启动失败", str(exc), parent=self.root)
             return
 
-        threading.Thread(target=self._wait_until_ready, name="bilipdj-server-ready", daemon=True).start()
+        self.status_var.set("正在启动后端服务器……")
+        self.detail_var.set(f"等待 http://127.0.0.1:{self.port}/health")
+        self.root.after(150, self._poll_backend_ready)
 
-    def _wait_until_ready(self) -> None:
-        deadline = time.monotonic() + 20.0
-        error = ""
-        while time.monotonic() < deadline:
-            process = self.backend_proc
-            if process is not None and process.poll() is not None:
-                error = f"后端服务器提前退出，退出码 {process.returncode}"
-                break
-            if _is_backend_ready(self.port):
-                self.root.after(0, lambda: self._mark_ready(open_browser=True))
-                return
-            time.sleep(0.2)
-        if not error:
-            error = "等待后端服务器启动超时"
-        self.root.after(0, lambda text=error: self._mark_failed(text))
+    def _poll_backend_ready(self) -> None:
+        if self._closing:
+            return
+        process = self.backend_proc
+        if process is not None and process.poll() is not None:
+            self.status_var.set("后端进程已退出")
+            self.detail_var.set(f"退出代码：{process.returncode}")
+            return
+        if _is_backend_ready(self.port):
+            self.ready = True
+            self._set_ready(f"后端已启动，监听 127.0.0.1:{self.port}。")
+            return
+        self.root.after(250, self._poll_backend_ready)
 
-    def _mark_ready(self, *, open_browser: bool) -> None:
-        self.ready = True
-        self.progress.stop()
-        self.progress.configure(mode="determinate", maximum=100, value=100)
-        self.status_var.set("后端服务器运行正常，客户端可以使用。")
-        owner = "本程序管理" if self.owns_backend else "外部服务（退出本窗口不会停止它）"
-        self.detail_var.set(f"服务地址：http://127.0.0.1:{self.port} · {owner}")
-        self.hint_var.set(
-            "请保持后端服务器运行。可点击“隐藏到右下角”让它在系统托盘继续工作；若停止后端，所有前端将失去核心服务。"
-        )
-        self.config_btn.configure(state="normal")
-        self.index_btn.configure(state="normal")
-        if open_browser:
-            self.open_config()
-            # Keep the established source contract while changing the action
-            # from a plain minimize to the new system-tray behavior.
-            self.root.after(1200, self._auto_minimize)
-
-    def _auto_minimize(self) -> None:
-        self.hide_to_tray()
-
-    def _mark_failed(self, error: str) -> None:
-        self.ready = False
-        self.progress.stop()
-        self.status_var.set("后端服务器启动失败。")
-        self.detail_var.set(error)
-        self.hint_var.set("请检查端口占用或运行目录权限；也请确认安全软件没有拦截，然后重新启动后端服务器系统。")
-        try:
-            self.root.deiconify()
-            self.root.lift()
-        except tk.TclError:
-            pass
-        messagebox.showerror("启动失败", error, parent=self.root)
+    def _set_ready(self, detail: str) -> None:
+        self.status_var.set("后端服务器运行中")
+        self.detail_var.set(detail)
+        self.control_button.configure(state="normal")
+        self.queue_button.configure(state="normal")
 
     def open_config(self) -> None:
         webbrowser.open(f"http://127.0.0.1:{self.port}/control")
