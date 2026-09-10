@@ -33,7 +33,7 @@ jobs:
           python scripts/issue144_release_audit_guard.py
           python scripts/issue130_js_runtime_probe.py
           python scripts/issue136_plugin_config_guard.py
-          python scripts/issue140_plugin_http_request_guard.py
+          python scripts/issue140_http_request_guard.py
           python scripts/issue142_danmu_event_guard.py
       - name: Commit validated audit fixes
         run: |
