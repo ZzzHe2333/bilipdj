@@ -145,9 +145,6 @@ _plugin_runtime_dual.install_dual_runtime_support()
 _plugin_secret_guard.install_plugin_secret_guard(_plugin_manager)
 _plugin_manager.install_plugin_manager(server, _issue79_guard)
 _issue79_guard.install_issue79_guard(server)
-# Install this last so every plugin-management POST passes the browser/size
-# safety boundary before entering any previously wrapped management handler.
-_plugin_api_security_guard.install_plugin_api_security_guard(server, _plugin_manager)
 
 _appearance_guard.install_appearance_guard(server)
 _issue123_guard.install_issue123_guard(
@@ -157,5 +154,9 @@ _issue123_guard.install_issue123_guard(
     _settings_backup,
 )
 _security_hardening_guard.install_security_hardening(server)
+
+# Keep this outermost: all plugin-management POST requests must pass the browser
+# origin/content-type/body-size safety boundary before any management handler.
+_plugin_api_security_guard.install_plugin_api_security_guard(server, _plugin_manager)
 
 __all__ = ["REPO_ROOT", "configure_runtime_paths", "server"]
