@@ -43,6 +43,8 @@ jobs:
         run: python scripts/issue150_updater_backup_guard.py
       - name: Validate incremental updater
         run: python scripts/issue155_incremental_update_guard.py
+      - name: Validate command/update/runtime layout migration
+        run: python scripts/issue167_runtime_layout_guard.py
       - name: Validate Huya protocol framing
         run: python apps/server/huya_protocol_guard.py
       - name: Validate red TV chat parser
@@ -81,3 +83,5 @@ jobs:
           test -f apps/web/dist/config.html
           test -f apps/web/dist/control.html
           test -f apps/web/dist/myjs.js
+          test -f apps/web/dist/issue167_control_extensions.js
+          grep -q 'issue167_control_extensions.js' apps/web/dist/control.html
