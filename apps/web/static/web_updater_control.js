@@ -37,7 +37,7 @@
     section.className = 'web-update-controls';
     section.innerHTML = `
       <div class="web-update-head">
-        <div><strong>Web Portable 自动更新</strong><p>同时读取云端正式版和测试版；默认选择最新正式版。支持全量更新、逐文件增量更新和本地版本恢复。</p></div>
+        <div><strong>Web Portable 自动更新</strong><p>同时读取云端正式版和测试版；默认选择最新正式版。支持全量更新、逐文件增量更新和本地版本恢复，更新开始后会打开独立的俄罗斯方块进度页。</p></div>
         <span id="web-update-capability" class="web-update-chip">检测中</span>
       </div>
       <div class="web-update-picker-row">
