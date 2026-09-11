@@ -59,6 +59,8 @@ jobs:
         run: python scripts/issue185_regression_guard.py
       - name: Validate fixed Windows control-panel size
         run: python scripts/issue194_fixed_window_guard.py
+      - name: Validate compact Windows log toolbar
+        run: python scripts/issue196_log_toolbar_guard.py
       - name: Validate Huya protocol framing
         run: python apps/server/huya_protocol_guard.py
       - name: Validate red TV chat parser
