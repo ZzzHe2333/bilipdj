@@ -32,6 +32,7 @@ from apps.windows.issue79_features import patch_control_panel_issue79  # noqa: E
 from apps.windows.issue167_command_console import patch_control_panel_command_console  # noqa: E402
 from apps.windows.issue167_update_estimate import patch_update_ui  # noqa: E402
 from apps.windows.issue194_fixed_window import patch_control_panel_issue194  # noqa: E402
+from apps.windows.issue196_log_toolbar import patch_control_panel_issue196  # noqa: E402
 
 
 def _configure_control_panel_paths() -> None:
@@ -67,6 +68,7 @@ patch_control_panel_about(control_panel.ControlPanelApp)
 patch_control_panel_issue79(control_panel.ControlPanelApp)
 patch_control_panel_command_console(control_panel.ControlPanelApp)
 patch_control_panel_issue194(control_panel.ControlPanelApp)
+patch_control_panel_issue196(control_panel.ControlPanelApp)
 
 
 def main() -> None:
