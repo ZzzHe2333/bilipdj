@@ -38,8 +38,8 @@ Server 是唯一业务状态源，Windows 客户端、Web 控制台、OBS 展示
 
 | 版本 | 发行包 | 启动方式 | 说明 |
 |---|---|---|---|
-| 🖥️ Tk Windows 便携版 | [下载 `BiliPDJ-v3.0.5-Windows-Tk-Portable-x64.zip`](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.5/BiliPDJ-v3.0.5-Windows-Tk-Portable-x64.zip) | 解压后双击 `main.exe` | 普通 Windows 用户请选择这个包 |
-| 🌐 Web 便携版 | [下载 `BiliPDJ-v3.0.5-Web-Portable-x64.zip`](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.5/BiliPDJ-v3.0.5-Web-Portable-x64.zip) | 解压后双击 `BiliPDJ-Web.exe` | 启动内置后端服务器，就绪后自动打开 Web 控制台 |
+| 🖥️ Tk Windows 便携版 | [下载 `BiliPDJ-v3.0.6-Windows-Tk-Portable-x64.zip`](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.6/BiliPDJ-v3.0.6-Windows-Tk-Portable-x64.zip) | 解压后双击 `main.exe` | 普通 Windows 用户请选择这个包 |
+| 🌐 Web 便携版 | [下载 `BiliPDJ-v3.0.6-Web-Portable-x64.zip`](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.6/BiliPDJ-v3.0.6-Web-Portable-x64.zip) | 解压后双击 `BiliPDJ-Web.exe` | 启动内置后端服务器，就绪后自动打开 Web 控制台 |
 
 每个发行包都附带 `.sha256` 与 `update-manifest.json`。客户端更新时会先读取 manifest 拿到准确的包名、下载地址、大小和 SHA-256 再下载校验，不会靠猜版本号拼文件名。`Windows-Tk-files.json` 与 `Windows-Tk-Incremental-x64.pack` 是内置增量更新器使用的资源，普通用户无需手动下载。
 
@@ -117,7 +117,6 @@ dist\bilipdj\main.exe
 dist\bilipdj\paiduijitm.exe
 dist\bilipdj\updater.exe
 ```
-
 </details>
 
 <details>
