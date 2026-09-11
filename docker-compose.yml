@@ -1,0 +1,29 @@
+services:
+  bilipdj:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "127.0.0.1:9816:9816"
+    environment:
+      BILIPDJ_DATA_DIR: /data
+      BILIPDJ_DOCKER: "1"
+      BILIPDJ_DOCKER_TRUSTED_CIDRS: auto
+      DANMUJI_BACKEND_HOST: 0.0.0.0
+      DANMUJI_BACKEND_PORT: "9816"
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9816/health', timeout=3).read()"
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3

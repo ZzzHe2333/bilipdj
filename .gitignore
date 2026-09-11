@@ -11,6 +11,7 @@ core/*token*
 core/cd/
 plugins/
 log/
+/data/
 tmp*
 
 # Generated API documentation

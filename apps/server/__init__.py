@@ -18,7 +18,9 @@ from . import server_runtime_guard as _server_runtime_guard
 from . import style_option_guard as _style_option_guard
 from . import web_queue_layout as _web_queue_layout
 from . import websocket_performance_guard as _websocket_performance_guard
+from .runtime_layout import data_dir_overridden as _data_dir_overridden
 from .runtime_layout import ensure_runtime_layout as _ensure_runtime_layout
+from .runtime_layout import resolve_data_dir as _resolve_data_dir
 
 
 def _is_server_frame(frame: Any) -> bool:
@@ -55,16 +57,20 @@ _queue_rank_query._restore_build_class_hook()
 
 
 def configure_runtime_paths(module: Any = server) -> Any:
-    """Apply source/frozen runtime paths and migrate legacy root YAML files."""
+    """Apply source/frozen runtime paths and optional external data storage."""
     frozen = bool(getattr(sys, "frozen", False))
     bundle_root = Path(getattr(sys, "_MEIPASS", REPO_ROOT)).resolve()
     app_dir = Path(sys.executable).resolve().parent if frozen else REPO_ROOT
     compatibility_core_dir = REPO_ROOT / "core"
-    runtime_core_dir = app_dir / "core" if frozen else compatibility_core_dir
-    # Keep appearance/style compatibility where it was; only the three YAML
-    # runtime configs move into core as requested.
-    misc_config_dir = app_dir if frozen else compatibility_core_dir
-    runtime_core_dir, key_dir = _ensure_runtime_layout(app_dir)
+    data_dir = _resolve_data_dir(app_dir)
+    external_data_dir = _data_dir_overridden()
+    runtime_core_dir, key_dir = _ensure_runtime_layout(
+        app_dir,
+        defaults_dir=compatibility_core_dir,
+    )
+    # Legacy source/portable layouts stay unchanged unless BILIPDJ_DATA_DIR is
+    # explicitly configured. Docker uses the external data root for settings.
+    misc_config_dir = data_dir if external_data_dir else (app_dir if frozen else compatibility_core_dir)
 
     source_web = REPO_ROOT / "apps" / "web" / "static"
     bundled_web = bundle_root / "apps" / "web" / "static"
@@ -79,13 +85,14 @@ def configure_runtime_paths(module: Any = server) -> Any:
     module.CORE_DIR = compatibility_core_dir
     module.BUNDLE_DIR = bundle_root
     module.APP_DIR = app_dir
+    module.DATA_DIR = data_dir
     module._YAML_DIR = misc_config_dir
     module.BUNDLE_CORE_DIR = bundle_root / "apps" / "server"
     module.RUNTIME_CORE_DIR = runtime_core_dir
     module.BUNDLE_UI_DIR = bundled_web
     module.UI_DIR = ui_dir
     module.CONFIG_PATH = runtime_core_dir / "config.yaml"
-    module.LOG_DIR = app_dir / "log"
+    module.LOG_DIR = (data_dir if external_data_dir else app_dir) / "log"
     module.PD_DIR = runtime_core_dir / "cd"
     module.QUEUE_STATE_PATH = module.PD_DIR / "queue_archive_state.json"
     module.BLACKLIST_PATH = module.PD_DIR / "blacklist.csv"
@@ -95,6 +102,8 @@ def configure_runtime_paths(module: Any = server) -> Any:
     module.APPEARANCE_PATH = misc_config_dir / "appearance.json"
     module.KEY_DIR = key_dir
     module.UPDATE_RESULT_PATH = key_dir / "update-result.json"
+    module.PLUGINS_DIR = (data_dir if external_data_dir else app_dir) / "plugins"
+    module.BACKUP_DIR = (data_dir if external_data_dir else app_dir) / "backup"
     module.LIVE_STYLE_CSS_PATH = ui_dir / "moren.css"
     module._CONFIG_LOCK_PATH = runtime_core_dir / ".config.lock"
     return module
@@ -122,6 +131,7 @@ from . import plugin_config_web as _plugin_config_web  # noqa: E402
 from . import appearance_guard as _appearance_guard  # noqa: E402
 from . import issue123_guard as _issue123_guard  # noqa: E402
 from . import security_hardening_guard as _security_hardening_guard  # noqa: E402
+from . import docker_runtime as _docker_runtime  # noqa: E402
 
 # appearance.json is a first-class cross-client setting and participates in the
 # same ZIP/WebDAV backup format as config.yaml/style.json.
@@ -153,6 +163,7 @@ _twitch_runtime_guard.install_twitch_runtime_guard(server, _issue79_guard)
 _danmu_plugins.install_danmu_plugin_system(server, _issue79_guard)
 _plugin_runtime_dual.install_dual_runtime_support()
 _plugin_secret_guard.install_plugin_secret_guard(_plugin_manager)
+_docker_runtime.install_plugin_data_root(_plugin_manager)
 _plugin_manager.install_plugin_manager(server, _issue79_guard)
 _issue79_guard.install_issue79_guard(server)
 
@@ -175,5 +186,8 @@ _security_hardening_guard.install_security_hardening(server)
 # Keep this outermost: original plugin-management POST requests must pass the
 # browser origin/content-type/body-size safety boundary before their handlers.
 _plugin_api_security_guard.install_plugin_api_security_guard(server, _plugin_manager)
+# Docker source-address translation is handled last so every existing local-only
+# guard keeps its Host/Origin validation and only the transport address changes.
+_docker_runtime.install_docker_local_access(server)
 
 __all__ = ["REPO_ROOT", "configure_runtime_paths", "server"]
