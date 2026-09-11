@@ -37,6 +37,8 @@ jobs:
         run: python -m compileall -q apps core scripts
       - name: Validate explicit-only release policy
         run: python scripts/issue138_release_policy_guard.py
+      - name: Validate updater backup repository
+        run: python scripts/issue150_updater_backup_guard.py
       - name: Validate Huya protocol framing
         run: python apps/server/huya_protocol_guard.py
       - name: Validate red TV chat parser
