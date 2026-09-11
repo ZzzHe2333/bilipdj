@@ -2,6 +2,15 @@
 
 v3.0.2 汇总了 v3.0.0 之后尚未正式发布的稳定性修复，并正式加入 Windows 便携版按文件增量更新。插件 API 与 `DanmuEvent` 的兼容约定保持不变。
 
+## 直接下载
+
+普通用户只需要下载对应的完整便携版 ZIP，不需要手动下载 `files.json`、`.pack` 或它们的 `.sha256`。
+
+- **Windows 客户端（推荐）**：下载 **`BiliPDJ-v3.0.2-Windows-Tk-Portable-x64.zip`** → [点击直接下载 Windows 客户端](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.2/BiliPDJ-v3.0.2-Windows-Tk-Portable-x64.zip)
+- **Web 便携版**：下载 **`BiliPDJ-v3.0.2-Web-Portable-x64.zip`** → [点击直接下载 Web 便携版](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.2/BiliPDJ-v3.0.2-Web-Portable-x64.zip)
+
+> Windows 用户请优先选择 `Windows-Tk-Portable-x64.zip`。`Windows-Tk-files.json` 与 `Windows-Tk-Incremental-x64.pack` 是内置更新器使用的逐文件索引和 Range 资源库，普通用户无需手动下载或解压。
+
 ## 更新器：全量更新与增量更新
 
 Windows 更新页现在提供两个明确入口：
@@ -55,7 +64,7 @@ Windows 更新页现在提供两个明确入口：
 
 ## 发行文件
 
-v3.0.2 正式发布将包含：
+v3.0.2 正式发布包含：
 
 - `BiliPDJ-v3.0.2-Windows-Tk-Portable-x64.zip`
 - `BiliPDJ-v3.0.2-Windows-Tk-Portable-x64.zip.sha256`
@@ -66,6 +75,8 @@ v3.0.2 正式发布将包含：
 - `BiliPDJ-v3.0.2-Web-Portable-x64.zip`
 - `BiliPDJ-v3.0.2-Web-Portable-x64.zip.sha256`
 - `update-manifest.json`
+
+GitHub 另外自动显示 `Source code (zip)` 与 `Source code (tar.gz)`，它们是源码快照，不是普通 Windows/Web 用户需要下载的便携程序包。
 
 ## 升级说明
 

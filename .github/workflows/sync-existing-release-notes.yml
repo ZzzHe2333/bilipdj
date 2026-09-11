@@ -1,0 +1,51 @@
+name: Sync existing GitHub Release notes
+
+on:
+  push:
+    branches:
+      - 'release-notes/v*'
+
+permissions:
+  contents: write
+
+jobs:
+  sync-release-notes:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate target release
+        id: target
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF_NAME" != release-notes/v* ]]; then
+            echo "Unexpected branch: $GITHUB_REF_NAME"
+            exit 1
+          fi
+          TAG="${GITHUB_REF_NAME#release-notes/}"
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "Release notes tag does not match VERSION: tag=$TAG VERSION=$VERSION"
+            exit 1
+          fi
+          if [ ! -s core/RELEASE_NOTES.md ]; then
+            echo "core/RELEASE_NOTES.md is missing or empty"
+            exit 1
+          fi
+          gh release view "$TAG" --repo ZzzHe2333/bilipdj >/dev/null
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Update release notes only
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.target.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" \
+            --repo ZzzHe2333/bilipdj \
+            --notes-file core/RELEASE_NOTES.md
