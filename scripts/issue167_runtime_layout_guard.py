@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import tempfile
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -31,6 +33,25 @@ def check_runtime_migration() -> None:
             assert not (app / name).exists(), f"legacy root {name} was not migrated"
         assert (key / "update-result.json").is_file()
         assert not (app / "update-result.json").exists()
+
+    # If both old and new files exist, keep the newer content and preserve the loser.
+    with tempfile.TemporaryDirectory() as raw:
+        app = Path(raw)
+        core = app / "core"
+        core.mkdir()
+        target = core / "config.yaml"
+        source = app / "config.yaml"
+        target.write_text("server:\n  port: 9816\n", encoding="utf-8")
+        source.write_text("server:\n  port: 9988\n", encoding="utf-8")
+        old = time.time_ns() - 2_000_000_000
+        os.utime(target, ns=(old, old))
+        now = time.time_ns()
+        os.utime(source, ns=(now, now))
+        core_dir, _key_dir = layout.ensure_runtime_layout(app)
+        assert (core_dir / "config.yaml").read_text(encoding="utf-8") == "server:\n  port: 9988\n"
+        backups = list((core_dir / "migration-backup").glob("config.yaml.legacy-root-*"))
+        assert backups, "previous core config was not preserved during conflict migration"
+        assert "9816" in backups[0].read_text(encoding="utf-8")
 
 
 def check_command_console() -> None:
@@ -97,11 +118,25 @@ def check_authoritative_core_paths() -> None:
     assert 'control_panel.CONFIG_PATH = config_dir / "config.yaml"' in windows_main
 
 
+def check_integration_wiring() -> None:
+    server_main = (ROOT / "apps/server/main.py").read_text(encoding="utf-8")
+    assert "install_command_console(backend)" in server_main
+    assert "install_update_estimate_api(backend)" in server_main
+
+    control_html = (ROOT / "apps/web/static/control.html").read_text(encoding="utf-8")
+    assert '<script src="issue167_control_extensions.js"></script>' in control_html
+
+    quality = (ROOT / ".github/workflows/quality.yml").read_text(encoding="utf-8")
+    assert "python scripts/issue167_runtime_layout_guard.py" in quality
+    assert "apps/web/dist/issue167_control_extensions.js" in quality
+
+
 def main() -> None:
     check_runtime_migration()
     check_command_console()
     check_update_estimates_and_key_layout()
     check_authoritative_core_paths()
+    check_integration_wiring()
     print("issue #167 command/update/runtime layout guard: OK")
 
 
