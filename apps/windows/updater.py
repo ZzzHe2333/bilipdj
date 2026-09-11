@@ -11,6 +11,7 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
+BACKUP_DIR_NAME = "backup"
 PRESERVE_PATHS = (
     Path("config.yaml"),
     Path("quanxian.yaml"),
@@ -22,6 +23,7 @@ PRESERVE_PATHS = (
     Path("core/style.json"),
     Path("core/cd"),
     Path("log"),
+    Path(BACKUP_DIR_NAME),
 )
 WAIT_TIMEOUT_SECONDS = 45.0
 STARTUP_GRACE_SECONDS = 8.0
@@ -35,6 +37,10 @@ class UpdaterError(RuntimeError):
 
 def _timestamp() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _backup_timestamp() -> str:
+    return datetime.now().strftime("%Y%m%d-%H%M%S")
 
 
 def _write_log(log_path: Path, message: str) -> None:
@@ -86,6 +92,69 @@ def validate_executable_name(name: str) -> str:
     return text
 
 
+def _safe_backup_version_component(version: str) -> str:
+    text = str(version or "").strip()
+    safe = "".join(
+        char if (char.isalnum() or char in {".", "-", "_"}) else "_"
+        for char in text
+    ).strip("._-")
+    return safe or "unknown"
+
+
+def _allocate_backup_snapshot_dir(app_dir: Path, target_version: str) -> Path:
+    backup_root = app_dir / BACKUP_DIR_NAME
+    backup_root.mkdir(parents=True, exist_ok=True)
+    base_name = (
+        f"update-{_backup_timestamp()}-to-v"
+        f"{_safe_backup_version_component(target_version)}"
+    )
+    candidate = backup_root / base_name
+    if not candidate.exists():
+        return candidate
+    for index in range(2, 10_000):
+        candidate = backup_root / f"{base_name}-{index}"
+        if not candidate.exists():
+            return candidate
+    raise UpdaterError("无法分配更新备份目录")
+
+
+def _copy_snapshot_entry(source: Path, destination: Path) -> None:
+    if source.is_symlink():
+        raise UpdaterError(f"备份目录不支持符号链接：{source}")
+    if source.is_dir():
+        destination.mkdir(parents=True, exist_ok=False)
+        for child in source.iterdir():
+            _copy_snapshot_entry(child, destination / child.name)
+        shutil.copystat(source, destination, follow_symlinks=False)
+        return
+    if source.is_file():
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination, follow_symlinks=False)
+        return
+    raise UpdaterError(f"备份遇到不支持的文件类型：{source}")
+
+
+def create_update_snapshot(app_dir: Path, target_version: str) -> Path:
+    """Create a persistent pre-update snapshot under app_dir/backup.
+
+    The backup repository itself is excluded so snapshots never recursively contain
+    older snapshots. Existing history under app_dir/backup is left untouched.
+    """
+
+    app_dir = app_dir.resolve()
+    snapshot_dir = _allocate_backup_snapshot_dir(app_dir, target_version)
+    snapshot_dir.mkdir(parents=False, exist_ok=False)
+    try:
+        for source in app_dir.iterdir():
+            if source.name.casefold() == BACKUP_DIR_NAME.casefold():
+                continue
+            _copy_snapshot_entry(source, snapshot_dir / source.name)
+    except Exception:
+        remove_path_with_retry(snapshot_dir)
+        raise
+    return snapshot_dir
+
+
 def wait_for_process_exit(pid: int, timeout: float = WAIT_TIMEOUT_SECONDS) -> bool:
     if pid <= 0:
         return True
@@ -135,9 +204,9 @@ def remove_path_with_retry(
             time.sleep(delay)
 
 
-def copy_preserved_data(backup_dir: Path, app_dir: Path) -> None:
+def copy_preserved_data(rollback_dir: Path, app_dir: Path) -> None:
     for relative in PRESERVE_PATHS:
-        source = backup_dir / relative
+        source = rollback_dir / relative
         destination = app_dir / relative
         if source.is_dir():
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -213,12 +282,12 @@ def launch_main(app_dir: Path, main_exe_name: str) -> subprocess.Popen[bytes]:
     )
 
 
-def rollback(app_dir: Path, backup_dir: Path, log_path: Path) -> None:
+def rollback(app_dir: Path, rollback_dir: Path, log_path: Path) -> None:
     _write_log(log_path, "开始回滚旧版本")
     if app_dir.exists():
         remove_path_with_retry(app_dir)
-    if backup_dir.exists():
-        backup_dir.replace(app_dir)
+    if rollback_dir.exists():
+        rollback_dir.replace(app_dir)
     _write_log(log_path, "旧版本已恢复")
 
 
@@ -239,9 +308,10 @@ def perform_update(
     parent = app_dir.parent
     safe_name = app_dir.name or "bilipdj"
     staging_dir = parent / f".{safe_name}.update-staging"
-    backup_dir = parent / f".{safe_name}.update-backup"
+    rollback_dir = parent / f".{safe_name}.update-backup"
     cleanup_dir = zip_path.parent
     log_path = parent / f"{safe_name}-update.log"
+    persistent_backup_dir = app_dir / BACKUP_DIR_NAME
 
     _write_log(log_path, f"准备更新到 v{target_version}")
     if not app_dir.is_dir():
@@ -251,7 +321,7 @@ def perform_update(
     if not wait_for_process_exit(pid):
         raise UpdaterError("等待主程序退出超时，请完全关闭程序后重试")
 
-    backup_created = False
+    rollback_created = False
     try:
         remove_path_with_retry(staging_dir)
         staging_dir.mkdir(parents=True, exist_ok=True)
@@ -259,18 +329,21 @@ def perform_update(
         safe_extract(zip_path, staging_dir)
         validate_staging(staging_dir, executable_name)
 
-        remove_path_with_retry(backup_dir)
-        _write_log(log_path, f"备份当前版本到：{backup_dir}")
-        app_dir.replace(backup_dir)
-        backup_created = True
+        persistent_backup_dir = create_update_snapshot(app_dir, target_version)
+        _write_log(log_path, f"已保存更新前备份：{persistent_backup_dir}")
+
+        remove_path_with_retry(rollback_dir)
+        _write_log(log_path, f"建立临时回滚目录：{rollback_dir}")
+        app_dir.replace(rollback_dir)
+        rollback_created = True
 
         staging_dir.replace(app_dir)
-        copy_preserved_data(backup_dir, app_dir)
+        copy_preserved_data(rollback_dir, app_dir)
         _write_update_result(
             app_dir,
             status="installed",
             target_version=target_version,
-            backup_dir=backup_dir,
+            backup_dir=persistent_backup_dir,
             cleanup_dir=cleanup_dir,
         )
         _write_log(log_path, "新版本文件替换完成，正在启动主程序")
@@ -283,14 +356,23 @@ def perform_update(
                     f"新版主程序启动后提前退出，退出码 {return_code}"
                 )
             time.sleep(0.25)
+
+        try:
+            remove_path_with_retry(rollback_dir)
+        except OSError as cleanup_error:
+            _write_log(log_path, f"清理临时回滚目录失败：{cleanup_error}")
+        else:
+            rollback_created = False
+
         _write_log(
             log_path,
-            f"v{target_version} 启动成功，保留上一版本备份：{backup_dir}",
+            f"v{target_version} 启动成功，更新前备份保留于：{persistent_backup_dir}",
         )
     except Exception as exc:
-        if backup_created:
+        if rollback_created:
             try:
-                rollback(app_dir, backup_dir, log_path)
+                rollback(app_dir, rollback_dir, log_path)
+                rollback_created = False
             except Exception as rollback_error:
                 _write_log(log_path, f"恢复旧版本失败：{rollback_error}")
         else:
@@ -298,9 +380,9 @@ def perform_update(
 
         _write_update_result(
             app_dir,
-            status="rolled_back" if backup_created else "preflight_failed",
+            status="rolled_back" if persistent_backup_dir.is_dir() else "preflight_failed",
             target_version=target_version,
-            backup_dir=backup_dir,
+            backup_dir=persistent_backup_dir,
             cleanup_dir=cleanup_dir,
             error=str(exc),
         )
