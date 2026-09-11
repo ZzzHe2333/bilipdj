@@ -39,13 +39,63 @@ python -m apps.server.main --web-dir apps/web/dist
 
 ## Docker
 
-从仓库根目录执行：
+推荐从仓库根目录直接使用 Compose：
+
+```bash
+docker compose up -d --build
+```
+
+默认访问地址：
+
+```text
+http://127.0.0.1:9816/control
+http://127.0.0.1:9816/config
+http://127.0.0.1:9816/index
+```
+
+Compose 默认把宿主机 `./data` 挂载到容器 `/data`，并设置：
+
+```text
+BILIPDJ_DATA_DIR=/data
+BILIPDJ_DOCKER=1
+BILIPDJ_DOCKER_TRUSTED_CIDRS=auto
+```
+
+配置、主题、日志、队列/黑名单存档、`key/` 更新元数据、插件与插件私有数据会写入持久化数据目录；删除或重建容器不会删除 `./data` 中的用户数据。
+
+为了保持管理 API 的本地安全边界，Compose 默认只发布：
+
+```text
+127.0.0.1:9816:9816
+```
+
+因此宿主机浏览器可以正常访问 local-only API，但局域网和公网不会直接得到管理端口。Docker NAT 会让后端看到网桥网关作为客户端地址；`BILIPDJ_DOCKER_TRUSTED_CIDRS=auto` 只自动信任 Linux 默认路由的**精确网关 IP**，不会把整个 `172.16.0.0/12` 或其他私网段加入信任列表。特殊 Docker 网络环境可以显式填写一个或多个精确 IP/CIDR，例如：
+
+```text
+BILIPDJ_DOCKER_TRUSTED_CIDRS=172.30.0.1/32
+```
+
+即使来源 IP 位于受信任网关范围，现有管理请求仍继续执行 loopback `Host` 与同源 `Origin/Referer` 检查。不要为了远程管理直接把 Compose 端口改成 `0.0.0.0:9816:9816`；当前 local-only API 的设计目标仍是本机管理，而不是公网鉴权。
+
+容器和 Compose 都使用现有 `/health` 接口做 healthcheck。查看状态：
+
+```bash
+docker compose ps
+```
+
+如需手动运行镜像，可显式保持相同安全边界：
 
 ```bash
 docker build -f apps/server/Dockerfile -t bilipdj-server .
-docker run --rm -p 9816:9816 bilipdj-server
+docker run --rm \
+  -p 127.0.0.1:9816:9816 \
+  -v "$(pwd)/data:/data" \
+  -e BILIPDJ_DATA_DIR=/data \
+  -e BILIPDJ_DOCKER=1 \
+  -e BILIPDJ_DOCKER_TRUSTED_CIDRS=auto \
+  bilipdj-server
 ```
 
 ## 兼容说明
 
-源码模式下配置和队列数据仍兼容原来的 `core/` 路径；冻结的便携发行包把运行数据放在发行目录中，以便整体复制和迁移。
+未设置 `BILIPDJ_DATA_DIR` 时，源码模式和冻结便携版继续使用原有运行目录布局；只有显式设置该变量时，用户数据才会切换到指定数据根目录。这样 Docker 可以安全挂载 `/data`，同时不改变 Windows / 源码现有安装的路径行为。
