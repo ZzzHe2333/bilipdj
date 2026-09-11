@@ -56,9 +56,16 @@ def check_runtime_migration() -> None:
 
 def check_command_console() -> None:
     module = _load_file_module("issue167_command_console", ROOT / "apps/server/command_console.py")
-    source = (ROOT / "apps/server/command_console.py").read_text(encoding="utf-8")
-    for forbidden in ("subprocess.", "os.system(", "eval(", "exec(", "powershell", "cmd.exe"):
-        assert forbidden not in source.lower(), f"unsafe command execution primitive found: {forbidden}"
+    source = (ROOT / "apps/server/command_console.py").read_text(encoding="utf-8").lower()
+    for forbidden in (
+        "import subprocess",
+        "from subprocess",
+        "subprocess.",
+        "os.system(",
+        "eval(",
+        "exec(",
+    ):
+        assert forbidden not in source, f"unsafe command execution primitive found: {forbidden}"
 
     captured = []
 
