@@ -78,6 +78,8 @@ HTTP_ENDPOINTS = [
     ep("GET", "/api/control/logs?kind=all&limit=400", "Web 控制台日志读取", response='{"status":"ok","files":[...],"lines":[...]}', notes="kind: all/common/error/update；limit 20-2000。"),
     ep("GET", "/api/control/performance", "Web 控制台性能数据", response="系统 CPU/内存/磁盘、进程、队列、WebSocket 与 Relay 状态。"),
     ep("GET", "/api/control/update", "读取更新清单", response="当前版本、最新版本、Release URL，以及 Web 便携包 filename/url/sha256/size。", notes="客户端应先读取 manifest/本接口，再下载并校验 SHA-256，不要猜测资产文件名。"),
+    ep("POST", "/api/control/command", "提交本地后端指令", body='{"command":"暂停排队功能"}', response='{"status":"ok","accepted":true,"recognized":true,"queue_changed":false,"queue_size":0,"message":"指令已送入后端弹幕流。"}', notes="仅本机。输入会构造成 platform=console 的 DanmuEvent 并进入现有弹幕/权限/队列指令链；不会执行系统 Shell。"),
+    ep("GET", "/api/control/update-estimate", "读取更新下载量预估", response='{"status":"ok","latest_version":"3.0.2","web":{"full_download_bytes":123456,"incremental_available":false},"windows":{"full_download_bytes":123456,"file_manifest_bytes":1234,"resource_pack_bytes":5678}}', notes="仅本机。Web Portable 当前只提供全量更新；Windows Tk 的实际增量估算由客户端读取逐文件清单并扫描本地 SHA-256。"),
 ]
 
 WS_ENDPOINTS = [

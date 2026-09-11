@@ -21,13 +21,16 @@ if getattr(sys, "frozen", False):
 
 from apps.server import server as backend  # noqa: E402
 from apps.server.main import configure_web_assets  # noqa: E402
+from apps.server.runtime_layout import ensure_runtime_layout  # noqa: E402
 
 configure_web_assets()
 
-from apps.windows import control_panel  # noqa: E402
+from apps.windows import control_panel, update_ui  # noqa: E402
 from apps.windows.about_page import patch_control_panel_about  # noqa: E402
 from apps.windows.bilibili_qr_dialog import patch_control_panel_qr_login  # noqa: E402
 from apps.windows.issue79_features import patch_control_panel_issue79  # noqa: E402
+from apps.windows.issue167_command_console import patch_control_panel_command_console  # noqa: E402
+from apps.windows.issue167_update_estimate import patch_update_ui  # noqa: E402
 
 
 def _configure_control_panel_paths() -> None:
@@ -35,7 +38,7 @@ def _configure_control_panel_paths() -> None:
     bundle_root = Path(getattr(sys, "_MEIPASS", REPO_ROOT)).resolve()
     app_dir = Path(sys.executable).resolve().parent if frozen else REPO_ROOT
     windows_dir = REPO_ROOT / "apps" / "windows"
-    config_dir = app_dir if frozen else REPO_ROOT / "core"
+    config_dir, key_dir = ensure_runtime_layout(app_dir)
 
     control_panel.REPO_DIR = REPO_ROOT
     control_panel.CORE_DIR = windows_dir
@@ -47,18 +50,21 @@ def _configure_control_panel_paths() -> None:
     control_panel.CONFIG_PATH = config_dir / "config.yaml"
     control_panel.QUANXIAN_PATH = config_dir / "quanxian.yaml"
     control_panel.KAIGUAN_PATH = config_dir / "kaiguan.yaml"
+    control_panel.KEY_DIR = key_dir
     control_panel.SERVER_PATH = REPO_ROOT / "apps" / "server" / "main.py"
     control_panel.OVERLAY_HOST_SCRIPT = windows_dir / "overlay_host.py"
     control_panel._BACKEND_SERVER_MODULE = backend
 
 
 _configure_control_panel_paths()
+patch_update_ui(update_ui)
 
 # Customer-facing entry points install critical UI patches explicitly instead of
 # relying only on legacy class-construction hooks and import order.
 patch_control_panel_qr_login(control_panel.ControlPanelApp)
 patch_control_panel_about(control_panel.ControlPanelApp)
 patch_control_panel_issue79(control_panel.ControlPanelApp)
+patch_control_panel_command_console(control_panel.ControlPanelApp)
 
 
 def main() -> None:

@@ -53,9 +53,18 @@ try {
     Copy-Item "dist\paiduijitm.exe" "dist\bilipdj\paiduijitm.exe" -Force
     Copy-Item "dist\updater.exe" "dist\bilipdj\updater.exe" -Force
 
+    New-Item -ItemType Directory -Path "dist\bilipdj\key" -Force | Out-Null
+    @"
+BiliPDJ 更新元数据目录
+
+此目录由内置更新器使用，用于保存更新检查 JSON、逐文件清单缓存、SHA-256 校验值和 update-result.json。
+请勿把 SHA-256 校验值当作加密私钥；正式签名私钥不会随发行包分发。
+"@ | Set-Content -LiteralPath "dist\bilipdj\key\README.txt" -Encoding utf8
+
     Write-Host "Main panel executable: dist\bilipdj\main.exe"
     Write-Host "Overlay executable: dist\bilipdj\paiduijitm.exe"
     Write-Host "Updater executable: dist\bilipdj\updater.exe"
+    Write-Host "Update metadata directory: dist\bilipdj\key"
 }
 finally {
     Pop-Location

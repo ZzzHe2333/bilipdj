@@ -15,6 +15,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from apps.server import configure_runtime_paths, server as backend  # noqa: E402
+from apps.server.command_console import install_command_console  # noqa: E402
+from apps.server.runtime_layout import configure_server_runtime_layout  # noqa: E402
+from apps.server.update_estimate_api import install_update_estimate_api  # noqa: E402
 
 SOURCE_WEB_DIR = REPO_ROOT / "apps" / "web" / "static"
 BUNDLED_WEB_DIR = Path(getattr(sys, "_MEIPASS", REPO_ROOT)) / "apps" / "web" / "static"
@@ -32,8 +35,11 @@ def _resolve_default_web_dir() -> Path:
 
 
 def configure_web_assets(web_dir: str | os.PathLike[str] | None = None) -> Path:
-    """Point the backend at the canonical Web assets for source or packaged runs."""
+    """Point the backend at canonical Web assets and runtime data folders."""
     configure_runtime_paths(backend)
+    configure_server_runtime_layout(backend)
+    install_command_console(backend)
+    install_update_estimate_api(backend)
     target = Path(web_dir).expanduser().resolve() if web_dir else _resolve_default_web_dir()
     if not target.is_dir():
         raise FileNotFoundError(f"Web assets directory does not exist: {target}")

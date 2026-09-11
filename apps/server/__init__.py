@@ -18,6 +18,7 @@ from . import server_runtime_guard as _server_runtime_guard
 from . import style_option_guard as _style_option_guard
 from . import web_queue_layout as _web_queue_layout
 from . import websocket_performance_guard as _websocket_performance_guard
+from .runtime_layout import ensure_runtime_layout as _ensure_runtime_layout
 
 
 def _is_server_frame(frame: Any) -> bool:
@@ -54,12 +55,16 @@ _queue_rank_query._restore_build_class_hook()
 
 
 def configure_runtime_paths(module: Any = server) -> Any:
-    """Apply source/frozen runtime paths after the physical code migration."""
+    """Apply source/frozen runtime paths and migrate legacy root YAML files."""
     frozen = bool(getattr(sys, "frozen", False))
     bundle_root = Path(getattr(sys, "_MEIPASS", REPO_ROOT)).resolve()
     app_dir = Path(sys.executable).resolve().parent if frozen else REPO_ROOT
     compatibility_core_dir = REPO_ROOT / "core"
-    yaml_dir = app_dir if frozen else compatibility_core_dir
+    runtime_core_dir = app_dir / "core" if frozen else compatibility_core_dir
+    # Keep appearance/style compatibility where it was; only the three YAML
+    # runtime configs move into core as requested.
+    misc_config_dir = app_dir if frozen else compatibility_core_dir
+    runtime_core_dir, key_dir = _ensure_runtime_layout(app_dir)
 
     source_web = REPO_ROOT / "apps" / "web" / "static"
     bundled_web = bundle_root / "apps" / "web" / "static"
@@ -74,22 +79,24 @@ def configure_runtime_paths(module: Any = server) -> Any:
     module.CORE_DIR = compatibility_core_dir
     module.BUNDLE_DIR = bundle_root
     module.APP_DIR = app_dir
-    module._YAML_DIR = yaml_dir
+    module._YAML_DIR = misc_config_dir
     module.BUNDLE_CORE_DIR = bundle_root / "apps" / "server"
-    module.RUNTIME_CORE_DIR = app_dir / "core" if frozen else compatibility_core_dir
+    module.RUNTIME_CORE_DIR = runtime_core_dir
     module.BUNDLE_UI_DIR = bundled_web
     module.UI_DIR = ui_dir
-    module.CONFIG_PATH = yaml_dir / "config.yaml"
+    module.CONFIG_PATH = runtime_core_dir / "config.yaml"
     module.LOG_DIR = app_dir / "log"
-    module.PD_DIR = app_dir / "core" / "cd"
+    module.PD_DIR = runtime_core_dir / "cd"
     module.QUEUE_STATE_PATH = module.PD_DIR / "queue_archive_state.json"
     module.BLACKLIST_PATH = module.PD_DIR / "blacklist.csv"
-    module.QUANXIAN_PATH = yaml_dir / "quanxian.yaml"
-    module.KAIGUAN_PATH = yaml_dir / "kaiguan.yaml"
-    module.STYLE_PATH = yaml_dir / "style.json"
-    module.APPEARANCE_PATH = yaml_dir / "appearance.json"
+    module.QUANXIAN_PATH = runtime_core_dir / "quanxian.yaml"
+    module.KAIGUAN_PATH = runtime_core_dir / "kaiguan.yaml"
+    module.STYLE_PATH = misc_config_dir / "style.json"
+    module.APPEARANCE_PATH = misc_config_dir / "appearance.json"
+    module.KEY_DIR = key_dir
+    module.UPDATE_RESULT_PATH = key_dir / "update-result.json"
     module.LIVE_STYLE_CSS_PATH = ui_dir / "moren.css"
-    module._CONFIG_LOCK_PATH = yaml_dir / ".config.lock"
+    module._CONFIG_LOCK_PATH = runtime_core_dir / ".config.lock"
     return module
 
 

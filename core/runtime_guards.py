@@ -123,12 +123,16 @@ def _application_dir() -> Path:
 
 def _validated_cleanup_target(app_dir: Path | None = None) -> Path | None:
     root = Path(app_dir) if app_dir is not None else _application_dir()
-    marker = root / "update-result.json"
-    try:
-        payload = json.loads(marker.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, TypeError):
-        return None
-    if not isinstance(payload, dict):
+    payload: dict[str, Any] | None = None
+    for marker in (root / "key" / "update-result.json", root / "update-result.json"):
+        try:
+            candidate = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(candidate, dict):
+            payload = candidate
+            break
+    if payload is None:
         return None
 
     raw_target = str(payload.get("cleanup_dir", "") or "").strip()

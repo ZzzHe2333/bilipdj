@@ -7,12 +7,14 @@ from pathlib import Path, PurePosixPath
 # Matching is case-insensitive because the supported desktop target is Windows.
 PRESERVED_FILES = frozenset(
     {
+        # Legacy root locations are preserved for migration compatibility.
         "config.yaml",
         "quanxian.yaml",
         "kaiguan.yaml",
         "appearance.json",
         "style.json",
         "update-result.json",
+        # Current runtime locations.
         "core/config.yaml",
         "core/quanxian.yaml",
         "core/kaiguan.yaml",
@@ -26,6 +28,7 @@ PRESERVED_PREFIXES = (
     "logs/",
     "backup/",
     "plugins/",
+    "key/",
 )
 
 

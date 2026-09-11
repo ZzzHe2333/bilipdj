@@ -25,6 +25,13 @@ class _FakeProcess:
 UpdateFunction = Callable[..., None]
 
 
+def _read_update_result(app_dir: Path) -> dict:
+    for path in (app_dir / "key" / "update-result.json", app_dir / "update-result.json"):
+        if path.is_file():
+            return json.loads(path.read_text(encoding="utf-8"))
+    raise AssertionError("update-result.json was not written to key/ or legacy root")
+
+
 def _write_old_app(app_dir: Path) -> None:
     app_dir.mkdir(parents=True)
     (app_dir / "main.exe").write_bytes(b"old-main")
@@ -112,9 +119,11 @@ def _test_successful_update(
     assert (app_dir / "log" / "session.log").read_text(encoding="utf-8") == "keep-log"
     assert not (app_dir.parent / ".BiliPDJ.update-backup").exists()
 
-    result = json.loads((app_dir / "update-result.json").read_text(encoding="utf-8"))
+    result = _read_update_result(app_dir)
     assert result["status"] == "installed"
     assert Path(result["backup_dir"]) == snapshot
+    assert (app_dir / "key" / "update-result.json").is_file()
+    assert not (app_dir / "update-result.json").exists()
 
     second = updater.create_update_snapshot(app_dir, "../3.0.2 unsafe")
     assert second.parent == app_dir / "backup"
@@ -151,9 +160,11 @@ def _test_failed_startup_rolls_back(
     assert not (app_dir / "new-only.txt").exists()
     assert not (app_dir.parent / ".BiliPDJ.update-backup").exists()
 
-    result = json.loads((app_dir / "update-result.json").read_text(encoding="utf-8"))
+    result = _read_update_result(app_dir)
     assert result["status"] == "rolled_back"
     assert Path(result["backup_dir"]) == snapshot
+    assert (app_dir / "key" / "update-result.json").is_file()
+    assert not (app_dir / "update-result.json").exists()
 
 
 def _test_preflight_failure_with_existing_history(
@@ -181,14 +192,17 @@ def _test_preflight_failure_with_existing_history(
     ) == "historical-backup"
     assert not (app_dir.parent / ".BiliPDJ.update-backup").exists()
 
-    result = json.loads((app_dir / "update-result.json").read_text(encoding="utf-8"))
+    result = _read_update_result(app_dir)
     assert result["status"] == "preflight_failed"
     assert result["backup_dir"] == ""
+    assert (app_dir / "key" / "update-result.json").is_file()
+    assert not (app_dir / "update-result.json").exists()
 
 
 def main() -> None:
     assert Path("log") in updater.PRESERVE_PATHS
     assert Path("backup") in updater.PRESERVE_PATHS
+    assert Path("key") in updater.PRESERVE_PATHS
 
     original_launch = updater.launch_main
     original_grace = updater.STARTUP_GRACE_SECONDS
