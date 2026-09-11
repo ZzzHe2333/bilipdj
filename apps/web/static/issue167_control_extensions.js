@@ -135,8 +135,18 @@
     const select = $('platform-select');
     const pane = $('settings-platform');
     if (!select || !pane) return;
-    select.addEventListener('change', () => window.setTimeout(syncPlatformFields, 0));
+    let lastPlatform = String(select.value || 'bilibili');
+    select.addEventListener('change', () => {
+      lastPlatform = String(select.value || 'bilibili');
+      window.setTimeout(syncPlatformFields, 0);
+    });
     new MutationObserver(syncPlatformFields).observe(pane, { childList: true, subtree: true });
+    window.setInterval(() => {
+      const current = String(select.value || 'bilibili');
+      if (current === lastPlatform) return;
+      lastPlatform = current;
+      syncPlatformFields();
+    }, 250);
     syncPlatformFields();
   }
 
