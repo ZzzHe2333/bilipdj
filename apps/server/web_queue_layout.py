@@ -17,44 +17,46 @@ html, body {
 }
 .wk {
   position: relative;
-  width: min(92%, 720px);
-  min-height: 72vh;
+  width: auto;
+  min-height: 0;
   height: auto;
-  margin: 4vh auto;
-  padding: 22px;
-  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
   text-overflow: clip;
   white-space: normal;
-  border: 1px solid rgba(0,229,255,.32);
-  border-radius: 24px;
-  background: linear-gradient(145deg, rgba(8,18,38,.88), rgba(4,10,24,.72));
-  box-shadow: 0 24px 80px rgba(0,0,0,.34), inset 0 1px rgba(255,255,255,.08);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
 }
+.wk::before { content: none; }
 .vText { display: none !important; }
 .div {
   position: relative;
   display: grid;
   width: auto;
   height: auto;
-  max-height: 68vh;
+  max-height: none;
   float: none;
   gap: var(--queue-item-gap);
   margin-top: 0;
-  overflow: auto;
+  overflow: visible;
   line-height: normal;
   text-align: initial;
-  scrollbar-width: thin;
-  scrollbar-color: #00e5ff transparent;
+  scrollbar-width: none;
 }
+.div::-webkit-scrollbar { display: none; }
 .queue-item {
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr);
   align-items: center;
-  min-height: 54px;
+  min-height: 0;
   padding: var(--queue-item-padding-y) var(--queue-item-padding-x);
-  border: 1px solid rgba(255,255,255,.08);
-  border-radius: 14px;
-  background: linear-gradient(90deg, rgba(255,255,255,.08), rgba(255,255,255,.025));
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 .queue-item.no-sequence { grid-template-columns: minmax(0, 1fr); }
 .queue-number {
@@ -62,8 +64,8 @@ html, body {
   place-items: center;
   width: 34px;
   height: 34px;
-  border-radius: 10px;
-  background: rgba(0,229,255,.14);
+  border-radius: 0;
+  background: transparent;
   color: #00e5ff;
   font-size: 12px;
   font-weight: 800;
@@ -86,7 +88,7 @@ html, body {
   -webkit-text-stroke: 2px var(--text-stroke);
 }
 @media (max-width: 520px) {
-  .wk { width: auto; margin: 12px; padding: 16px; border-radius: 18px; }
+  .wk { width: auto; margin: 0; padding: 0; border-radius: 0; }
 }
 '''
 
