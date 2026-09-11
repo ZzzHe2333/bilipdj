@@ -107,6 +107,8 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
                 from .issue79_features import patch_control_panel_issue79
                 from .issue180_windows_ui import patch_control_panel_issue180
                 from .issue185_stability import patch_control_panel_issue185
+                from .issue187_stability import patch_control_panel_issue187
+                from .issue187_update_channel import install_update_channel_guard
                 from .portable_autostart import patch_control_panel_portable_autostart
                 from .purple_mouse_control_guard import patch_control_panel_purple_mouse
                 from .redtv_control_guard import patch_control_panel_redtv
@@ -116,6 +118,7 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
                 from .webdav_backup_ui import patch_control_panel_webdav_backup
 
                 install_style_save_transport()
+                install_update_channel_guard()
                 patch_control_panel_class(cls)
                 patch_control_panel_features(cls)
                 patch_control_panel_about(cls)
@@ -133,6 +136,7 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
                 patch_control_panel_purple_mouse(cls)
                 patch_control_panel_issue180(cls)
                 patch_control_panel_issue185(cls)
+                patch_control_panel_issue187(cls)
                 patch_control_panel_unified_theme(cls)
                 _install_final_support_renderer(cls, module)
             finally:
