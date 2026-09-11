@@ -84,6 +84,9 @@ def main() -> None:
     check_release_channel_selection()
     check_server_installation()
     check_desktop_stability()
+    from issue187_regression_guard import main as issue187_main
+
+    issue187_main()
     print("issue #185 Web/desktop regression guard: OK")
 
 
