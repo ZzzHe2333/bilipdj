@@ -4,7 +4,7 @@ import re
 import sys
 from pathlib import Path
 
-_VERSION_PATTERN = re.compile(r"^\d+(?:\.\d+){2,}$")
+_VERSION_PATTERN = re.compile(r"^\d+(?:\.\d+){2,}(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$")
 
 
 def _version_candidates() -> tuple[Path, ...]:
