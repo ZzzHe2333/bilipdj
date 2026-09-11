@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import re
 import threading
+import time
 from typing import Any
 
 from apps.server import issue185_runtime_guard, update_estimate_api, web_control_guard, web_update_api
 
 _PATCH_LOCK = threading.RLock()
 _LAUNCH_LOCK = threading.RLock()
+_CATALOG_LOCK = threading.RLock()
+_CATALOG_CACHE: dict[str, Any] = {"time": 0.0, "entries": None}
+_CATALOG_TTL_SECONDS = 45.0
 
 
 def _release_version(payload: dict[str, Any]) -> str:
@@ -87,28 +91,37 @@ def _validated_manifest(release: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def _catalog() -> list[dict[str, Any]]:
-    releases = _release_list()
-    chosen = [_latest(releases, prerelease=False), _latest(releases, prerelease=True)]
-    result: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    errors: list[str] = []
-    for release in chosen:
-        if release is None:
-            continue
-        tag = str(release.get("tag_name", "") or "").strip()
-        if not tag or tag in seen:
-            continue
-        try:
-            manifest = _validated_manifest(release)
-        except Exception as exc:  # noqa: BLE001
-            errors.append(f"{tag}: {exc}")
-            continue
-        seen.add(tag)
-        result.append({"release": release, "manifest": manifest})
-    if not result:
-        raise RuntimeError("无法读取可用 Release" + (f"：{'；'.join(errors)}" if errors else ""))
-    return result
+def _catalog(*, refresh: bool = False) -> list[dict[str, Any]]:
+    now = time.monotonic()
+    with _CATALOG_LOCK:
+        cached = _CATALOG_CACHE.get("entries")
+        cached_at = float(_CATALOG_CACHE.get("time", 0.0) or 0.0)
+        if not refresh and isinstance(cached, list) and cached and now - cached_at < _CATALOG_TTL_SECONDS:
+            return cached
+
+        releases = _release_list()
+        chosen = [_latest(releases, prerelease=False), _latest(releases, prerelease=True)]
+        result: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        errors: list[str] = []
+        for release in chosen:
+            if release is None:
+                continue
+            tag = str(release.get("tag_name", "") or "").strip()
+            if not tag or tag in seen:
+                continue
+            try:
+                manifest = _validated_manifest(release)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"{tag}: {exc}")
+                continue
+            seen.add(tag)
+            result.append({"release": release, "manifest": manifest})
+        if not result:
+            raise RuntimeError("无法读取可用 Release" + (f"：{'；'.join(errors)}" if errors else ""))
+        _CATALOG_CACHE["time"] = now
+        _CATALOG_CACHE["entries"] = result
+        return result
 
 
 def _summary(entry: dict[str, Any]) -> dict[str, Any]:
@@ -181,6 +194,13 @@ def install_issue189_release_selector(server_module: Any) -> bool:
                         selected = entry
                         break
                 if selected is None:
+                    # Refresh once so a just-published Release can be selected immediately.
+                    entries = _catalog(refresh=True)
+                    for entry in entries:
+                        if str(entry["release"].get("tag_name", "") or "").strip() == target_tag:
+                            selected = entry
+                            break
+                if selected is None:
                     raise ValueError("所选云端版本已不存在，请刷新版本列表后重试")
             else:
                 selected = entries[0]
@@ -210,7 +230,7 @@ def install_issue189_release_selector(server_module: Any) -> bool:
                 "published_at": str(release.get("published_at", "") or ""),
                 "html_url": str(release.get("html_url", "") or ""),
                 "body": str(release.get("body", "") or "")[:12000],
-                "prerelease": False,
+                "prerelease": bool(release.get("prerelease")),
             }
 
         def stable_estimate_release() -> dict[str, Any]:
