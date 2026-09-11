@@ -22,13 +22,41 @@ def _set_notes(app: Any, text: str) -> None:
     widget.configure(state="disabled")
 
 
+def _selected_version_source(app: Any) -> str:
+    mapping = getattr(app, "_update_version_candidates", None)
+    variable = getattr(app, "update_version_var", None)
+    if not isinstance(mapping, dict) or variable is None:
+        return ""
+    candidate = mapping.get(str(variable.get()))
+    return str(getattr(candidate, "source", "")) if candidate is not None else ""
+
+
 def _set_busy(app: Any, busy: bool) -> None:
     app._update_busy = busy
     check_button = getattr(app, "_update_check_button", None)
     full_button = getattr(app, "_update_full_button", getattr(app, "_update_install_button", None))
     incremental_button = getattr(app, "_update_incremental_button", None)
+    version_combo = getattr(app, "_update_version_combo", None)
     if check_button is not None:
         check_button.configure(state="disabled" if busy else "normal")
+    if version_combo is not None:
+        values = tuple(version_combo.cget("values") or ())
+        version_combo.configure(state="disabled" if busy or not values else "readonly")
+
+    source = _selected_version_source(app)
+    if source:
+        enabled = not busy
+        if full_button is not None:
+            full_button.configure(
+                text="恢复旧版" if source == "local" else "全量更新",
+                state="normal" if enabled else "disabled",
+            )
+        if incremental_button is not None:
+            incremental_button.configure(
+                state="normal" if enabled and source == "cloud" else "disabled"
+            )
+        return
+
     enabled = not busy and getattr(app, "_available_update", None) is not None
     if full_button is not None:
         full_button.configure(state="normal" if enabled else "disabled")
@@ -172,7 +200,12 @@ def auto_check(app: Any) -> None:
     if not hasattr(app, "update_status_var"):
         return
     if getattr(sys, "frozen", False):
-        check_for_updates(app, silent=True)
+        if hasattr(app, "_update_version_combo"):
+            from . import update_version_selector
+
+            update_version_selector.check_for_versions(app, silent=True)
+        else:
+            check_for_updates(app, silent=True)
     else:
         app.update_status_var.set("开发模式：可检查版本，但自动安装仅在 Windows 打包版中启用。")
 

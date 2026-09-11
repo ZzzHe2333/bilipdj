@@ -7,7 +7,7 @@ from pathlib import Path
 from tkinter import messagebox, ttk
 from typing import Any
 
-from . import update_network, update_ui
+from . import update_network, update_ui, update_version_selector
 from .version import APP_VERSION
 
 
@@ -124,6 +124,33 @@ def test_proxy_settings(app: Any) -> None:
     threading.Thread(target=worker, name="bilipdj-update-proxy-test", daemon=True).start()
 
 
+def _bind_stable_scroll_region(canvas: tk.Canvas, inner: ttk.Frame, window_id: int) -> None:
+    """Coalesce geometry updates so status/layout changes do not make controls jitter."""
+
+    state: dict[str, Any] = {"job": None, "width": -1}
+
+    def refresh_scroll_region() -> None:
+        state["job"] = None
+        bbox = canvas.bbox("all")
+        if bbox is not None:
+            canvas.configure(scrollregion=bbox)
+
+    def schedule_scroll_region(_event: tk.Event[Any] | None = None) -> None:
+        if state["job"] is None:
+            state["job"] = canvas.after_idle(refresh_scroll_region)
+
+    def resize_inner(event: tk.Event[Any]) -> None:
+        width = max(1, int(event.width))
+        if abs(width - int(state["width"])) <= 1:
+            return
+        state["width"] = width
+        canvas.itemconfigure(window_id, width=width)
+        schedule_scroll_region()
+
+    inner.bind("<Configure>", schedule_scroll_region)
+    canvas.bind("<Configure>", resize_inner)
+
+
 def build_update_tab(
     app: Any,
     frame: ttk.Frame,
@@ -140,8 +167,11 @@ def build_update_tab(
     app._prepared_incremental_update = None
     app._update_launched = False
     app._update_proxy_test_busy = False
+    app._update_version_candidates = {}
+    app._selected_version_label = ""
     app.update_status_var = tk.StringVar(value="尚未检查更新")
     app.update_progress_var = tk.DoubleVar(value=0.0)
+    app.update_version_var = tk.StringVar(value="检查后加载版本")
     app.update_bypass_proxy_var = tk.BooleanVar(value=False)
     app.update_third_party_proxy_var = tk.BooleanVar(value=False)
     app.update_proxy_host_var = tk.StringVar(value="")
@@ -161,8 +191,7 @@ def build_update_tab(
     inner = ttk.Frame(canvas, padding=(10, 4, 10, 16))
     window_id = canvas.create_window((0, 0), window=inner, anchor="nw")
     inner.columnconfigure(0, weight=1)
-    inner.bind("<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
-    canvas.bind("<Configure>", lambda event: canvas.itemconfigure(window_id, width=event.width))
+    _bind_stable_scroll_region(canvas, inner, window_id)
 
     ttk.Label(
         inner,
@@ -174,28 +203,49 @@ def build_update_tab(
     update_frame = ttk.LabelFrame(inner, text="检测更新与更新内容", padding=12)
     update_frame.grid(row=2, column=0, sticky="ew")
     update_frame.columnconfigure(0, weight=1)
-    ttk.Label(update_frame, textvariable=app.update_status_var, wraplength=760, justify="left").grid(
-        row=0, column=0, columnspan=2, sticky="w"
+
+    status_slot = ttk.Frame(update_frame, height=42)
+    status_slot.grid(row=0, column=0, columnspan=2, sticky="ew")
+    status_slot.grid_propagate(False)
+    ttk.Label(status_slot, textvariable=app.update_status_var, wraplength=760, justify="left").place(
+        x=0, y=0, relwidth=1.0, relheight=1.0
     )
+
+    version_row = ttk.Frame(update_frame)
+    version_row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 3))
+    version_row.columnconfigure(1, weight=1)
+    ttk.Label(version_row, text="选择版本").grid(row=0, column=0, sticky="w", padx=(0, 8))
+    app._update_version_combo = ttk.Combobox(
+        version_row,
+        textvariable=app.update_version_var,
+        state="disabled",
+        width=52,
+    )
+    app._update_version_combo.grid(row=0, column=1, sticky="ew")
+    app._update_version_combo.bind(
+        "<<ComboboxSelected>>",
+        lambda _event: update_version_selector.on_version_selected(app),
+    )
+
     app._update_progress = ttk.Progressbar(
         update_frame,
         mode="determinate",
         maximum=100,
         variable=app.update_progress_var,
     )
-    app._update_progress.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(9, 8))
+    app._update_progress.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(7, 8))
     button_row = ttk.Frame(update_frame)
-    button_row.grid(row=2, column=0, columnspan=2, sticky="w")
+    button_row.grid(row=3, column=0, columnspan=2, sticky="w")
     app._update_check_button = ttk.Button(
         button_row,
         text="检查更新",
-        command=lambda: update_ui.check_for_updates(app, silent=False),
+        command=lambda: update_version_selector.check_for_versions(app, silent=False),
     )
     app._update_check_button.pack(side="left", padx=(0, 8))
     app._update_full_button = ttk.Button(
         button_row,
         text="全量更新",
-        command=lambda: update_ui.install_available_update(app),
+        command=lambda: update_version_selector.install_selected_full(app),
         state="disabled",
     )
     app._update_full_button.pack(side="left", padx=(0, 8))
@@ -203,18 +253,18 @@ def build_update_tab(
     app._update_incremental_button = ttk.Button(
         button_row,
         text="增量更新",
-        command=lambda: update_ui.install_incremental_update(app),
+        command=lambda: update_version_selector.install_selected_incremental(app),
         state="disabled",
     )
     app._update_incremental_button.pack(side="left")
     ttk.Label(
         update_frame,
-        text="全量更新：下载完整 ZIP；增量更新：按逐文件 SHA-256 扫描，只替换缺失/变化的程序资源。",
+        text="云端版本可全量/增量更新；本地备份无需重新下载，使用“恢复旧版”完成回退。",
         wraplength=760,
-    ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
-    ttk.Label(update_frame, text="更新内容").grid(row=4, column=0, sticky="w", pady=(12, 4))
+    ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
+    ttk.Label(update_frame, text="更新内容").grid(row=5, column=0, sticky="w", pady=(12, 4))
     notes_frame = ttk.Frame(update_frame)
-    notes_frame.grid(row=5, column=0, columnspan=2, sticky="nsew")
+    notes_frame.grid(row=6, column=0, columnspan=2, sticky="nsew")
     notes_frame.columnconfigure(0, weight=1)
     app._update_notes = tk.Text(notes_frame, height=10, wrap="word", state="disabled")
     app._all_text_widgets.append(app._update_notes)
@@ -222,7 +272,7 @@ def build_update_tab(
     notes_scroll = ttk.Scrollbar(notes_frame, orient="vertical", command=app._update_notes.yview)
     notes_scroll.grid(row=0, column=1, sticky="ns")
     app._update_notes.configure(yscrollcommand=notes_scroll.set)
-    _set_notes(app, "点击“检查更新”获取 GitHub 最新版本和更新内容。")
+    _set_notes(app, "点击“检查更新”加载云端最新版本和本地 backup 中可恢复的旧版本。")
 
     network = ttk.LabelFrame(inner, text="更新网络", padding=12)
     network.grid(row=3, column=0, sticky="ew", pady=(12, 0))
