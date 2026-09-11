@@ -16,6 +16,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from apps.server import configure_runtime_paths, server as backend  # noqa: E402
 from apps.server.command_console import install_command_console  # noqa: E402
+from apps.server.issue185_runtime_guard import install_issue185_runtime_guards  # noqa: E402
 from apps.server.runtime_layout import configure_server_runtime_layout  # noqa: E402
 from apps.server.update_estimate_api import install_update_estimate_api  # noqa: E402
 from apps.server.web_update_api import install_web_update_api  # noqa: E402
@@ -39,6 +40,7 @@ def configure_web_assets(web_dir: str | os.PathLike[str] | None = None) -> Path:
     """Point the backend at canonical Web assets and runtime data folders."""
     configure_runtime_paths(backend)
     configure_server_runtime_layout(backend)
+    install_issue185_runtime_guards(backend)
     install_command_console(backend)
     install_update_estimate_api(backend)
     install_web_update_api(backend)
