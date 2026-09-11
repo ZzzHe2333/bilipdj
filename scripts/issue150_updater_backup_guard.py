@@ -5,12 +5,13 @@ import sys
 import tempfile
 import zipfile
 from pathlib import Path
+from typing import Callable
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from apps.windows import updater
+from apps.windows import updater, updater_v2
 
 
 class _FakeProcess:
@@ -19,6 +20,9 @@ class _FakeProcess:
 
     def poll(self) -> int | None:
         return self.return_code
+
+
+UpdateFunction = Callable[..., None]
 
 
 def _write_old_app(app_dir: Path) -> None:
@@ -43,6 +47,12 @@ def _write_update_zip(zip_path: Path) -> None:
         archive.writestr("new-only.txt", "new")
 
 
+def _write_invalid_update_zip(zip_path: Path) -> None:
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("main.exe", b"new-main")
+
+
 def _snapshot_dirs(app_dir: Path) -> list[Path]:
     return sorted(
         path
@@ -63,27 +73,33 @@ def _assert_common_backup_contract(app_dir: Path, snapshot: Path) -> None:
     ) == "historical-backup"
 
 
-def _test_successful_update(root: Path) -> None:
-    app_dir = root / "success" / "BiliPDJ"
-    zip_path = root / "success" / "download" / "update.zip"
+def _call_update(
+    perform_update: UpdateFunction,
+    *,
+    app_dir: Path,
+    zip_path: Path,
+) -> None:
+    perform_update(
+        pid=0,
+        app_dir=app_dir,
+        zip_path=zip_path,
+        main_exe_name="main.exe",
+        target_version="3.0.1",
+    )
+
+
+def _test_successful_update(
+    root: Path,
+    label: str,
+    perform_update: UpdateFunction,
+) -> None:
+    app_dir = root / f"success-{label}" / "BiliPDJ"
+    zip_path = root / f"success-{label}" / "download" / "update.zip"
     _write_old_app(app_dir)
     _write_update_zip(zip_path)
 
-    original_launch = updater.launch_main
-    original_grace = updater.STARTUP_GRACE_SECONDS
-    try:
-        updater.launch_main = lambda *_args, **_kwargs: _FakeProcess(None)  # type: ignore[assignment]
-        updater.STARTUP_GRACE_SECONDS = 0.0
-        updater.perform_update(
-            pid=0,
-            app_dir=app_dir,
-            zip_path=zip_path,
-            main_exe_name="main.exe",
-            target_version="3.0.1",
-        )
-    finally:
-        updater.launch_main = original_launch
-        updater.STARTUP_GRACE_SECONDS = original_grace
+    updater.launch_main = lambda *_args, **_kwargs: _FakeProcess(None)  # type: ignore[assignment]
+    _call_update(perform_update, app_dir=app_dir, zip_path=zip_path)
 
     snapshots = _snapshot_dirs(app_dir)
     assert len(snapshots) == 1, snapshots
@@ -108,32 +124,23 @@ def _test_successful_update(root: Path) -> None:
     assert len(_snapshot_dirs(app_dir)) == 2
 
 
-def _test_failed_startup_rolls_back(root: Path) -> None:
-    app_dir = root / "failure" / "BiliPDJ"
-    zip_path = root / "failure" / "download" / "update.zip"
+def _test_failed_startup_rolls_back(
+    root: Path,
+    label: str,
+    perform_update: UpdateFunction,
+) -> None:
+    app_dir = root / f"failure-{label}" / "BiliPDJ"
+    zip_path = root / f"failure-{label}" / "download" / "update.zip"
     _write_old_app(app_dir)
     _write_update_zip(zip_path)
 
-    original_launch = updater.launch_main
-    original_grace = updater.STARTUP_GRACE_SECONDS
+    updater.launch_main = lambda *_args, **_kwargs: _FakeProcess(7)  # type: ignore[assignment]
     try:
-        updater.launch_main = lambda *_args, **_kwargs: _FakeProcess(7)  # type: ignore[assignment]
-        updater.STARTUP_GRACE_SECONDS = 1.0
-        try:
-            updater.perform_update(
-                pid=0,
-                app_dir=app_dir,
-                zip_path=zip_path,
-                main_exe_name="main.exe",
-                target_version="3.0.1",
-            )
-        except updater.UpdaterError as exc:
-            assert "退出码 7" in str(exc)
-        else:
-            raise AssertionError("startup failure must raise UpdaterError")
-    finally:
-        updater.launch_main = original_launch
-        updater.STARTUP_GRACE_SECONDS = original_grace
+        _call_update(perform_update, app_dir=app_dir, zip_path=zip_path)
+    except updater.UpdaterError as exc:
+        assert "退出码 7" in str(exc)
+    else:
+        raise AssertionError("startup failure must raise UpdaterError")
 
     snapshots = _snapshot_dirs(app_dir)
     assert len(snapshots) == 1, snapshots
@@ -149,13 +156,61 @@ def _test_failed_startup_rolls_back(root: Path) -> None:
     assert Path(result["backup_dir"]) == snapshot
 
 
+def _test_preflight_failure_with_existing_history(
+    root: Path,
+    label: str,
+    perform_update: UpdateFunction,
+) -> None:
+    app_dir = root / f"preflight-{label}" / "BiliPDJ"
+    zip_path = root / f"preflight-{label}" / "download" / "invalid.zip"
+    _write_old_app(app_dir)
+    _write_invalid_update_zip(zip_path)
+
+    updater.launch_main = lambda *_args, **_kwargs: _FakeProcess(None)  # type: ignore[assignment]
+    try:
+        _call_update(perform_update, app_dir=app_dir, zip_path=zip_path)
+    except updater.UpdaterError as exc:
+        assert "缺少 updater.exe" in str(exc)
+    else:
+        raise AssertionError("invalid staging must raise UpdaterError")
+
+    assert _snapshot_dirs(app_dir) == []
+    assert (app_dir / "old-only.txt").read_text(encoding="utf-8") == "old"
+    assert (app_dir / "backup" / "history" / "keep.txt").read_text(
+        encoding="utf-8"
+    ) == "historical-backup"
+    assert not (app_dir.parent / ".BiliPDJ.update-backup").exists()
+
+    result = json.loads((app_dir / "update-result.json").read_text(encoding="utf-8"))
+    assert result["status"] == "preflight_failed"
+    assert result["backup_dir"] == ""
+
+
 def main() -> None:
     assert Path("log") in updater.PRESERVE_PATHS
     assert Path("backup") in updater.PRESERVE_PATHS
-    with tempfile.TemporaryDirectory(prefix="bilipdj-issue150-") as temp_dir:
-        root = Path(temp_dir)
-        _test_successful_update(root)
-        _test_failed_startup_rolls_back(root)
+
+    original_launch = updater.launch_main
+    original_grace = updater.STARTUP_GRACE_SECONDS
+    original_settle = updater_v2.POST_EXIT_SETTLE_SECONDS
+    try:
+        updater.STARTUP_GRACE_SECONDS = 0.0
+        updater_v2.POST_EXIT_SETTLE_SECONDS = 0.0
+        implementations = (
+            ("legacy", updater.perform_update),
+            ("gui", updater_v2.perform_update),
+        )
+        with tempfile.TemporaryDirectory(prefix="bilipdj-issue150-") as temp_dir:
+            root = Path(temp_dir)
+            for label, perform_update in implementations:
+                _test_successful_update(root, label, perform_update)
+                _test_failed_startup_rolls_back(root, label, perform_update)
+                _test_preflight_failure_with_existing_history(root, label, perform_update)
+    finally:
+        updater.launch_main = original_launch
+        updater.STARTUP_GRACE_SECONDS = original_grace
+        updater_v2.POST_EXIT_SETTLE_SECONDS = original_settle
+
     print("issue150 updater backup guard: ok")
 
 
