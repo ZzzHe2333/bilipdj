@@ -1,0 +1,76 @@
+# Git / CI / agent metadata is not needed inside the runtime image.
+.git
+.github
+.agents
+
+# Docker persistent/runtime data. These paths may contain credentials,
+# cookies, WebDAV settings, logs, queue archives and plugin private data.
+data/
+log/
+plugins/
+backup/
+key/
+tmp*
+*.log
+
+# Legacy/source runtime state that may exist locally even though Git ignores it.
+config.yaml
+kaiguan.yaml
+quanxian.yaml
+core/config.yaml
+core/kaiguan.yaml
+core/quanxian.yaml
+core/platform_config_archive*.json
+core/*cookie*
+core/*token*
+core/cd/
+
+# Local environment files / credentials.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets.*
+
+# Python caches, environments and test output.
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.pyre/
+.pytype/
+.ruff_cache/
+.hypothesis/
+.tox/
+.nox/
+.venv/
+venv/
+env/
+ENV/
+__pypackages__/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Node/Web tooling and generated build/package output.
+node_modules/
+build/
+dist/
+downloads/
+_package/
+package-tk/
+package-web/
+*.egg-info/
+.eggs/
+*.egg
+
+# Editor / OS noise.
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
