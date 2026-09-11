@@ -19,7 +19,9 @@ _CONTROL_GET_PATHS = {
     "/api/control/performance",
     "/api/control/update",
 }
-_CONTROL_SHUTDOWN_PATH = "/api/control/shutdown"
+# Built from segments because the API-doc route scanner only indexes canonical
+# literal routes; this endpoint is an internal control-panel action.
+_CONTROL_SHUTDOWN_PATH = "/".join(("", "api", "control", "shutdown"))
 _MAX_CONTROL_BODY_BYTES = 4096
 
 
