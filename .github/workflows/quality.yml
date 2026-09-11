@@ -67,6 +67,8 @@ jobs:
         run: python scripts/generate_api_docs.py --output /tmp/bilipdj-api
       - name: Validate Web source build
         run: python apps/web/build.py
+      - name: Validate stable Web scrollbar gutter
+        run: python scripts/issue148_scrollbar_jitter_guard.py
       - name: Validate key generated Web files
         run: |
           test -f apps/web/dist/index.html
