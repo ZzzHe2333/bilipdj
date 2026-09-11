@@ -24,6 +24,7 @@ hiddenimports = [
     "apps.windows.control_panel_features", "apps.windows.control_panel_ui_finish", "apps.windows.gui_log_sink",
     "apps.windows.about_page", "apps.windows.bilibili_qr_dialog", "apps.windows.portable_autostart", "apps.windows.style_save_transport",
     "apps.windows.support_us", "apps.windows.webdav_backup_ui", "apps.windows.issue79_features", "apps.windows.redtv_control_guard", "apps.windows.purple_mouse_control_guard", "apps.windows.unified_theme",
+    "apps.windows.issue187_update_channel", "apps.windows.issue189_release_selector",
     "apps.windows.update_client", "apps.windows.update_ui", "apps.windows.update_network", "apps.windows.update_page",
     "apps.windows.incremental_update", "apps.windows.update_manifest",
     "apps.windows.overlay_refresh_guard", "apps.windows.overlay_performance_guard", "apps.windows.slider_switches",
