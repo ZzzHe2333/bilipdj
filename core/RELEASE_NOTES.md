@@ -1,96 +1,65 @@
-# 弹幕排队姬 v2.0.4
+# 弹幕排队姬 v3.0.0
 
-v2.0.4 重点升级更新系统、Web 控制台、Windows 手动排队、多平台弹幕流和后端服务器管理体验。
+v3.0.0 是 BiliPDJ 插件化与多平台弹幕核心的一次主版本升级。重点从“把不同平台伪装成 Bilibili 消息”迁移到统一 `DanmuEvent`，并完善 Python / JavaScript 插件运行时、权限边界、动态配置和发布安全。
 
-## 更新清单与 SHA-256
+## 插件系统
 
-Windows 与 Web 不再通过猜测 Release 文件名检查更新。发行流程会生成并随 Release 发布 `update-manifest.json`，其中明确提供：
+- 支持 `.bilipdj-plugin` 安装包的安装、卸载、启用和禁用；
+- manifest 支持版本兼容、文件哈希、签名/完整性校验、权限声明和 capability；
+- 同时支持 Python 与 JavaScript 插件；
+- JavaScript 插件在独立进程 QuickJS runtime 中执行，保留 watchdog 和 IPC 边界；
+- 新增 `config_schema`，插件可以声明动态配置项，Web 设置页自动生成安全配置界面；
+- secret 配置不会通过读取 API 回显明文，空值保存可保留现有 secret；
+- JavaScript `host.httpRequest()` 支持受限 GET / POST、请求体、状态码和安全响应头；
+- Python / JavaScript 插件私有数据统一限制为单文件 4 MiB、每插件 64 MiB、最多 1024 个常规文件，并限制相对路径深度与长度。
 
-- 最新版本号；
-- 客户端类型；
-- 安装包准确文件名；
-- 下载地址；
-- 文件大小；
-- SHA-256。
+## 平台无关 DanmuEvent
 
-Windows 自动更新先读取更新清单，再下载对应 ZIP 并校验 SHA-256。Web 更新页同步显示 Web 便携包的文件名、大小、SHA-256 和下载入口。
+- 新增平台无关 `DanmuEvent` 作为 QueueManager 的标准输入；
+- Bilibili 原始 `DANMU_MSG` 继续兼容，但只作为适配层；
+- 新插件应使用 Python `context.process_danmu_event(...)` 或 JavaScript `host.processDanmuEvent(...)`；
+- 原生字符串用户 ID 被完整保留，不再要求第三方平台伪造 Bilibili 数字 UID；
+- 房管、主播、舰长/守护、粉丝牌和接收时间使用统一身份字段；
+- `DANMU_EVENT` WebSocket 事件提供统一 `platform / message / identity / received_at` 结构。
 
-## Web 样式设置
+## 平台 Relay 与兼容
 
-“设置 → 样式”新增可视化编辑器和实时预览，包括：
+- 抖音、虎牙、Twitch、YouTube 的内建 Relay 已改为直接产生 `DanmuEvent`，去除伪造 Bilibili JSON 的内部耦合；
+- 抖音 `role >= 3` 按房管身份映射；
+- Twitch 保留 moderator / broadcaster / badge 等原生身份元数据；
+- 旧 `processDanmu` / `process_danmu_json` 仍保留为 Bilibili 兼容 API，已有插件不会被强制一次性迁移。
 
-- 三段背景色；
-- 文字颜色、描边颜色和描边开关；
-- 字体、字号、字重、斜体；
-- 行高、字间距、词间距、条目间距；
-- 内边距、对齐、透明度；
-- 自动滚动；
-- 是否显示序号。
+## 安全与稳定性
 
-原高级 JSON 编辑器继续保留，便于高级用户直接修改完整样式配置。
+- 发布前补齐插件 API 权限、文件路径、symlink、mutation、HTTP Host、config schema、DanmuEvent 等专项回归；
+- 插件私有数据增加总容量与文件数配额，避免失控插件持续创建文件耗尽磁盘；
+- 更新检查顺序调整为 Release 附件 manifest → GitHub latest Release API → `now` 静态 manifest 最后兜底，避免旧静态清单抢占最新 Release；
+- 普通 `now` push 和 Pull Request 只构建/校验，不再拥有创建 GitHub Release 的权限；
+- GitHub Release 只能通过显式 workflow dispatch 或 `v*` tag 流程创建。
 
-## 后端服务器系统
+## Windows / Web Portable 验证
 
-Web 便携启动器改为“后端服务器系统”：
+- Tk Windows 与 Web Portable 都会真实 PyInstaller 构建；
+- 打包 CI 在生成 ZIP 前实际启动两个 frozen GUI EXE 的隐藏插件自检入口；
+- 自检会在冻结环境中安装并启动 QuickJS 插件，通过 multiprocessing worker 发送 `DanmuEvent`；
+- frozen EXE 返回非 0 时停止打包，不会生成可发布 ZIP；
+- Windows GUI 子系统 EXE 使用 `Start-Process -Wait -PassThru` 获取真实退出码。
 
-- 明确提示后端停止后 Web、Windows 与第三方客户端会失去排队/弹幕/管理能力；
-- 自动打开 Web 控制台后可隐藏到系统托盘；
-- 托盘菜单可重新打开服务器窗口、Web 控制台和队列看板；
-- 关闭窗口时会询问是停止后端还是隐藏到右下角继续运行；
-- 不会误杀由其他程序启动的外部后端。
+## 更新与校验
 
-## 手动新增排队项
+正式发行会同时提供：
 
-Windows 与 Web 统一为两个输入字段：
-
-1. 用户名：必填；
-2. 排队内容：可选。
-
-Web 队列表格同步显示“序号 / 用户名 / 内容 / 最近操作 / 操作”，并继续兼容原有队列存档格式。
-
-## 多平台弹幕流
-
-Windows 与 Web 的设置中新增“激活平台”：
-
-- 当前支持同时激活 Bilibili 与抖音；
-- 每个平台当前只允许一个直播间；
-- 多个平台收到的排队指令进入同一个后端队列；
-- 可分别查看各平台弹幕连接状态；
-- 虎牙、快手、斗鱼、微信视频号仍为预留配置，尚未接入弹幕流。
-
-## 导航与项目信息
-
-Windows 与 Web 同步调整：
-
-- 左侧导航取消数字前缀；
-- 保留“更新软件”；
-- 新增/修正“关于项目”；
-- “支持我们”保持独立页面；
-- “关于项目”提供 GitHub 仓库和 Releases 发行包入口。
-
-GitHub：`https://github.com/ZzzHe2333/bilipdj`
-
-Releases：`https://github.com/ZzzHe2333/bilipdj/releases`
-
-## Web 主题
-
-Web 控制台新增：
-
-- 跟随系统；
-- 白天模式；
-- 夜晚模式；
-- 自定义强调色、页面背景、卡片背景和正文颜色。
-
-主题设置保存在浏览器本地，只影响控制台界面，不会改变 OBS 队列样式。
-
-## 发行包
-
-发布完成后提供：
-
-- `BiliPDJ-v2.0.4-Windows-Tk-Portable-x64.zip`
-- `BiliPDJ-v2.0.4-Windows-Tk-Portable-x64.zip.sha256`
-- `BiliPDJ-v2.0.4-Web-Portable-x64.zip`
-- `BiliPDJ-v2.0.4-Web-Portable-x64.zip.sha256`
+- `BiliPDJ-v3.0.0-Windows-Tk-Portable-x64.zip`
+- `BiliPDJ-v3.0.0-Windows-Tk-Portable-x64.zip.sha256`
+- `BiliPDJ-v3.0.0-Web-Portable-x64.zip`
+- `BiliPDJ-v3.0.0-Web-Portable-x64.zip.sha256`
 - `update-manifest.json`
 
-请完整解压便携包后再运行程序。
+`update-manifest.json` 由发布构建根据真实产物生成，包含包名、下载地址、文件大小和 SHA-256。客户端仍会先读取 manifest 并校验 SHA-256 后再安装。
+
+## 升级建议
+
+- 从 v2.x 升级时请完整解压新 portable 包；
+- 原有队列、配置和兼容 API 继续保留；
+- 新开发的第三方弹幕插件建议直接使用 `DanmuEvent` API；
+- 高权限插件仍应仅安装可信来源，尤其是声明 `subprocess`、网络或文件写权限的插件。

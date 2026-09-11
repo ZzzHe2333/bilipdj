@@ -283,18 +283,18 @@ https://github.com/ZzzHe2333/bilipdj/releases/latest/download/update-manifest.js
 ```json
 {
   "schema": 1,
-  "version": "2.0.4",
-  "tag_name": "v2.0.4",
-  "release_url": "https://github.com/ZzzHe2333/bilipdj/releases/tag/v2.0.4",
+  "version": "3.0.0",
+  "tag_name": "v3.0.0",
+  "release_url": "https://github.com/ZzzHe2333/bilipdj/releases/tag/v3.0.0",
   "packages": {
     "windows-tk-x64": {
-      "filename": "BiliPDJ-v2.0.4-Windows-Tk-Portable-x64.zip",
+      "filename": "BiliPDJ-v3.0.0-Windows-Tk-Portable-x64.zip",
       "url": "...",
       "sha256": "64位十六进制SHA256",
       "size": 12345678
     },
     "web-portable-x64": {
-      "filename": "BiliPDJ-v2.0.4-Web-Portable-x64.zip",
+      "filename": "BiliPDJ-v3.0.0-Web-Portable-x64.zip",
       "url": "...",
       "sha256": "64位十六进制SHA256",
       "size": 12345678
