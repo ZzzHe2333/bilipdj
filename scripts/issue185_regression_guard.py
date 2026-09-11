@@ -85,8 +85,10 @@ def main() -> None:
     check_server_installation()
     check_desktop_stability()
     from issue187_regression_guard import main as issue187_main
+    from issue189_regression_guard import main as issue189_main
 
     issue187_main()
+    issue189_main()
     print("issue #185 Web/desktop regression guard: OK")
 
 
