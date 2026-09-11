@@ -32,52 +32,53 @@ html, body {
 }
 .wk {
     position: relative;
-    width: min(92%, 720px);
-    min-height: 72vh;
-    margin: 4vh auto;
-    padding: 22px;
-    overflow: hidden;
-    border: 1px solid color-mix(in srgb, var(--neon) 38%, transparent);
-    border-radius: 24px;
-    background: linear-gradient(145deg, rgba(8, 18, 38, .88), rgba(4, 10, 24, .72));
-    box-shadow: 0 24px 80px rgba(0,0,0,.34), inset 0 1px rgba(255,255,255,.08);
-    backdrop-filter: blur(18px);
+    width: auto;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
 }
 .wk::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background: radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--neon) 18%, transparent), transparent 38%);
+    content: none;
 }
 .div {
     position: relative;
     display: grid;
     gap: var(--queue-item-gap);
     margin-top: 0;
-    max-height: 68vh;
-    overflow: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--neon) transparent;
+    max-height: none;
+    overflow: visible;
+    scrollbar-width: none;
+}
+.div::-webkit-scrollbar {
+    display: none;
 }
 .queue-item {
     display: grid;
     grid-template-columns: 44px 1fr;
     align-items: center;
-    min-height: 54px;
+    min-height: 0;
     padding: var(--queue-item-padding-y) var(--queue-item-padding-x);
-    border: 1px solid rgba(255,255,255,.08);
-    border-radius: 14px;
-    background: linear-gradient(90deg, rgba(255,255,255,.08), rgba(255,255,255,.025));
+    border: 0;
+    border-radius: 0;
+    background: transparent;
     animation: queueEnter .28s ease-out both;
+}
+.queue-item.no-sequence {
+    grid-template-columns: minmax(0, 1fr);
 }
 .queue-number {
     display: grid;
     place-items: center;
     width: 34px;
     height: 34px;
-    border-radius: 10px;
-    background: color-mix(in srgb, var(--neon) 14%, transparent);
+    border-radius: 0;
+    background: transparent;
     color: var(--neon);
     font-size: 12px;
     font-weight: 800;
@@ -107,7 +108,7 @@ html, body {
     .queue-item { animation: none; }
 }
 @media (max-width: 520px) {
-    .wk { width: auto; margin: 12px; padding: 16px; border-radius: 18px; }
+    .wk { width: auto; margin: 0; padding: 0; border-radius: 0; }
 }
 .div span.pdj-confirm-pending {
     animation: pdjPendingBlink 0.7s infinite alternate;
