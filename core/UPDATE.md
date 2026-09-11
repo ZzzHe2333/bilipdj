@@ -2,6 +2,25 @@
 
 ---
 
+## v3.0.0（2026-09-11）
+
+### 插件化与 DanmuEvent
+- 完成 `.bilipdj-plugin` 插件管理器、Python / JavaScript 双运行时、权限和完整性校验。
+- 新增 `config_schema` 动态插件设置，以及受控 `host.httpRequest()`。
+- QueueManager 改为平台无关 `DanmuEvent` 标准输入，第三方平台不再依赖伪造 Bilibili JSON。
+
+### 发布前稳定性与安全
+- Python / JavaScript 插件私有数据增加 4 MiB 单文件、64 MiB 总容量、1024 文件数量限制。
+- 修复更新检查在 Release manifest 不可用时可能被旧 `now/update-manifest.json` 降级的问题。
+- Windows Tk / Web Portable 打包新增 frozen EXE QuickJS 插件端到端自检。
+- 普通 `now` push / PR 的 Release job 保持 skipped，只有显式发布流程可以创建 Release。
+
+### 兼容
+- 旧 Bilibili `DANMU_MSG` 和插件 `processDanmu/process_danmu_json` 接口继续保留。
+- 新插件推荐使用 `process_danmu_event/processDanmuEvent`。
+
+---
+
 ## v1.0.8（2026-07-18）
 
 ### 程序内自动更新

@@ -38,8 +38,8 @@ Server 是唯一业务状态源，Windows 客户端、Web 控制台、OBS 展示
 
 | 版本 | 发行包 | 启动方式 | 说明 |
 |---|---|---|---|
-| 🖥️ Tk Windows 便携版 | `BiliPDJ-v2.0.4-Windows-Tk-Portable-x64.zip` | 解压后双击 `main.exe` | 桌面前端自动拉起内置后端 |
-| 🌐 Web 便携版 | `BiliPDJ-v2.0.4-Web-Portable-x64.zip` | 解压后双击 `BiliPDJ-Web.exe` | 启动内置后端服务器，就绪后自动打开 Web 控制台 |
+| 🖥️ Tk Windows 便携版 | `BiliPDJ-v3.0.0-Windows-Tk-Portable-x64.zip` | 解压后双击 `main.exe` | 桌面前端自动拉起内置后端 |
+| 🌐 Web 便携版 | `BiliPDJ-v3.0.0-Web-Portable-x64.zip` | 解压后双击 `BiliPDJ-Web.exe` | 启动内置后端服务器，就绪后自动打开 Web 控制台 |
 
 每个发行包都附带 `.sha256` 与 `update-manifest.json`。客户端更新时会先读取 manifest 拿到准确的包名、下载地址、大小和 SHA-256 再下载校验，不会靠猜版本号拼文件名。
 
