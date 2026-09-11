@@ -17,6 +17,7 @@ if str(REPO_ROOT) not in sys.path:
 from apps.server import configure_runtime_paths, server as backend  # noqa: E402
 from apps.server.command_console import install_command_console  # noqa: E402
 from apps.server.issue185_runtime_guard import install_issue185_runtime_guards  # noqa: E402
+from apps.server.issue187_web_update_guard import install_issue187_web_update_guard  # noqa: E402
 from apps.server.runtime_layout import configure_server_runtime_layout  # noqa: E402
 from apps.server.update_estimate_api import install_update_estimate_api  # noqa: E402
 from apps.server.web_update_api import install_web_update_api  # noqa: E402
@@ -44,6 +45,7 @@ def configure_web_assets(web_dir: str | os.PathLike[str] | None = None) -> Path:
     install_command_console(backend)
     install_update_estimate_api(backend)
     install_web_update_api(backend)
+    install_issue187_web_update_guard(backend)
     target = Path(web_dir).expanduser().resolve() if web_dir else _resolve_default_web_dir()
     if not target.is_dir():
         raise FileNotFoundError(f"Web assets directory does not exist: {target}")
