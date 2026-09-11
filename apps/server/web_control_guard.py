@@ -8,6 +8,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from http import HTTPStatus
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,8 @@ _CONTROL_GET_PATHS = {
     "/api/control/performance",
     "/api/control/update",
 }
+_CONTROL_SHUTDOWN_PATH = "/api/control/shutdown"
+_MAX_CONTROL_BODY_BYTES = 4096
 
 
 def _read_version(server_module: Any) -> str:
@@ -181,6 +184,54 @@ def _update_payload(server_module: Any) -> dict[str, Any]:
     }
 
 
+def _same_origin_or_no_origin(handler: Any) -> bool:
+    origin = str(handler.headers.get("Origin", "") or "").strip()
+    if not origin:
+        return True
+    try:
+        parsed = urllib.parse.urlsplit(origin)
+    except ValueError:
+        return False
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    return str(parsed.hostname or "").strip().lower() in {"127.0.0.1", "localhost", "::1"}
+
+
+def _read_control_json(handler: Any) -> dict[str, Any]:
+    content_type = str(handler.headers.get("Content-Type", "") or "").split(";", 1)[0].strip().lower()
+    if content_type != "application/json":
+        raise ValueError("Content-Type 必须是 application/json")
+    try:
+        length = int(handler.headers.get("Content-Length", "0") or 0)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Content-Length 无效") from exc
+    if length <= 0 or length > _MAX_CONTROL_BODY_BYTES:
+        raise ValueError("请求大小无效")
+    try:
+        payload = json.loads(handler.rfile.read(length).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("请求不是有效 JSON") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("请求必须是 JSON 对象")
+    return payload
+
+
+def _schedule_server_shutdown(active_server: Any) -> None:
+    logger = getattr(active_server, "logger", None)
+    if logger is not None:
+        logger.info("[Web控制台] 收到本地关闭服务器请求")
+
+    def stop() -> None:
+        time.sleep(0.15)
+        try:
+            active_server.shutdown()
+        except Exception as exc:  # noqa: BLE001
+            if logger is not None:
+                logger.error("[Web控制台] 关闭服务器失败: %s", exc)
+
+    threading.Thread(target=stop, name="bilipdj-web-shutdown", daemon=True).start()
+
+
 def install_web_control_guard(server_module: Any) -> bool:
     """Add local-only Web control panel endpoints without changing queue logic."""
     if server_module is None or not hasattr(server_module, "ApiHandler"):
@@ -190,6 +241,7 @@ def install_web_control_guard(server_module: Any) -> bool:
             return True
         handler_class = server_module.ApiHandler
         original_get = handler_class.do_GET
+        original_post = handler_class.do_POST
 
         def do_GET(self: Any) -> None:  # noqa: N802
             parsed = urllib.parse.urlparse(self.path)
@@ -230,7 +282,34 @@ def install_web_control_guard(server_module: Any) -> bool:
                 return
             self._write_json(_update_payload(server_module))
 
+        def do_POST(self: Any) -> None:  # noqa: N802
+            path = urllib.parse.urlparse(self.path).path
+            if path != _CONTROL_SHUTDOWN_PATH:
+                return original_post(self)
+            if not self._require_loopback():
+                return
+            if not _same_origin_or_no_origin(self):
+                self._write_json(
+                    {"status": "error", "message": "Origin 不允许访问本地关闭接口"},
+                    status=HTTPStatus.FORBIDDEN,
+                )
+                return
+            try:
+                payload = _read_control_json(self)
+            except ValueError as exc:
+                self._write_json({"status": "error", "message": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            if str(payload.get("confirm", "") or "").strip().lower() != "shutdown":
+                self._write_json(
+                    {"status": "error", "message": "缺少关闭确认"},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            self._write_json({"status": "ok", "message": "后端服务器正在关闭"})
+            _schedule_server_shutdown(self.server)
+
         handler_class.do_GET = do_GET
+        handler_class.do_POST = do_POST
         server_module._web_control_guard_installed = True
         return True
 
