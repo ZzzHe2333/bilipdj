@@ -93,11 +93,13 @@
     if (!grid) return;
     grid.querySelectorAll('[data-switch]').forEach(input => {
       const key = String(input.dataset.switch || '');
+      const translated = SWITCH_LABELS[key];
       const label = input.closest('label');
       const text = label?.querySelector('span');
-      if (text && SWITCH_LABELS[key]) {
-        text.textContent = SWITCH_LABELS[key];
-        label.title = `配置键：${key}`;
+      if (text && translated && text.textContent !== translated) text.textContent = translated;
+      if (label && translated) {
+        const title = `配置键：${key}`;
+        if (label.title !== title) label.title = title;
       }
     });
   }
@@ -106,7 +108,16 @@
     const grid = $('switch-grid');
     if (!grid) return;
     translateSwitchLabels();
-    new MutationObserver(translateSwitchLabels).observe(grid, { childList: true, subtree: true });
+    let queued = false;
+    const observer = new MutationObserver(() => {
+      if (queued) return;
+      queued = true;
+      queueMicrotask(() => {
+        queued = false;
+        translateSwitchLabels();
+      });
+    });
+    observer.observe(grid, { childList: true, subtree: true });
   }
 
   function syncPlatformFields() {
@@ -273,8 +284,8 @@
       full.textContent = fmtMiB(web.full_download_bytes);
       incremental.textContent = web.incremental_available
         ? fmtMiB(web.incremental_download_bytes)
-        : 'Web 便携版暂不支持';
-      if (!web.incremental_available && web.note) incremental.title = web.note;
+        : '当前 Release 未提供增量资源';
+      if (web.note) incremental.title = web.note;
     } catch (error) {
       full.textContent = '检测失败';
       incremental.textContent = '检测失败';
