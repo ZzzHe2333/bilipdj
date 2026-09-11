@@ -4,12 +4,14 @@ import json
 import threading
 import urllib.parse
 from http import HTTPStatus
+from pathlib import Path
 from typing import Any
 
 _PATCH_LOCK = threading.RLock()
 COMMAND_PATH = "/api/control/command"
 MAX_COMMAND_BYTES = 4096
 MAX_COMMAND_CHARS = 500
+CONTROL_EXTENSION_SCRIPT = "/issue167_control_extensions.js"
 
 
 def _same_origin_or_no_origin(handler: Any) -> bool:
@@ -105,6 +107,7 @@ def install_command_console(server_module: Any) -> bool:
             return True
         handler_class = server_module.ApiHandler
         original_post = handler_class.do_POST
+        original_serve = handler_class._serve_static_file
 
         def do_POST(self: Any) -> None:  # noqa: N802
             path = urllib.parse.urlparse(self.path).path
@@ -132,9 +135,26 @@ def install_command_console(server_module: Any) -> bool:
                 return
             self._write_json(result)
 
+        def serve_static_file(self: Any, file_path: Path) -> None:
+            file_path = Path(file_path)
+            if file_path.name != "control.html":
+                return original_serve(self, file_path)
+            text = file_path.read_text(encoding="utf-8")
+            marker = f'<script src="{CONTROL_EXTENSION_SCRIPT}"></script>'
+            if marker not in text:
+                text = text.replace("</body>", f"{marker}\n</body>")
+            body = text.encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         handler_class.do_POST = do_POST
+        handler_class._serve_static_file = serve_static_file
         server_module._command_console_installed = True
         return True
 
 
-__all__ = ["COMMAND_PATH", "install_command_console"]
+__all__ = ["COMMAND_PATH", "CONTROL_EXTENSION_SCRIPT", "install_command_console"]
