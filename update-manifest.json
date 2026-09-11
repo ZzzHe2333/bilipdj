@@ -1,23 +1,37 @@
 {
-  "schema": 1,
-  "version": "3.0.0",
-  "tag_name": "v3.0.0",
-  "name": "弹幕排队姬 v3.0.0",
-  "published_at": "2026-09-11T01:07:41.0187822Z",
-  "release_url": "https://github.com/ZzzHe2333/bilipdj/releases/tag/v3.0.0",
-  "notes": "完整更新说明请查看 Release 页面。客户端必须先读取本清单，再下载对应安装包。",
+  "schema": 2,
+  "version": "3.0.2",
+  "tag_name": "v3.0.2",
+  "name": "弹幕排队姬 v3.0.2",
+  "published_at": "2026-09-11T05:59:37.6285266Z",
+  "release_url": "https://github.com/ZzzHe2333/bilipdj/releases/tag/v3.0.2",
+  "notes": "完整更新说明请查看 Release 页面。Windows 客户端可选择全量更新，或依据逐文件 SHA-256 从增量资源包按 Range 读取实际需要的文件。",
   "packages": {
     "windows-tk-x64": {
-      "filename": "BiliPDJ-v3.0.0-Windows-Tk-Portable-x64.zip",
-      "url": "https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.0/BiliPDJ-v3.0.0-Windows-Tk-Portable-x64.zip",
-      "sha256": "4bbfd51b4aa4de81da43db589e33c15e95b4ceddf6bf65e0130af26f812a1d4a",
-      "size": 90232324
+      "filename": "BiliPDJ-v3.0.2-Windows-Tk-Portable-x64.zip",
+      "url": "https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.2/BiliPDJ-v3.0.2-Windows-Tk-Portable-x64.zip",
+      "sha256": "5255e26eea05b04d9bd0294b89ad1bb7d799be43db9e34f99d6dc898acb9bb8a",
+      "size": 90275389,
+      "file_manifest": {
+        "filename": "BiliPDJ-v3.0.2-Windows-Tk-files.json",
+        "url": "https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.2/BiliPDJ-v3.0.2-Windows-Tk-files.json",
+        "sha256": "ddd7899f0965263054b6728c03a32224b4084785e9b6af1653b6b6f1c59cd00d",
+        "size": 375411
+      },
+      "incremental": {
+        "filename": "BiliPDJ-v3.0.2-Windows-Tk-Incremental-x64.pack",
+        "url": "https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.2/BiliPDJ-v3.0.2-Windows-Tk-Incremental-x64.pack",
+        "sha256": "692d18074d7abdf14793dc2e978ad8989447ac24b1564b9e30f7ffc38ba2da0c",
+        "size": 89291706,
+        "base_version": "3.0.0",
+        "transport": "http-range"
+      }
     },
     "web-portable-x64": {
-      "filename": "BiliPDJ-v3.0.0-Web-Portable-x64.zip",
-      "url": "https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.0/BiliPDJ-v3.0.0-Web-Portable-x64.zip",
-      "sha256": "9d298107ba830a5978b43a6a9b5f992ea142ed813f4a51db36a4986afea0a078",
-      "size": 33016601
+      "filename": "BiliPDJ-v3.0.2-Web-Portable-x64.zip",
+      "url": "https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.2/BiliPDJ-v3.0.2-Web-Portable-x64.zip",
+      "sha256": "6a7148fce85f18d512185f70ef7cb341bd5a40d891bba924d07c813089c8d588",
+      "size": 33015152
     }
   }
 }
