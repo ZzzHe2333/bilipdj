@@ -109,6 +109,7 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
                 from .issue185_stability import patch_control_panel_issue185
                 from .issue187_stability import patch_control_panel_issue187
                 from .issue187_update_channel import install_update_channel_guard
+                from .issue189_release_selector import install_issue189_release_selector
                 from .portable_autostart import patch_control_panel_portable_autostart
                 from .purple_mouse_control_guard import patch_control_panel_purple_mouse
                 from .redtv_control_guard import patch_control_panel_redtv
@@ -119,6 +120,7 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
 
                 install_style_save_transport()
                 install_update_channel_guard()
+                install_issue189_release_selector()
                 patch_control_panel_class(cls)
                 patch_control_panel_features(cls)
                 patch_control_panel_about(cls)
