@@ -55,20 +55,31 @@ def _install_console_row(panel: Any) -> None:
     except Exception:
         return
 
-    row = ttk.Frame(log_frame)
-    row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+    row = ttk.LabelFrame(log_frame, text="后端指令", padding=(10, 8))
+    row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
     row.columnconfigure(1, weight=1)
-    ttk.Label(row, text="后端指令 >").grid(row=0, column=0, padx=(0, 8), sticky="w")
+
+    ttk.Label(row, text="指令").grid(row=0, column=0, padx=(0, 8), sticky="w")
     panel.backend_command_var = tk.StringVar(value="")
-    panel.backend_command_status_var = tk.StringVar(value="可输入排队/权限等后端指令；不会执行系统 Shell。")
+    panel.backend_command_status_var = tk.StringVar(
+        value="与直播弹幕共用同一套后端命令处理链；不会执行系统 Shell。"
+    )
     entry = ttk.Entry(row, textvariable=panel.backend_command_var)
     entry.grid(row=0, column=1, sticky="ew")
-    status = ttk.Label(row, textvariable=panel.backend_command_status_var)
-    status.grid(row=1, column=1, sticky="w", pady=(3, 0))
     button = ttk.Button(row, text="发送")
-    button.grid(row=0, column=2, padx=(8, 0))
+    button.grid(row=0, column=2, padx=(8, 0), sticky="e")
+    status = ttk.Label(
+        row,
+        textvariable=panel.backend_command_status_var,
+        justify="left",
+        anchor="w",
+        wraplength=720,
+    )
+    status.grid(row=1, column=1, columnspan=2, sticky="ew", pady=(5, 0))
+
     panel._issue167_console_button = button
     panel._issue167_console_entry = entry
+    panel._issue167_console_status = status
     panel._issue167_console_row = row
 
     def finish_ok(command: str, payload: dict[str, Any]) -> None:
@@ -85,9 +96,11 @@ def _install_console_row(panel: Any) -> None:
         command = panel.backend_command_var.get().strip()
         if not command:
             panel.backend_command_status_var.set("请输入后端指令。")
+            entry.focus_set()
             return "break"
         if len(command) > 500:
             panel.backend_command_status_var.set("指令不能超过 500 个字符。")
+            entry.focus_set()
             return "break"
         button.configure(state="disabled")
         panel.backend_command_status_var.set("正在送入后端弹幕流…")
