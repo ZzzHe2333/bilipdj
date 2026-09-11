@@ -6,14 +6,15 @@ on:
       - 'release-publish/v*'
 
 # This workflow is intentionally narrow: creating an explicit release-publish/v*
-# branch is the opt-in action. It only dispatches the existing validated package
-# workflow; all version/tag checks and Release creation stay there.
+# branch is the opt-in action. Deleting/cleaning an old release-publish branch
+# must never re-dispatch a historical release.
 permissions:
   contents: read
   actions: write
 
 jobs:
   dispatch-release:
+    if: github.event.deleted == false
     runs-on: ubuntu-latest
     steps:
       - name: Validate explicit release branch
