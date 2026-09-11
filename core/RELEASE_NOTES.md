@@ -1,65 +1,62 @@
-# 弹幕排队姬 v3.0.0
+# 弹幕排队姬 v3.0.1
 
-v3.0.0 是 BiliPDJ 插件化与多平台弹幕核心的一次主版本升级。重点从“把不同平台伪装成 Bilibili 消息”迁移到统一 `DanmuEvent`，并完善 Python / JavaScript 插件运行时、权限边界、动态配置和发布安全。
+v3.0.1 是 v3.0.0 之后的稳定性修复版本，主要处理 Web 控制台横向抖动和内置更新器备份/回滚链路，不改变插件 API 与 `DanmuEvent` 的既有兼容约定。
 
-## 插件系统
+## Web 控制台稳定性
 
-- 支持 `.bilipdj-plugin` 安装包的安装、卸载、启用和禁用；
-- manifest 支持版本兼容、文件哈希、签名/完整性校验、权限声明和 capability；
-- 同时支持 Python 与 JavaScript 插件；
-- JavaScript 插件在独立进程 QuickJS runtime 中执行，保留 watchdog 和 IPC 边界；
-- 新增 `config_schema`，插件可以声明动态配置项，Web 设置页自动生成安全配置界面；
-- secret 配置不会通过读取 API 回显明文，空值保存可保留现有 secret；
-- JavaScript `host.httpRequest()` 支持受限 GET / POST、请求体、状态码和安全响应头；
-- Python / JavaScript 插件私有数据统一限制为单文件 4 MiB、每插件 64 MiB、最多 1024 个常规文件，并限制相对路径深度与长度。
+- 修复 Windows Chromium 下页面内容高度变化时，纵向滚动条出现/消失导致右侧主内容区约 16–17 px 左右横移的问题；
+- 根滚动容器固定预留纵向 scrollbar gutter，页面切换和内容刷新时不再因可用宽度变化产生横向 layout shift；
+- 新增 Web scrollbar 回归 guard，避免后续误删稳定 gutter 规则。
 
-## 平台无关 DanmuEvent
+## 内置更新器与 backup 备份仓库
 
-- 新增平台无关 `DanmuEvent` 作为 QueueManager 的标准输入；
-- Bilibili 原始 `DANMU_MSG` 继续兼容，但只作为适配层；
-- 新插件应使用 Python `context.process_danmu_event(...)` 或 JavaScript `host.processDanmuEvent(...)`；
-- 原生字符串用户 ID 被完整保留，不再要求第三方平台伪造 Bilibili 数字 UID；
-- 房管、主播、舰长/守护、粉丝牌和接收时间使用统一身份字段；
-- `DANMU_EVENT` WebSocket 事件提供统一 `platform / message / identity / received_at` 结构。
+- 真正执行覆盖更新前，在程序源目录创建并维护 `backup/`，与 `log/` 平级；
+- 每次更新生成独立快照，例如 `backup/update-YYYYMMDD-HHMMSS-to-v3.0.1/`，不会覆盖历史备份；
+- 快照复制旧版本文件并明确排除 `backup/` 自身，避免形成 `backup/backup/...` 递归备份；
+- 配置、日志和既有备份仓库在更新后继续保留；
+- 源目录外的 `.<app>.update-backup` 只作为更新过程中的临时原子回滚目录，新版确认启动成功后会清理；
+- 新版启动失败时仍会恢复旧版本，同时保留本次 `backup/` 长期快照。
 
-## 平台 Relay 与兼容
+## GUI 更新路径修复
 
-- 抖音、虎牙、Twitch、YouTube 的内建 Relay 已改为直接产生 `DanmuEvent`，去除伪造 Bilibili JSON 的内部耦合；
-- 抖音 `role >= 3` 按房管身份映射；
-- Twitch 保留 moderator / broadcaster / badge 等原生身份元数据；
-- 旧 `processDanmu` / `process_danmu_json` 仍保留为 Bilibili 兼容 API，已有插件不会被强制一次性迁移。
+发布前审计发现，打包后的 `updater.exe` 实际通过 `updater_gui.py -> updater_v2.perform_update()` 执行更新，而最初的 `backup/` 逻辑只加入了 `updater.py`。这会导致真实 GUI 自动更新路径没有使用新的长期备份仓库。
 
-## 安全与稳定性
+v3.0.1 已将完整更新事务收敛到共享实现：
 
-- 发布前补齐插件 API 权限、文件路径、symlink、mutation、HTTP Host、config schema、DanmuEvent 等专项回归；
-- 插件私有数据增加总容量与文件数配额，避免失控插件持续创建文件耗尽磁盘；
-- 更新检查顺序调整为 Release 附件 manifest → GitHub latest Release API → `now` 静态 manifest 最后兜底，避免旧静态清单抢占最新 Release；
-- 普通 `now` push 和 Pull Request 只构建/校验，不再拥有创建 GitHub Release 的权限；
-- GitHub Release 只能通过显式 workflow dispatch 或 `v*` tag 流程创建。
+- `updater.py` 与 `updater_v2.py` 不再各维护一套容易漂移的更新流程；
+- `updater_v2` 只保留 Windows 文件占用场景下的目录移动重试和短暂 settle delay；
+- GUI 更新器和兼容入口统一使用同一套快照、替换、启动检测、回滚与结果记录逻辑。
 
-## Windows / Web Portable 验证
+## 更新状态记录修复
 
-- Tk Windows 与 Web Portable 都会真实 PyInstaller 构建；
-- 打包 CI 在生成 ZIP 前实际启动两个 frozen GUI EXE 的隐藏插件自检入口；
-- 自检会在冻结环境中安装并启动 QuickJS 插件，通过 multiprocessing worker 发送 `DanmuEvent`；
-- frozen EXE 返回非 0 时停止打包，不会生成可发布 ZIP；
-- Windows GUI 子系统 EXE 使用 `Start-Process -Wait -PassThru` 获取真实退出码。
+- 修复程序已有历史 `backup/` 时，如果新更新包在预检阶段失败，`update-result.json` 可能误报 `rolled_back` 的问题；
+- 未创建本次快照时，`backup_dir` 现在为空，不再错误指向整个 `backup/` 仓库；
+- 只有实际完成回滚时才记录 `rolled_back`；
+- 回滚本身失败时单独记录 `rollback_failed`；
+- 更新包缺文件、解压/预检失败且程序目录从未被替换时记录 `preflight_failed`。
 
-## 更新与校验
+## 发布前验证
 
-正式发行会同时提供：
+- updater 回归测试同时覆盖 legacy 与真实 GUI (`updater_v2`) 两条路径；
+- 覆盖成功更新、启动失败回滚、已有历史 backup 时预检失败三类场景；
+- Windows Tk Portable 与 Web Portable 均重新进行 PyInstaller 构建和 frozen 插件自检；
+- Web build、API 文档、协议 guard、更新器 guard 与 Release 权限策略检查通过；
+- 普通 Pull Request 和 `now` push 的 GitHub Release job 继续保持 skipped，只有显式发布流程可以创建 Release。
 
-- `BiliPDJ-v3.0.0-Windows-Tk-Portable-x64.zip`
-- `BiliPDJ-v3.0.0-Windows-Tk-Portable-x64.zip.sha256`
-- `BiliPDJ-v3.0.0-Web-Portable-x64.zip`
-- `BiliPDJ-v3.0.0-Web-Portable-x64.zip.sha256`
+## 计划发行文件
+
+正式发布 v3.0.1 时，构建流程将生成：
+
+- `BiliPDJ-v3.0.1-Windows-Tk-Portable-x64.zip`
+- `BiliPDJ-v3.0.1-Windows-Tk-Portable-x64.zip.sha256`
+- `BiliPDJ-v3.0.1-Web-Portable-x64.zip`
+- `BiliPDJ-v3.0.1-Web-Portable-x64.zip.sha256`
 - `update-manifest.json`
 
-`update-manifest.json` 由发布构建根据真实产物生成，包含包名、下载地址、文件大小和 SHA-256。客户端仍会先读取 manifest 并校验 SHA-256 后再安装。
+`update-manifest.json` 的文件大小和 SHA-256 必须由正式发布构建根据真实产物生成。在 v3.0.1 尚未正式发布前，仓库根目录仍保留当前真实 v3.0.0 Release 的 manifest，不提前伪造 v3.0.1 哈希。
 
-## 升级建议
+## 升级说明
 
-- 从 v2.x 升级时请完整解压新 portable 包；
-- 原有队列、配置和兼容 API 继续保留；
-- 新开发的第三方弹幕插件建议直接使用 `DanmuEvent` API；
-- 高权限插件仍应仅安装可信来源，尤其是声明 `subprocess`、网络或文件写权限的插件。
+- v3.0.0 用户可在 v3.0.1 正式发布后直接使用内置更新器升级；
+- 升级时旧版本会先写入源目录下的 `backup/`，建议在确认新版本稳定运行前保留该目录；
+- 插件格式、`DanmuEvent`、配置文件和现有队列数据保持兼容。
