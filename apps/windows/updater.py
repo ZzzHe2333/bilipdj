@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import time
 import zipfile
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -29,6 +30,7 @@ WAIT_TIMEOUT_SECONDS = 45.0
 STARTUP_GRACE_SECONDS = 8.0
 MAX_ARCHIVE_MEMBERS = 20_000
 MAX_ARCHIVE_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
+PathMover = Callable[[Path, Path], None]
 
 
 class UpdaterError(RuntimeError):
@@ -54,7 +56,7 @@ def _write_update_result(
     *,
     status: str,
     target_version: str,
-    backup_dir: Path,
+    backup_dir: Path | None,
     cleanup_dir: Path,
     error: str = "",
 ) -> None:
@@ -64,7 +66,7 @@ def _write_update_result(
         "status": str(status),
         "version": str(target_version),
         "installed_at": _timestamp(),
-        "backup_dir": str(backup_dir),
+        "backup_dir": str(backup_dir) if backup_dir is not None else "",
         "cleanup_dir": str(cleanup_dir),
     }
     if error:
@@ -282,22 +284,34 @@ def launch_main(app_dir: Path, main_exe_name: str) -> subprocess.Popen[bytes]:
     )
 
 
-def rollback(app_dir: Path, rollback_dir: Path, log_path: Path) -> None:
+def _replace_path(source: Path, destination: Path) -> None:
+    source.replace(destination)
+
+
+def rollback(
+    app_dir: Path,
+    rollback_dir: Path,
+    log_path: Path,
+    *,
+    move_path: PathMover = _replace_path,
+) -> None:
     _write_log(log_path, "开始回滚旧版本")
     if app_dir.exists():
         remove_path_with_retry(app_dir)
     if rollback_dir.exists():
-        rollback_dir.replace(app_dir)
+        move_path(rollback_dir, app_dir)
     _write_log(log_path, "旧版本已恢复")
 
 
-def perform_update(
+def perform_update_core(
     *,
     pid: int,
     app_dir: Path,
     zip_path: Path,
     main_exe_name: str,
     target_version: str,
+    move_path: PathMover,
+    post_exit_settle_seconds: float = 0.0,
 ) -> None:
     executable_name = validate_executable_name(main_exe_name)
     app_dir = app_dir.resolve()
@@ -311,7 +325,7 @@ def perform_update(
     rollback_dir = parent / f".{safe_name}.update-backup"
     cleanup_dir = zip_path.parent
     log_path = parent / f"{safe_name}-update.log"
-    persistent_backup_dir = app_dir / BACKUP_DIR_NAME
+    persistent_backup_dir: Path | None = None
 
     _write_log(log_path, f"准备更新到 v{target_version}")
     if not app_dir.is_dir():
@@ -320,6 +334,9 @@ def perform_update(
         raise UpdaterError(f"更新包不存在：{zip_path}")
     if not wait_for_process_exit(pid):
         raise UpdaterError("等待主程序退出超时，请完全关闭程序后重试")
+
+    if post_exit_settle_seconds > 0:
+        time.sleep(float(post_exit_settle_seconds))
 
     rollback_created = False
     try:
@@ -334,10 +351,10 @@ def perform_update(
 
         remove_path_with_retry(rollback_dir)
         _write_log(log_path, f"建立临时回滚目录：{rollback_dir}")
-        app_dir.replace(rollback_dir)
+        move_path(app_dir, rollback_dir)
         rollback_created = True
 
-        staging_dir.replace(app_dir)
+        move_path(staging_dir, app_dir)
         copy_preserved_data(rollback_dir, app_dir)
         _write_update_result(
             app_dir,
@@ -369,18 +386,28 @@ def perform_update(
             f"v{target_version} 启动成功，更新前备份保留于：{persistent_backup_dir}",
         )
     except Exception as exc:
+        rollback_attempted = rollback_created
+        rollback_succeeded = False
         if rollback_created:
             try:
-                rollback(app_dir, rollback_dir, log_path)
+                rollback(app_dir, rollback_dir, log_path, move_path=move_path)
                 rollback_created = False
+                rollback_succeeded = True
             except Exception as rollback_error:
                 _write_log(log_path, f"恢复旧版本失败：{rollback_error}")
         else:
             _write_log(log_path, "更新预检失败，原程序目录未被替换")
 
+        if rollback_succeeded:
+            result_status = "rolled_back"
+        elif rollback_attempted:
+            result_status = "rollback_failed"
+        else:
+            result_status = "preflight_failed"
+
         _write_update_result(
             app_dir,
-            status="rolled_back" if persistent_backup_dir.is_dir() else "preflight_failed",
+            status=result_status,
             target_version=target_version,
             backup_dir=persistent_backup_dir,
             cleanup_dir=cleanup_dir,
@@ -400,6 +427,24 @@ def perform_update(
             remove_path_with_retry(staging_dir)
         except OSError as cleanup_error:
             _write_log(log_path, f"清理更新暂存目录失败：{cleanup_error}")
+
+
+def perform_update(
+    *,
+    pid: int,
+    app_dir: Path,
+    zip_path: Path,
+    main_exe_name: str,
+    target_version: str,
+) -> None:
+    perform_update_core(
+        pid=pid,
+        app_dir=app_dir,
+        zip_path=zip_path,
+        main_exe_name=main_exe_name,
+        target_version=target_version,
+        move_path=_replace_path,
+    )
 
 
 def parse_args() -> argparse.Namespace:
