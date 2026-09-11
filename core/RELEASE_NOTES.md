@@ -12,14 +12,14 @@
 - `.agents/skills/` 固定集成 `emilkowalski/skills` 上游 commit `d23d7f88a2e21c9e4b1418c7abe420f5c1052ba7`，保留 MIT License 与来源记录；
 - 新增 Issue #171 UI regression guard，并继续通过 Quality CI 验证。
 
-## 下载说明
+## 直接下载
 
 普通测试用户只需要下载对应的完整便携版 ZIP：
 
-- **Windows 客户端**：`BiliPDJ-v3.0.3-test-Windows-Tk-Portable-x64.zip`
-- **Web 便携版**：`BiliPDJ-v3.0.3-test-Web-Portable-x64.zip`
+- **Windows 客户端**：下载 **`BiliPDJ-v3.0.3-test-Windows-Tk-Portable-x64.zip`** → [点击直接下载 Windows 测试版](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.3-test/BiliPDJ-v3.0.3-test-Windows-Tk-Portable-x64.zip)
+- **Web 便携版**：下载 **`BiliPDJ-v3.0.3-test-Web-Portable-x64.zip`** → [点击直接下载 Web 测试版](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.3-test/BiliPDJ-v3.0.3-test-Web-Portable-x64.zip)
 
-`Windows-Tk-files.json`、`Windows-Tk-Incremental-x64.pack` 及其 `.sha256` 为更新器资源，普通用户无需手动处理。
+`Windows-Tk-files.json`、`Windows-Tk-Incremental-x64.pack` 及其 `.sha256` 为更新器资源，普通用户无需手动下载或处理。
 
 ## 更新器与安全
 
@@ -43,4 +43,4 @@
 
 ## 测试版说明
 
-`v3.0.3-test` 用于验证当前 UI 与打包链路，不作为稳定版替代。发现问题可继续在仓库 Issue 中反馈；稳定用户可继续使用 v3.0.2。
+`v3.0.3-test` 用于验证当前 UI 与打包链路，不作为稳定版替代。仓库 README 的默认下载入口继续保留稳定版 v3.0.2，避免普通用户误装测试版本。
