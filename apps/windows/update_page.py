@@ -137,6 +137,7 @@ def build_update_tab(
     app._update_busy = False
     app._available_update = None
     app._prepared_update = None
+    app._prepared_incremental_update = None
     app._update_launched = False
     app._update_proxy_test_busy = False
     app.update_status_var = tk.StringVar(value="尚未检查更新")
@@ -191,16 +192,29 @@ def build_update_tab(
         command=lambda: update_ui.check_for_updates(app, silent=False),
     )
     app._update_check_button.pack(side="left", padx=(0, 8))
-    app._update_install_button = ttk.Button(
+    app._update_full_button = ttk.Button(
         button_row,
-        text="下载并安装",
+        text="全量更新",
         command=lambda: update_ui.install_available_update(app),
         state="disabled",
     )
-    app._update_install_button.pack(side="left")
-    ttk.Label(update_frame, text="更新内容").grid(row=3, column=0, sticky="w", pady=(12, 4))
+    app._update_full_button.pack(side="left", padx=(0, 8))
+    app._update_install_button = app._update_full_button
+    app._update_incremental_button = ttk.Button(
+        button_row,
+        text="增量更新",
+        command=lambda: update_ui.install_incremental_update(app),
+        state="disabled",
+    )
+    app._update_incremental_button.pack(side="left")
+    ttk.Label(
+        update_frame,
+        text="全量更新：下载完整 ZIP；增量更新：按逐文件 SHA-256 扫描，只替换缺失/变化的程序资源。",
+        wraplength=760,
+    ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
+    ttk.Label(update_frame, text="更新内容").grid(row=4, column=0, sticky="w", pady=(12, 4))
     notes_frame = ttk.Frame(update_frame)
-    notes_frame.grid(row=4, column=0, columnspan=2, sticky="nsew")
+    notes_frame.grid(row=5, column=0, columnspan=2, sticky="nsew")
     notes_frame.columnconfigure(0, weight=1)
     app._update_notes = tk.Text(notes_frame, height=10, wrap="word", state="disabled")
     app._all_text_widgets.append(app._update_notes)
