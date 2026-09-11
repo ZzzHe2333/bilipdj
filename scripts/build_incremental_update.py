@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
-import shutil
 import sys
 import tempfile
+import zlib
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -66,13 +67,42 @@ def _directories(files: dict[str, dict[str, object]]) -> list[str]:
     return sorted(directories, key=str.casefold)
 
 
+def _pack_files(package_dir: Path, files: dict[str, dict[str, object]], output_pack: Path) -> None:
+    output_pack.parent.mkdir(parents=True, exist_ok=True)
+    output_pack.unlink(missing_ok=True)
+    offset = 0
+    with output_pack.open("wb") as pack:
+        for relative in sorted(files, key=str.casefold):
+            source = package_dir / Path(relative)
+            raw = source.read_bytes()
+            compressed = zlib.compress(raw, level=9)
+            if len(compressed) < len(raw):
+                payload = compressed
+                compression = "zlib"
+            else:
+                payload = raw
+                compression = "store"
+            packed_sha256 = hashlib.sha256(payload).hexdigest()
+            metadata = files[relative]
+            metadata.update(
+                {
+                    "offset": offset,
+                    "packed_size": len(payload),
+                    "packed_sha256": packed_sha256,
+                    "compression": compression,
+                }
+            )
+            pack.write(payload)
+            offset += len(payload)
+
+
 def build(
     *,
     package_dir: Path,
     version: str,
     package_sha256: str,
     output_manifest: Path,
-    output_delta_zip: Path,
+    output_pack: Path,
     previous_zip: Path | None,
     base_version: str,
 ) -> None:
@@ -88,25 +118,19 @@ def build(
             _safe_extract(previous_zip, previous_root)
             previous = _collect_files(previous_root)
 
-    changed = [
-        path
-        for path, metadata in current.items()
-        if path not in previous or previous[path]["sha256"] != metadata["sha256"]
-    ]
-    removed = sorted(
-        (path for path in previous if path not in current),
+    changed = sorted(
+        (
+            path
+            for path, metadata in current.items()
+            if path not in previous or previous[path]["sha256"] != metadata["sha256"]
+        ),
         key=str.casefold,
     )
-    changed.sort(key=str.casefold)
+    removed = sorted((path for path in previous if path not in current), key=str.casefold)
 
-    output_delta_zip.parent.mkdir(parents=True, exist_ok=True)
-    output_delta_zip.unlink(missing_ok=True)
-    with zipfile.ZipFile(output_delta_zip, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
-        for relative in changed:
-            archive.write(package_dir / Path(relative), arcname=relative)
-
+    _pack_files(package_dir, current, output_pack)
     manifest = {
-        "schema": 1,
+        "schema": 2,
         "kind": "bilipdj-file-manifest",
         "version": str(version),
         "package": "windows-tk-x64",
@@ -114,10 +138,10 @@ def build(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "directories": _directories(current),
         "files": [current[path] for path in sorted(current, key=str.casefold)],
-        "delta": {
+        "incremental": {
             "base_version": str(base_version or "").strip(),
-            "files": changed,
-            "removed": removed,
+            "changed_from_base": changed,
+            "removed_from_base": removed,
         },
         "excluded": {
             "files": sorted(PRESERVED_FILES),
@@ -134,19 +158,19 @@ def build(
     total_bytes = sum(int(item["size"]) for item in current.values())
     print(
         "incremental assets: "
-        f"managed_files={len(current)} changed={len(changed)} removed={len(removed)} "
+        f"managed_files={len(current)} changed_from_base={len(changed)} removed={len(removed)} "
         f"changed_bytes={changed_bytes} total_bytes={total_bytes} "
-        f"base_version={base_version or 'none'}"
+        f"pack_bytes={output_pack.stat().st_size} base_version={base_version or 'none'}"
     )
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build BiliPDJ per-file manifest and incremental update ZIP")
+    parser = argparse.ArgumentParser(description="Build BiliPDJ per-file manifest and range-addressable incremental pack")
     parser.add_argument("--package-dir", type=Path, required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--package-sha256", required=True)
     parser.add_argument("--output-manifest", type=Path, required=True)
-    parser.add_argument("--output-delta-zip", type=Path, required=True)
+    parser.add_argument("--output-pack", type=Path, required=True)
     parser.add_argument("--previous-zip", type=Path)
     parser.add_argument("--base-version", default="")
     args = parser.parse_args()
@@ -155,7 +179,7 @@ def main() -> int:
         version=args.version,
         package_sha256=args.package_sha256,
         output_manifest=args.output_manifest,
-        output_delta_zip=args.output_delta_zip,
+        output_pack=args.output_pack,
         previous_zip=args.previous_zip,
         base_version=args.base_version,
     )
