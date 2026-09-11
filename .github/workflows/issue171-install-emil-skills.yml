@@ -1,0 +1,60 @@
+name: Bootstrap Emil Kowalski skills
+
+on:
+  push:
+    branches:
+      - ui/issue171-emil-skills-polish
+    paths:
+      - '.github/workflows/issue171-install-emil-skills.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  install-skills:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout BiliPDJ branch
+        uses: actions/checkout@v4
+        with:
+          ref: ui/issue171-emil-skills-polish
+          fetch-depth: 0
+
+      - name: Vendor pinned emilkowalski/skills
+        shell: bash
+        env:
+          UPSTREAM_SHA: d23d7f88a2e21c9e4b1418c7abe420f5c1052ba7
+        run: |
+          set -euo pipefail
+          rm -rf .agents/skills
+          mkdir -p .agents/skills
+          git clone --filter=blob:none --no-checkout https://github.com/emilkowalski/skills.git "$RUNNER_TEMP/emil-skills"
+          git -C "$RUNNER_TEMP/emil-skills" checkout "$UPSTREAM_SHA"
+          cp -R "$RUNNER_TEMP/emil-skills/skills/." .agents/skills/
+          cp "$RUNNER_TEMP/emil-skills/LICENSE" .agents/skills/emilkowalski-LICENSE
+          cat > .agents/skills/UPSTREAM.md <<EOF
+          # Emil Kowalski skills
+
+          Project-local copy of https://github.com/emilkowalski/skills for Codex/Agent skill discovery.
+
+          - Upstream commit: \`$UPSTREAM_SHA\`
+          - Installed for: BiliPDJ Issue #171
+          - License: \`emilkowalski-LICENSE\` (MIT)
+          - Canonical skill root: \`.agents/skills/\`
+
+          The upstream files are vendored unchanged under their original skill directory names.
+          EOF
+
+      - name: Commit installed skills
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .agents/skills
+          if git diff --cached --quiet; then
+            echo "Skills already match the pinned upstream commit."
+            exit 0
+          fi
+          git commit -m "chore: install emilkowalski skills (#171)"
+          git push origin HEAD:ui/issue171-emil-skills-polish
