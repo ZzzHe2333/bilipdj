@@ -11,6 +11,7 @@ on:
       - 'packages/shared/**'
       - 'requirements.txt'
       - 'docker-compose.yml'
+      - '.dockerignore'
       - '.github/workflows/**'
   push:
     branches: [now]
@@ -22,6 +23,7 @@ on:
       - 'packages/shared/**'
       - 'requirements.txt'
       - 'docker-compose.yml'
+      - '.dockerignore'
       - '.github/workflows/**'
 
 permissions:
@@ -51,6 +53,8 @@ jobs:
         run: python scripts/issue167_runtime_layout_guard.py
       - name: Validate Docker foundation
         run: python scripts/issue202_docker_guard.py
+      - name: Validate Docker build-context privacy
+        run: python scripts/issue204_docker_context_guard.py
       - name: Validate Emil skills and UI polish
         run: python scripts/issue171_ui_polish_guard.py
       - name: Validate update version selector and stable layout
