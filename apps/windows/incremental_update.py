@@ -101,10 +101,11 @@ def fetch_incremental_assets(
     if not isinstance(package, dict):
         raise IncrementalUnavailable("增量更新清单缺少 Windows Tk 包")
 
+    raw_incremental = package.get("incremental")
     return IncrementalAssets(
         file_manifest=_asset_from_object(package.get("file_manifest"), "逐文件清单"),
-        delta_zip=_asset_from_object(package.get("incremental"), "增量资源包"),
-        base_version=str((package.get("incremental") or {}).get("base_version", "") if isinstance(package.get("incremental"), dict) else "").strip(),
+        delta_zip=_asset_from_object(raw_incremental, "增量资源包"),
+        base_version=str(raw_incremental.get("base_version", "") if isinstance(raw_incremental, dict) else "").strip(),
     )
 
 
@@ -133,6 +134,7 @@ def _read_and_validate_file_manifest(
     if not isinstance(raw_files, list) or not raw_files:
         raise IncrementalUpdateError("逐文件更新清单没有文件记录")
     files: dict[str, dict[str, object]] = {}
+    seen_keys: set[str] = set()
     for raw in raw_files:
         if not isinstance(raw, dict):
             raise IncrementalUpdateError("逐文件更新清单包含无效文件记录")
@@ -142,8 +144,10 @@ def _read_and_validate_file_manifest(
             raise IncrementalUpdateError(str(exc)) from exc
         if is_preserved_path(relative):
             raise IncrementalUpdateError(f"逐文件清单错误地包含用户数据路径：{relative}")
-        if relative.casefold() in {key.casefold() for key in files}:
+        key = relative.casefold()
+        if key in seen_keys:
             raise IncrementalUpdateError(f"逐文件清单包含重复路径：{relative}")
+        seen_keys.add(key)
         try:
             size = int(raw.get("size", -1))
         except (TypeError, ValueError) as exc:
@@ -177,6 +181,35 @@ def _read_and_validate_file_manifest(
         removed.append(relative)
 
     return files, delta_files, removed, str(delta.get("base_version", "") or "").strip()
+
+
+def _require_exact_base_version(app_dir: Path, base_version: str) -> str:
+    """Require the local install to match the release used to construct the delta.
+
+    File hashes still decide which files actually need replacement.  The exact
+    base-version gate is needed so the `removed` list is complete: a package
+    built as 3.0.0 -> 3.0.1 cannot know about arbitrary stale files from older
+    installs.
+    """
+
+    base = str(base_version or "").strip()
+    if not base:
+        raise IncrementalUnavailable("本次 Release 没有声明增量基线版本，请使用全量更新。")
+    version_path = Path(app_dir) / "VERSION"
+    try:
+        local = version_path.read_text(encoding="utf-8-sig").strip()
+    except OSError as exc:
+        raise IncrementalUnavailable("无法读取本地 VERSION，不能安全执行增量更新；请使用全量更新。") from exc
+    try:
+        local_key = update_client.normalize_version(local)
+        base_key = update_client.normalize_version(base)
+    except ValueError as exc:
+        raise IncrementalUnavailable("本地版本或增量基线版本格式无效，请使用全量更新。") from exc
+    if local_key != base_key:
+        raise IncrementalUnavailable(
+            f"本次增量包基于 v{base}，当前本地为 v{local or '?'}；跨版本增量可能遗留旧文件，请使用全量更新。"
+        )
+    return local
 
 
 def _sha256_stream(handle: object) -> tuple[str, int]:
@@ -279,6 +312,8 @@ def prepare_incremental_download(
             manifest_path,
             release=release,
         )
+        base_version = manifest_base_version or assets.base_version
+        _require_exact_base_version(Path(app_dir), base_version)
 
         needed, unchanged = _scan_local(Path(app_dir), files)
         unavailable = [path for path in needed if path not in delta_files]
@@ -308,7 +343,7 @@ def prepare_incremental_download(
             "schema": 1,
             "kind": "bilipdj-incremental-plan",
             "version": release.version,
-            "base_version": manifest_base_version or assets.base_version,
+            "base_version": base_version,
             "target_package_sha256": str(release.sha256 or release.zip_asset.sha256),
             "replace": [files[path] for path in needed],
             "remove": remove_existing,
