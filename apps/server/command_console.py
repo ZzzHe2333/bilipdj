@@ -12,6 +12,8 @@ COMMAND_PATH = "/api/control/command"
 MAX_COMMAND_BYTES = 4096
 MAX_COMMAND_CHARS = 500
 CONTROL_EXTENSION_SCRIPT = "/issue167_control_extensions.js"
+WEB_UPDATER_SCRIPT = "/web_updater_control.js"
+WEB_UPDATER_STYLE = "/web_updater_control.css"
 
 
 def _same_origin_or_no_origin(handler: Any) -> bool:
@@ -140,9 +142,15 @@ def install_command_console(server_module: Any) -> bool:
             if file_path.name != "control.html":
                 return original_serve(self, file_path)
             text = file_path.read_text(encoding="utf-8")
-            marker = f'<script src="{CONTROL_EXTENSION_SCRIPT}"></script>'
-            if marker not in text:
-                text = text.replace("</body>", f"{marker}\n</body>")
+            command_marker = f'<script src="{CONTROL_EXTENSION_SCRIPT}"></script>'
+            updater_script = f'<script src="{WEB_UPDATER_SCRIPT}"></script>'
+            updater_style = f'<link rel="stylesheet" href="{WEB_UPDATER_STYLE}">'
+            if updater_style not in text:
+                text = text.replace("</head>", f"  {updater_style}\n</head>")
+            if command_marker not in text:
+                text = text.replace("</body>", f"{command_marker}\n</body>")
+            if updater_script not in text:
+                text = text.replace("</body>", f"{updater_script}\n</body>")
             body = text.encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -157,4 +165,10 @@ def install_command_console(server_module: Any) -> bool:
         return True
 
 
-__all__ = ["COMMAND_PATH", "CONTROL_EXTENSION_SCRIPT", "install_command_console"]
+__all__ = [
+    "COMMAND_PATH",
+    "CONTROL_EXTENSION_SCRIPT",
+    "WEB_UPDATER_SCRIPT",
+    "WEB_UPDATER_STYLE",
+    "install_command_console",
+]
