@@ -271,7 +271,13 @@ def perform_incremental_update_core(
                 raise legacy.UpdaterError(f"新版主程序启动后提前退出，退出码 {return_code}")
             time.sleep(0.25)
 
-        legacy.remove_path_with_retry(rollback_dir)
+        try:
+            legacy.remove_path_with_retry(rollback_dir)
+        except OSError as cleanup_error:
+            # Once the new process survived the startup grace window, a temporary
+            # rollback-directory cleanup problem must not convert a successful
+            # install into a rollback attempt against a running new process.
+            legacy._write_log(log_path, f"清理增量回滚目录失败（不影响本次更新）：{cleanup_error}")
         rollback_ready = False
         legacy._write_log(
             log_path,
