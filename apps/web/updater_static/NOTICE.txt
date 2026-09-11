@@ -1,0 +1,1 @@
+This updater page is intentionally self-contained and requires no external web assets.
