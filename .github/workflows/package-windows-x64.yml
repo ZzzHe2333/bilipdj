@@ -58,8 +58,8 @@ jobs:
         shell: bash
         run: |
           VERSION="$(tr -d '[:space:]' < VERSION)"
-          if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+){2,}$ ]]; then
-            echo "VERSION 文件格式不合法：$VERSION（应为 3.0.0 形式）"
+          if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+){2,}(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+            echo "VERSION 文件格式不合法：$VERSION（应为 3.0.0 或 3.0.0-test 形式）"
             exit 1
           fi
 
@@ -326,3 +326,4 @@ jobs:
           replacesArtifacts: true
           bodyFile: core/RELEASE_NOTES.md
           generateReleaseNotes: false
+          prerelease: ${{ contains(needs.build-portable-bundles.outputs.version, '-') }}
