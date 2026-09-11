@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import json
 import os
 import time
 from pathlib import Path
@@ -24,6 +25,50 @@ DIRECTORY_MOVE_ATTEMPTS = 60
 DIRECTORY_MOVE_DELAY_SECONDS = 0.5
 POST_EXIT_SETTLE_SECONDS = 1.0
 INCREMENTAL_PLAN_NAME = "incremental-plan.json"
+KEY_DIR_NAME = "key"
+
+# The updater must never replace local update metadata/caches. Keep legacy root
+# config entries as well because an old portable install may still need migration.
+if Path(KEY_DIR_NAME) not in legacy.PRESERVE_PATHS:
+    legacy.PRESERVE_PATHS = tuple(legacy.PRESERVE_PATHS) + (Path(KEY_DIR_NAME),)
+
+
+def _write_update_result_in_key(
+    app_dir: Path,
+    *,
+    status: str,
+    target_version: str,
+    backup_dir: Path | None,
+    cleanup_dir: Path,
+    error: str = "",
+) -> None:
+    app_dir = Path(app_dir).resolve()
+    if not app_dir.is_dir():
+        return
+    key_dir = app_dir / KEY_DIR_NAME
+    key_dir.mkdir(parents=True, exist_ok=True)
+    result = {
+        "status": str(status),
+        "version": str(target_version),
+        "installed_at": legacy._timestamp(),
+        "backup_dir": str(backup_dir) if backup_dir is not None else "",
+        "cleanup_dir": str(cleanup_dir),
+    }
+    if error:
+        result["error"] = str(error)
+    path = key_dir / "update-result.json"
+    path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    legacy_marker = app_dir / "update-result.json"
+    if legacy_marker.is_file():
+        try:
+            legacy_marker.unlink()
+        except OSError:
+            pass
+
+
+# Both full and incremental transaction cores resolve this function from the
+# shared updater module at call time, so one override keeps both modes aligned.
+legacy._write_update_result = _write_update_result_in_key
 
 
 def replace_path_with_retry(
