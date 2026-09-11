@@ -3,12 +3,17 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import sys
 import tempfile
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from apps.windows.update_manifest import (
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from apps.windows.update_manifest import (  # noqa: E402
     PRESERVED_FILES,
     PRESERVED_PREFIXES,
     calculate_sha256,
@@ -43,8 +48,7 @@ def _safe_extract(archive_path: Path, destination: Path) -> None:
             name = str(member.filename or "").replace("\\", "/")
             if not name:
                 continue
-            pure = Path(name)
-            target = (destination / pure).resolve()
+            target = (destination / Path(name)).resolve()
             try:
                 target.relative_to(destination)
             except ValueError as exc:
