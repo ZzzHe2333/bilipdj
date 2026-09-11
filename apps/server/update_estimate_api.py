@@ -60,18 +60,27 @@ def _estimate_payload(server_module: Any) -> dict[str, Any]:
     release = _fetch_latest_release()
     tag = str(release.get("tag_name", "") or "")
     web = _asset(release, "-Web-Portable-x64.zip")
+    web_files = _asset(release, "-Web-files.json")
+    web_pack = _asset(release, "-Web-Incremental-x64.pack")
     windows = _asset(release, "-Windows-Tk-Portable-x64.zip")
     files = _asset(release, "-Windows-Tk-files.json")
     pack = _asset(release, "-Windows-Tk-Incremental-x64.pack")
+    web_incremental = bool(web_files and web_pack)
     result = {
         "status": "ok",
         "tag_name": tag,
         "latest_version": tag.lstrip("v"),
         "web": {
             "full_download_bytes": int(web.get("size", 0) or 0) if web else 0,
-            "incremental_available": False,
-            "incremental_download_bytes": None,
-            "note": "Web Portable 当前仅提供全量更新；逐文件增量资源目前用于 Windows Tk 客户端。",
+            "incremental_available": web_incremental,
+            "incremental_download_bytes": int(web_pack.get("size", 0) or 0) if web_pack else None,
+            "file_manifest_bytes": int(web_files.get("size", 0) or 0) if web_files else 0,
+            "resource_pack_bytes": int(web_pack.get("size", 0) or 0) if web_pack else 0,
+            "note": (
+                "Web Portable 支持逐文件 SHA-256 扫描与 HTTP Range 增量下载；显示值为资源包上限，实际只下载变化文件。"
+                if web_incremental else
+                "当前 Release 未提供 Web Portable 增量资源，可使用全量更新。"
+            ),
         },
         "windows": {
             "full_download_bytes": int(windows.get("size", 0) or 0) if windows else 0,
