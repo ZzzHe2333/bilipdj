@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import zipfile
 from pathlib import Path
 
-from apps.windows import incremental_apply, incremental_update, updater
-from apps.windows.update_manifest import is_preserved_path
-from scripts import build_incremental_update
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from apps.windows import incremental_apply, updater  # noqa: E402
+from apps.windows.update_manifest import is_preserved_path  # noqa: E402
+from scripts import build_incremental_update  # noqa: E402
 
 
 class _FakeProcess:
@@ -30,8 +33,8 @@ def _zip_tree(root: Path, destination: Path) -> None:
 def _test_manifest_builder(root: Path) -> None:
     previous = root / "previous"
     current = root / "current"
-    previous.mkdir()
-    current.mkdir()
+    previous.mkdir(parents=True)
+    current.mkdir(parents=True)
     for folder in (previous, current):
         (folder / "_internal").mkdir()
         (folder / "core" / "cd").mkdir(parents=True)
