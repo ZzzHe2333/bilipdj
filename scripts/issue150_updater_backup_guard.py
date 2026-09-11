@@ -194,7 +194,7 @@ def main() -> None:
     original_grace = updater.STARTUP_GRACE_SECONDS
     original_settle = updater_v2.POST_EXIT_SETTLE_SECONDS
     try:
-        updater.STARTUP_GRACE_SECONDS = 0.0
+        updater.STARTUP_GRACE_SECONDS = 0.05
         updater_v2.POST_EXIT_SETTLE_SECONDS = 0.0
         implementations = (
             ("legacy", updater.perform_update),
