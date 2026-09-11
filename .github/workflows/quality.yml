@@ -53,6 +53,8 @@ jobs:
         run: python scripts/issue175_update_version_guard.py
       - name: Validate Web Portable updater
         run: python scripts/issue179_web_updater_guard.py
+      - name: Smoke-test Web updater HTTP host
+        run: python scripts/issue179_web_updater_smoke.py
       - name: Validate Huya protocol framing
         run: python apps/server/huya_protocol_guard.py
       - name: Validate red TV chat parser
