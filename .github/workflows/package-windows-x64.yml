@@ -34,8 +34,6 @@ on:
       - 'core/RELEASE_NOTES.md'
       - '.github/workflows/package-windows-x64.yml'
 
-# Build/validation runs never need repository write access. The release job below
-# elevates contents permission only for an explicit dispatch or v* tag push.
 permissions:
   contents: read
 
@@ -94,7 +92,7 @@ jobs:
           echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
           echo "tk_zip=BiliPDJ-v$VERSION-Windows-Tk-Portable-x64.zip" >> "$GITHUB_OUTPUT"
           echo "tk_files=BiliPDJ-v$VERSION-Windows-Tk-files.json" >> "$GITHUB_OUTPUT"
-          echo "tk_incremental=BiliPDJ-v$VERSION-Windows-Tk-Incremental-x64.zip" >> "$GITHUB_OUTPUT"
+          echo "tk_incremental=BiliPDJ-v$VERSION-Windows-Tk-Incremental-x64.pack" >> "$GITHUB_OUTPUT"
           echo "web_zip=BiliPDJ-v$VERSION-Web-Portable-x64.zip" >> "$GITHUB_OUTPUT"
           echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
 
@@ -161,7 +159,7 @@ jobs:
             Write-Host "Incremental baseline: $tag / $previousZip"
           }
           catch {
-            Write-Warning "Previous release baseline unavailable; incremental bundle will contain all managed files: $_"
+            Write-Warning "Previous release baseline unavailable; range pack still contains all managed target files: $_"
             "base_version=" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
             "previous_zip=" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           }
@@ -193,7 +191,7 @@ jobs:
           1. 请完整解压 ZIP，不要只拖出 main.exe。
           2. 双击 main.exe 启动桌面前端。
           3. 后端服务器必须保持运行；后端停止后，排队、弹幕和管理功能均不可用。
-          4. 全量更新继续下载完整 ZIP；增量更新会依据逐文件 SHA-256 清单只替换缺失或变化的程序资源。
+          4. 全量更新继续下载完整 ZIP；增量更新按逐文件 SHA-256 扫描，并从同一 Release 的资源包中只读取缺失或变化的文件片段。
           "@ | Set-Content -LiteralPath "package-tk\使用说明.txt" -Encoding utf8
 
           @"
@@ -227,7 +225,7 @@ jobs:
             "--version", $version,
             "--package-sha256", $tkHash,
             "--output-manifest", $tkFiles,
-            "--output-delta-zip", $tkIncremental,
+            "--output-pack", $tkIncremental,
             "--base-version", $baseVersion
           )
           if ($previousZip -and (Test-Path -LiteralPath $previousZip)) {
@@ -251,7 +249,7 @@ jobs:
             name = "弹幕排队姬 $tagName"
             published_at = (Get-Date).ToUniversalTime().ToString("o")
             release_url = $releasePage
-            notes = "完整更新说明请查看 Release 页面。客户端可选择全量更新或基于逐文件 SHA-256 的增量更新。"
+            notes = "完整更新说明请查看 Release 页面。Windows 客户端可选择全量更新，或依据逐文件 SHA-256 从增量资源包按 Range 读取实际需要的文件。"
             packages = [ordered]@{
               "windows-tk-x64" = [ordered]@{
                 filename = $tkZip
@@ -270,6 +268,7 @@ jobs:
                   sha256 = $tkIncrementalHash
                   size = (Get-Item -LiteralPath $tkIncremental).Length
                   base_version = $baseVersion
+                  transport = "http-range"
                 }
               }
               "web-portable-x64" = [ordered]@{
