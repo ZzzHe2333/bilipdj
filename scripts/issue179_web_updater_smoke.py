@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
 
-from apps.web.web_updater import UpdateHost
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from apps.web.web_updater import UpdateHost  # noqa: E402
 
 
 def main() -> None:
