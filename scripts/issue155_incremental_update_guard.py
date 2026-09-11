@@ -10,7 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from apps.windows import incremental_apply, updater  # noqa: E402
+from apps.windows import incremental_apply, incremental_update, updater  # noqa: E402
 from apps.windows.update_manifest import is_preserved_path  # noqa: E402
 from scripts import build_incremental_update  # noqa: E402
 
@@ -43,6 +43,7 @@ def _test_manifest_builder(root: Path) -> None:
     (previous / "main.exe").write_bytes(b"old-main")
     (previous / "_internal" / "same.dll").write_bytes(b"same")
     (previous / "removed.bin").write_bytes(b"remove-me")
+    (previous / "VERSION").write_text("3.0.1\n", encoding="utf-8")
     (previous / "config.yaml").write_text("secret: old", encoding="utf-8")
     (previous / "core" / "cd" / "queue.csv").write_text("old", encoding="utf-8")
     (previous / "plugins" / "data" / "private.json").write_text("old", encoding="utf-8")
@@ -50,33 +51,40 @@ def _test_manifest_builder(root: Path) -> None:
     (current / "main.exe").write_bytes(b"new-main")
     (current / "_internal" / "same.dll").write_bytes(b"same")
     (current / "new.bin").write_bytes(b"new-file")
+    (current / "VERSION").write_text("3.0.2\n", encoding="utf-8")
     (current / "config.yaml").write_text("secret: new-default", encoding="utf-8")
     (current / "core" / "cd" / "queue.csv").write_text("new-default", encoding="utf-8")
     (current / "plugins" / "data" / "private.json").write_text("new-default", encoding="utf-8")
 
     previous_zip = root / "previous.zip"
     manifest_path = root / "files.json"
-    delta_zip = root / "delta.zip"
+    pack_path = root / "incremental.pack"
     _zip_tree(previous, previous_zip)
     build_incremental_update.build(
         package_dir=current,
         version="3.0.2",
         package_sha256="a" * 64,
         output_manifest=manifest_path,
-        output_delta_zip=delta_zip,
+        output_pack=pack_path,
         previous_zip=previous_zip,
         base_version="3.0.1",
     )
 
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert payload["schema"] == 2
     paths = {entry["path"] for entry in payload["files"]}
-    assert paths == {"_internal/same.dll", "main.exe", "new.bin"}, paths
-    assert payload["delta"]["base_version"] == "3.0.1"
-    assert set(payload["delta"]["files"]) == {"main.exe", "new.bin"}
-    assert payload["delta"]["removed"] == ["removed.bin"]
-    with zipfile.ZipFile(delta_zip, "r") as archive:
-        names = {name for name in archive.namelist() if not name.endswith("/")}
-    assert names == {"main.exe", "new.bin"}, names
+    assert paths == {"_internal/same.dll", "main.exe", "new.bin", "VERSION"}, paths
+    assert payload["incremental"]["base_version"] == "3.0.1"
+    assert set(payload["incremental"]["changed_from_base"]) == {"main.exe", "new.bin", "VERSION"}
+    assert payload["incremental"]["removed_from_base"] == ["removed.bin"]
+
+    pack = pack_path.read_bytes()
+    for entry in payload["files"]:
+        start = int(entry["offset"])
+        size = int(entry["packed_size"])
+        packed = pack[start : start + size]
+        raw = incremental_update._unpack_file(entry, packed)  # noqa: SLF001
+        assert raw == (current / Path(entry["path"])).read_bytes()
 
     assert is_preserved_path("config.yaml")
     assert is_preserved_path("core/cd/queue.csv")
@@ -110,7 +118,7 @@ def _sha(data: bytes) -> str:
 
 
 def _write_patch(zip_path: Path, values: dict[str, bytes]) -> None:
-    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED) as archive:
         for name, data in values.items():
             archive.writestr(name, data)
 
@@ -120,6 +128,7 @@ def _run_apply_case(root: Path, *, startup_code: int | None) -> None:
     app_dir.mkdir()
     (app_dir / "main.exe").write_bytes(b"old-main")
     (app_dir / "removed.bin").write_bytes(b"old-removed")
+    (app_dir / "VERSION").write_text("3.0.1\n", encoding="utf-8")
     (app_dir / "config.yaml").write_text("keep-me", encoding="utf-8")
     (app_dir / "core" / "cd").mkdir(parents=True)
     (app_dir / "core" / "cd" / "queue.csv").write_text("queue", encoding="utf-8")
@@ -128,16 +137,18 @@ def _run_apply_case(root: Path, *, startup_code: int | None) -> None:
 
     work = root / ("success-work" if startup_code is None else "rollback-work")
     work.mkdir()
-    patch_zip = work / "delta.zip"
+    patch_zip = work / "incremental-patch.zip"
     plan_path = work / "incremental-plan.json"
     new_main = b"new-main"
     new_file = b"new-file"
-    _write_patch(patch_zip, {"main.exe": new_main, "new.bin": new_file})
+    new_version = b"3.0.2\n"
+    _write_patch(patch_zip, {"main.exe": new_main, "new.bin": new_file, "VERSION": new_version})
     _plan(
         plan_path,
         replace=[
             {"path": "main.exe", "size": len(new_main), "sha256": _sha(new_main)},
             {"path": "new.bin", "size": len(new_file), "sha256": _sha(new_file)},
+            {"path": "VERSION", "size": len(new_version), "sha256": _sha(new_version)},
         ],
         remove=["removed.bin"],
     )
@@ -160,6 +171,7 @@ def _run_apply_case(root: Path, *, startup_code: int | None) -> None:
             )
             assert (app_dir / "main.exe").read_bytes() == new_main
             assert (app_dir / "new.bin").read_bytes() == new_file
+            assert (app_dir / "VERSION").read_bytes() == new_version
             assert not (app_dir / "removed.bin").exists()
         else:
             try:
@@ -176,6 +188,7 @@ def _run_apply_case(root: Path, *, startup_code: int | None) -> None:
             else:
                 raise AssertionError("startup failure must raise UpdaterError")
             assert (app_dir / "main.exe").read_bytes() == b"old-main"
+            assert (app_dir / "VERSION").read_text(encoding="utf-8") == "3.0.1\n"
             assert not (app_dir / "new.bin").exists()
             assert (app_dir / "removed.bin").read_bytes() == b"old-removed"
 
@@ -204,6 +217,19 @@ def _test_preserved_plan_rejected(root: Path) -> None:
     raise AssertionError("incremental plan must reject preserved config paths")
 
 
+def _test_base_version_guard(root: Path) -> None:
+    app = root / "base-version"
+    app.mkdir()
+    (app / "VERSION").write_text("3.0.1\n", encoding="utf-8")
+    assert incremental_update._require_exact_base_version(app, "3.0.1") == "3.0.1"  # noqa: SLF001
+    try:
+        incremental_update._require_exact_base_version(app, "3.0.0")  # noqa: SLF001
+    except incremental_update.IncrementalUnavailable:
+        pass
+    else:
+        raise AssertionError("cross-version delta must fall back to full update")
+
+
 def _test_source_contracts() -> None:
     update_page = (REPO_ROOT / "apps/windows/update_page.py").read_text(encoding="utf-8")
     workflow = (REPO_ROOT / ".github/workflows/package-windows-x64.yml").read_text(encoding="utf-8")
@@ -211,9 +237,10 @@ def _test_source_contracts() -> None:
     assert 'text="全量更新"' in update_page
     assert 'text="增量更新"' in update_page
     assert "Windows-Tk-files.json" in workflow
-    assert "Windows-Tk-Incremental-x64.zip" in workflow
-    assert "schema = 2" in workflow
+    assert "Windows-Tk-Incremental-x64.pack" in workflow
+    assert 'transport = "http-range"' in workflow
     assert "incremental-plan.json" in client
+    assert '"Range": f"bytes={offset}-{end}"' in client
 
 
 def main() -> None:
@@ -223,6 +250,7 @@ def main() -> None:
         _run_apply_case(root, startup_code=None)
         _run_apply_case(root, startup_code=1)
         _test_preserved_plan_rejected(root)
+        _test_base_version_guard(root)
     _test_source_contracts()
     print("issue #155 incremental update guard: OK")
 
