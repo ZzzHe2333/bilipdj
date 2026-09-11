@@ -7,8 +7,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_CSS = ROOT / "apps" / "web" / "static" / "control.css"
 BUILT_CSS = ROOT / "apps" / "web" / "dist" / "control.css"
-STABLE_GUTTER_RULE = "html{overflow-y:scroll;scrollbar-gutter:stable}"
-CONTENT_WIDTH_RULE = ".content{padding:20px;min-width:0}"
+STABLE_GUTTER_RULE = "html{overflow-y:scroll;scrollbar-gutter:stable"
+CONTENT_WIDTH_RULE = ".content{padding:20px;min-width:0"
 
 
 def _compact_css(text: str) -> str:
