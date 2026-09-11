@@ -19,6 +19,7 @@ on:
       - 'apps/windows/**'
       - 'apps/web/**'
       - 'scripts/build_incremental_update.py'
+      - 'scripts/build_web_incremental_update.py'
       - 'update-manifest.json'
       - 'core/RELEASE_NOTES.md'
       - '.github/workflows/package-windows-x64.yml'
@@ -30,6 +31,7 @@ on:
       - 'apps/windows/**'
       - 'apps/web/**'
       - 'scripts/build_incremental_update.py'
+      - 'scripts/build_web_incremental_update.py'
       - 'update-manifest.json'
       - 'core/RELEASE_NOTES.md'
       - '.github/workflows/package-windows-x64.yml'
@@ -47,6 +49,8 @@ jobs:
       tk_files: ${{ steps.resolve_tag.outputs.tk_files }}
       tk_incremental: ${{ steps.resolve_tag.outputs.tk_incremental }}
       web_zip: ${{ steps.resolve_tag.outputs.web_zip }}
+      web_files: ${{ steps.resolve_tag.outputs.web_files }}
+      web_incremental: ${{ steps.resolve_tag.outputs.web_incremental }}
       artifact_name: ${{ steps.resolve_tag.outputs.artifact_name }}
 
     steps:
@@ -94,6 +98,8 @@ jobs:
           echo "tk_files=BiliPDJ-v$VERSION-Windows-Tk-files.json" >> "$GITHUB_OUTPUT"
           echo "tk_incremental=BiliPDJ-v$VERSION-Windows-Tk-Incremental-x64.pack" >> "$GITHUB_OUTPUT"
           echo "web_zip=BiliPDJ-v$VERSION-Web-Portable-x64.zip" >> "$GITHUB_OUTPUT"
+          echo "web_files=BiliPDJ-v$VERSION-Web-files.json" >> "$GITHUB_OUTPUT"
+          echo "web_incremental=BiliPDJ-v$VERSION-Web-Incremental-x64.pack" >> "$GITHUB_OUTPUT"
           echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
@@ -119,7 +125,8 @@ jobs:
             "dist\bilipdj\main.exe",
             "dist\bilipdj\paiduijitm.exe",
             "dist\bilipdj\updater.exe",
-            "dist\web-portable\bilipdj-web\BiliPDJ-Web.exe"
+            "dist\web-portable\bilipdj-web\BiliPDJ-Web.exe",
+            "dist\web-portable\bilipdj-web\BiliPDJ-Web-Updater.exe"
           )
           foreach ($path in $required) {
             if (-not (Test-Path $path)) { throw "Portable output missing: $path" }
@@ -137,7 +144,7 @@ jobs:
           $webProbe = Start-Process -FilePath $webExe -ArgumentList "--plugin-runtime-self-test" -Wait -PassThru
           if ($webProbe.ExitCode -ne 0) { throw "Web frozen JavaScript plugin self-test failed: $($webProbe.ExitCode)" }
 
-      - name: Download previous Windows release baseline
+      - name: Download previous portable release baselines
         id: previous_release
         shell: pwsh
         env:
@@ -147,21 +154,33 @@ jobs:
           New-Item -ItemType Directory -Path "previous-release" -Force | Out-Null
           try {
             $release = gh api repos/ZzzHe2333/bilipdj/releases/latest | ConvertFrom-Json
-            $asset = $release.assets | Where-Object { $_.name -match '^BiliPDJ-v.+-Windows-Tk-Portable-x64\.zip$' } | Select-Object -First 1
-            if (-not $asset) { throw "latest release has no Windows Tk portable zip" }
             $tag = [string]$release.tag_name
             $baseVersion = if ($tag.StartsWith('v')) { $tag.Substring(1) } else { $tag }
-            gh release download $tag --repo ZzzHe2333/bilipdj --pattern $asset.name --dir previous-release --clobber
-            if ($LASTEXITCODE -ne 0) { throw "gh release download failed" }
-            $previousZip = (Resolve-Path (Join-Path "previous-release" $asset.name)).Path
             "base_version=$baseVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-            "previous_zip=$previousZip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-            Write-Host "Incremental baseline: $tag / $previousZip"
+
+            $tkAsset = $release.assets | Where-Object { $_.name -match '^BiliPDJ-v.+-Windows-Tk-Portable-x64\.zip$' } | Select-Object -First 1
+            $webAsset = $release.assets | Where-Object { $_.name -match '^BiliPDJ-v.+-Web-Portable-x64\.zip$' } | Select-Object -First 1
+
+            $previousTk = ""
+            if ($tkAsset) {
+              gh release download $tag --repo ZzzHe2333/bilipdj --pattern $tkAsset.name --dir previous-release --clobber
+              if ($LASTEXITCODE -eq 0) { $previousTk = (Resolve-Path (Join-Path "previous-release" $tkAsset.name)).Path }
+            }
+            "previous_zip=$previousTk" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+            $previousWeb = ""
+            if ($webAsset) {
+              gh release download $tag --repo ZzzHe2333/bilipdj --pattern $webAsset.name --dir previous-release --clobber
+              if ($LASTEXITCODE -eq 0) { $previousWeb = (Resolve-Path (Join-Path "previous-release" $webAsset.name)).Path }
+            }
+            "previous_web_zip=$previousWeb" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            Write-Host "Incremental baseline: $tag / Tk=$previousTk / Web=$previousWeb"
           }
           catch {
-            Write-Warning "Previous release baseline unavailable; range pack still contains all managed target files: $_"
+            Write-Warning "Previous release baseline unavailable; range packs still contain all managed target files: $_"
             "base_version=" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
             "previous_zip=" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            "previous_web_zip=" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           }
 
       - name: Create portable zips, checksums and update manifest
@@ -200,14 +219,17 @@ jobs:
           1. 请完整解压 ZIP，不要只拖出 BiliPDJ-Web.exe。
           2. 双击 BiliPDJ-Web.exe 启动“后端服务器系统”。
           3. 后端运行后会自动打开浏览器管理页；可隐藏到系统托盘继续运行。
-          4. 关闭后端服务器后，Web 控制台、队列和第三方客户端均无法继续使用核心功能。
-          5. 更新程序会先读取 update-manifest.json，再按清单提供准确的包名、下载地址和 SHA-256。
+          4. Web 控制台支持全量更新、逐文件增量更新和本地版本恢复；更新前会自动备份，失败时自动回滚。
+          5. 更新时独立 BiliPDJ-Web-Updater.exe 会继续提供 HTML 进度页和俄罗斯方块小游戏，主 Web 服务可安全退出并替换文件。
+          6. 更新程序会读取 update-manifest.json，并校验 SHA-256；增量模式只按 Range 下载本地 SHA-256 不一致的文件片段。
           "@ | Set-Content -LiteralPath "package-web\使用说明.txt" -Encoding utf8
 
           $tkZip = "${{ steps.resolve_tag.outputs.tk_zip }}"
           $tkFiles = "${{ steps.resolve_tag.outputs.tk_files }}"
           $tkIncremental = "${{ steps.resolve_tag.outputs.tk_incremental }}"
           $webZip = "${{ steps.resolve_tag.outputs.web_zip }}"
+          $webFiles = "${{ steps.resolve_tag.outputs.web_files }}"
+          $webIncremental = "${{ steps.resolve_tag.outputs.web_incremental }}"
           Compress-Archive -Path "package-tk\*" -DestinationPath $tkZip -Force
           Compress-Archive -Path "package-web\*" -DestinationPath $webZip -Force
 
@@ -219,7 +241,9 @@ jobs:
           $version = "${{ steps.resolve_tag.outputs.version }}"
           $baseVersion = "${{ steps.previous_release.outputs.base_version }}"
           $previousZip = "${{ steps.previous_release.outputs.previous_zip }}"
-          $buildArgs = @(
+          $previousWebZip = "${{ steps.previous_release.outputs.previous_web_zip }}"
+
+          $tkBuildArgs = @(
             "scripts\build_incremental_update.py",
             "--package-dir", "package-tk",
             "--version", $version,
@@ -229,15 +253,34 @@ jobs:
             "--base-version", $baseVersion
           )
           if ($previousZip -and (Test-Path -LiteralPath $previousZip)) {
-            $buildArgs += @("--previous-zip", $previousZip)
+            $tkBuildArgs += @("--previous-zip", $previousZip)
           }
-          python @buildArgs
-          if ($LASTEXITCODE -ne 0) { throw "incremental update metadata build failed" }
+          python @tkBuildArgs
+          if ($LASTEXITCODE -ne 0) { throw "Windows incremental update metadata build failed" }
+
+          $webBuildArgs = @(
+            "scripts\build_web_incremental_update.py",
+            "--package-dir", "package-web",
+            "--version", $version,
+            "--package-sha256", $webHash,
+            "--output-manifest", $webFiles,
+            "--output-pack", $webIncremental,
+            "--base-version", $baseVersion
+          )
+          if ($previousWebZip -and (Test-Path -LiteralPath $previousWebZip)) {
+            $webBuildArgs += @("--previous-zip", $previousWebZip)
+          }
+          python @webBuildArgs
+          if ($LASTEXITCODE -ne 0) { throw "Web incremental update metadata build failed" }
 
           $tkFilesHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $tkFiles).Hash.ToLowerInvariant()
           $tkIncrementalHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $tkIncremental).Hash.ToLowerInvariant()
+          $webFilesHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $webFiles).Hash.ToLowerInvariant()
+          $webIncrementalHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $webIncremental).Hash.ToLowerInvariant()
           "$tkFilesHash  $tkFiles" | Set-Content -LiteralPath "$tkFiles.sha256" -Encoding ascii
           "$tkIncrementalHash  $tkIncremental" | Set-Content -LiteralPath "$tkIncremental.sha256" -Encoding ascii
+          "$webFilesHash  $webFiles" | Set-Content -LiteralPath "$webFiles.sha256" -Encoding ascii
+          "$webIncrementalHash  $webIncremental" | Set-Content -LiteralPath "$webIncremental.sha256" -Encoding ascii
 
           $tagName = "${{ steps.resolve_tag.outputs.tag_name }}"
           $releaseBase = "https://github.com/ZzzHe2333/bilipdj/releases/download/$tagName"
@@ -249,7 +292,7 @@ jobs:
             name = "弹幕排队姬 $tagName"
             published_at = (Get-Date).ToUniversalTime().ToString("o")
             release_url = $releasePage
-            notes = "完整更新说明请查看 Release 页面。Windows 客户端可选择全量更新，或依据逐文件 SHA-256 从增量资源包按 Range 读取实际需要的文件。"
+            notes = "完整更新说明请查看 Release 页面。Windows Tk 与 Web Portable 均支持全量更新，以及依据逐文件 SHA-256 从 Range 资源包读取实际需要文件的增量更新。"
             packages = [ordered]@{
               "windows-tk-x64" = [ordered]@{
                 filename = $tkZip
@@ -276,6 +319,20 @@ jobs:
                 url = "$releaseBase/$webZip"
                 sha256 = $webHash
                 size = (Get-Item -LiteralPath $webZip).Length
+                file_manifest = [ordered]@{
+                  filename = $webFiles
+                  url = "$releaseBase/$webFiles"
+                  sha256 = $webFilesHash
+                  size = (Get-Item -LiteralPath $webFiles).Length
+                }
+                incremental = [ordered]@{
+                  filename = $webIncremental
+                  url = "$releaseBase/$webIncremental"
+                  sha256 = $webIncrementalHash
+                  size = (Get-Item -LiteralPath $webIncremental).Length
+                  base_version = $baseVersion
+                  transport = "http-range"
+                }
               }
             }
           }
@@ -294,6 +351,10 @@ jobs:
             ${{ steps.resolve_tag.outputs.tk_incremental }}.sha256
             ${{ steps.resolve_tag.outputs.web_zip }}
             ${{ steps.resolve_tag.outputs.web_zip }}.sha256
+            ${{ steps.resolve_tag.outputs.web_files }}
+            ${{ steps.resolve_tag.outputs.web_files }}.sha256
+            ${{ steps.resolve_tag.outputs.web_incremental }}
+            ${{ steps.resolve_tag.outputs.web_incremental }}.sha256
             update-manifest.json
 
   release-portable-bundles:
@@ -320,7 +381,7 @@ jobs:
           tag: ${{ needs.build-portable-bundles.outputs.tag_name }}
           commit: ${{ github.sha }}
           name: 弹幕排队姬 ${{ needs.build-portable-bundles.outputs.tag_name }}
-          artifacts: release-assets/${{ needs.build-portable-bundles.outputs.tk_zip }},release-assets/${{ needs.build-portable-bundles.outputs.tk_zip }}.sha256,release-assets/${{ needs.build-portable-bundles.outputs.tk_files }},release-assets/${{ needs.build-portable-bundles.outputs.tk_files }}.sha256,release-assets/${{ needs.build-portable-bundles.outputs.tk_incremental }},release-assets/${{ needs.build-portable-bundles.outputs.tk_incremental }}.sha256,release-assets/${{ needs.build-portable-bundles.outputs.web_zip }},release-assets/${{ needs.build-portable-bundles.outputs.web_zip }}.sha256,release-assets/update-manifest.json
+          artifacts: release-assets/${{ needs.build-portable-bundles.outputs.tk_zip }},release-assets/${{ needs.build-portable-bundles.outputs.tk_zip }}.sha256,release-assets/${{ needs.build-portable-bundles.outputs.tk_files }},release-assets/${{ needs.build-portable-bundles.outputs.tk_files }}.sha256,release-assets/${{ needs.build-portable-bundles.outputs.tk_incremental }},release-assets/${{ needs.build-portable-bundles.outputs.tk_incremental }}.sha256,release-assets/${{ needs.build-portable-bundles.outputs.web_zip }},release-assets/${{ needs.build-portable-bundles.outputs.web_zip }}.sha256,release-assets/${{ needs.build-portable-bundles.outputs.web_files }},release-assets/${{ needs.build-portable-bundles.outputs.web_files }}.sha256,release-assets/${{ needs.build-portable-bundles.outputs.web_incremental }},release-assets/${{ needs.build-portable-bundles.outputs.web_incremental }}.sha256,release-assets/update-manifest.json
           artifactErrorsFailBuild: true
           allowUpdates: true
           replacesArtifacts: true
