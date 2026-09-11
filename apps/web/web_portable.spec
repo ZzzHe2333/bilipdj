@@ -19,7 +19,7 @@ hiddenimports = [
     "apps.server.queue_logic_guard", "apps.server.queue_rank_query", "apps.server.server_runtime_guard",
     "apps.server.settings_backup", "apps.server.settings_backup_bugfix_guard", "apps.server.settings_mtime_guard", "apps.server.settings_storage_guard",
     "apps.server.style_option_guard", "apps.server.web_control_guard", "apps.server.web_queue_layout", "apps.server.websocket_performance_guard",
-    "apps.server.update_estimate_api", "apps.server.web_update_api",
+    "apps.server.update_estimate_api", "apps.server.web_update_api", "apps.server.issue187_web_update_guard",
     "apps.server.issue79_guard", "apps.server.appearance_guard",
     "apps.server.danmu_plugins", "apps.server.plugin_manager", "apps.server.plugin_runtime_dual", "apps.server.javascript_plugin_runtime", "apps.server.plugin_data_quota",
     "apps.windows.frozen_plugin_probe",
@@ -31,8 +31,10 @@ hiddenimports = [
     "quickjs", "_quickjs",
 ]
 
+# portable_launcher_entry.py imports portable_launcher.py, preserving the
+# established launcher implementation while applying the issue-187 runtime guard.
 a = Analysis(
-    [str(project_root / "apps" / "web" / "portable_launcher.py")],
+    [str(project_root / "apps" / "web" / "portable_launcher_entry.py")],
     pathex=[str(project_root)], binaries=[], datas=datas, hiddenimports=hiddenimports,
     hookspath=[], hooksconfig={}, runtime_hooks=[], excludes=[], noarchive=False, optimize=0,
 )
