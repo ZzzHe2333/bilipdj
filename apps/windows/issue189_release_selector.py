@@ -39,6 +39,8 @@ def _read_release_list(*, timeout: float = 15.0) -> list[dict[str, Any]]:
 def _newest_release(releases: list[dict[str, Any]], *, prerelease: bool) -> dict[str, Any] | None:
     candidates: list[tuple[Any, dict[str, Any]]] = []
     for raw in releases:
+        if bool(raw.get("draft")):
+            continue
         if bool(raw.get("prerelease")) != prerelease:
             continue
         version = _release_version(raw)
