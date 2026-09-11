@@ -110,6 +110,7 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
                 from .issue187_stability import patch_control_panel_issue187
                 from .issue187_update_channel import install_update_channel_guard
                 from .issue189_release_selector import install_issue189_release_selector
+                from .issue194_fixed_window import patch_control_panel_issue194
                 from .portable_autostart import patch_control_panel_portable_autostart
                 from .purple_mouse_control_guard import patch_control_panel_purple_mouse
                 from .redtv_control_guard import patch_control_panel_redtv
@@ -139,6 +140,7 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
                 patch_control_panel_issue180(cls)
                 patch_control_panel_issue185(cls)
                 patch_control_panel_issue187(cls)
+                patch_control_panel_issue194(cls)
                 patch_control_panel_unified_theme(cls)
                 _install_final_support_renderer(cls, module)
             finally:
