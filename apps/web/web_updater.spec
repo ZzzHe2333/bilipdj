@@ -8,8 +8,10 @@ datas = [
     (str(project_root / "apps" / "web" / "updater_static" / "update.html"), "apps/web/updater_static"),
 ]
 
+# web_updater_entry.py imports web_updater.py and requires a confirmed browser
+# handoff before the updater is allowed to terminate the running Web service.
 a = Analysis(
-    [str(project_root / "apps" / "web" / "web_updater.py")],
+    [str(project_root / "apps" / "web" / "web_updater_entry.py")],
     pathex=[str(project_root)],
     binaries=[],
     datas=datas,
