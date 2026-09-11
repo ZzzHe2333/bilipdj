@@ -12,21 +12,26 @@ html,body{font-family:var(--font-family);background:var(--bg);color:var(--text)}
 .sidebar{border-right-color:var(--line)!important}
 .brand strong,.page-head h1,.metric strong{color:var(--text)!important}
 .nav,.subtab,.hint,.page-head p,.muted,.status{color:var(--muted)}
-.nav:hover,.subtab:hover{background:var(--panel2)!important;color:var(--text)!important}
 .nav.active,.subtab.active{color:var(--text)!important;background:color-mix(in srgb,var(--accent) 20%,transparent)!important;box-shadow:inset 3px 0 var(--accent)}
 .card,.subtab,.metric,.switch-item{background:var(--panel)!important;border-color:var(--line)!important;border-radius:var(--radius)!important}
 .button{border-color:var(--accent)!important;background:var(--accent)!important;border-radius:calc(var(--radius) - 3px)!important}
-.button:hover{background:var(--accent-hover)!important;filter:none}
 .button.ghost{background:transparent!important;color:var(--accent-hover)!important}
 .button.danger{border-color:var(--danger)!important;background:color-mix(in srgb,var(--danger) 35%,var(--panel))!important;color:#fff!important}
 input,select,textarea,.url-box,.log-output,.json-output,.notes{background:var(--input)!important;color:var(--text)!important;border-color:var(--line)!important;border-radius:calc(var(--radius) - 3px)!important}
 input:focus,select:focus,textarea:focus{border-color:var(--accent)!important;box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)!important}
+:where(button,a,input,select,textarea,summary):focus-visible{outline-color:var(--accent-hover)!important}
 .table-wrap,.preview,.config-frame{border-color:var(--line)!important;border-radius:var(--radius)!important}
 th{background:var(--panel2)!important;color:var(--muted)!important}
 th,td{border-bottom-color:var(--line)!important}
 .details{border-top-color:var(--line)!important}
 .details summary{color:var(--accent-hover)!important}
 .dot.ok{background:var(--ok)!important}.dot.bad{background:var(--danger)!important}
+
+@media (hover:hover) and (pointer:fine){
+  .nav:hover,.subtab:hover{background:var(--panel2)!important;color:var(--text)!important}
+  .button:hover{background:var(--accent-hover)!important;filter:none}
+  .button.ghost:hover{background:color-mix(in srgb,var(--accent) 10%,transparent)!important}
+}
 
 .unified-theme-card{max-width:1040px}
 .unified-theme-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:14px}
