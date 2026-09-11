@@ -37,7 +37,7 @@
     section.className = 'web-update-controls';
     section.innerHTML = `
       <div class="web-update-head">
-        <div><strong>Web Portable 自动更新</strong><p>支持全量更新、逐文件增量更新和本地版本恢复。更新开始后会打开独立的俄罗斯方块进度页。</p></div>
+        <div><strong>Web Portable 自动更新</strong><p>同时读取云端正式版和测试版；默认选择最新正式版。支持全量更新、逐文件增量更新和本地版本恢复。</p></div>
         <span id="web-update-capability" class="web-update-chip">检测中</span>
       </div>
       <div class="web-update-picker-row">
@@ -62,25 +62,36 @@
 
   function buildCandidates() {
     candidates = new Map();
-    const cloud = state?.cloud;
-    if (cloud?.version) {
-      const label = `云端最新 · v${cloud.version}`;
+    const releases = Array.isArray(state?.releases) && state.releases.length
+      ? state.releases
+      : (state?.cloud?.version ? [state.cloud] : []);
+    for (const cloud of releases) {
+      if (!cloud?.version) continue;
+      const kind = cloud.prerelease ? '云端测试版' : '云端正式版';
+      const label = `${kind} · v${cloud.version}`;
       candidates.set(label, { source: 'cloud', version: cloud.version, cloud });
     }
     for (const backup of (state?.backups || [])) {
       const label = `本地备份 · v${backup.version} · ${backup.created_at}`;
       candidates.set(label, { source: 'local', version: backup.version, backup });
     }
+
     const select = $('web-update-version');
     if (!select) return;
     select.innerHTML = '';
-    for (const label of candidates.keys()) {
-      const option = document.createElement('option'); option.value = label; option.textContent = label; select.appendChild(option);
+    let defaultLabel = '';
+    for (const [label, candidate] of candidates.entries()) {
+      const option = document.createElement('option');
+      option.value = label;
+      option.textContent = label;
+      select.appendChild(option);
+      if (candidate.source === 'cloud' && candidate.cloud?.tag_name === state?.default_tag) defaultLabel = label;
     }
     if (!candidates.size) {
       const option = document.createElement('option'); option.textContent = '暂无可用版本'; select.appendChild(option);
     }
     select.disabled = !candidates.size;
+    if (defaultLabel) select.value = defaultLabel;
   }
 
   function selected() {
@@ -98,10 +109,18 @@
     } else {
       full.textContent = '全量更新'; full.disabled = !canRun;
       incremental.disabled = !canRun || !candidate.cloud.incremental_available;
+      const releaseKind = candidate.cloud.prerelease ? '测试版' : '正式版';
       const incrementalText = candidate.cloud.incremental_available
         ? `增量资源上限 ${fmtBytes(candidate.cloud.incremental_max_bytes)}；实际仅按本机 SHA-256 差异 Range 下载。`
         : '当前 Release 没有 Web 增量资源。';
-      detail.innerHTML = `<strong>云端 v${candidate.version}</strong><span>全量包 ${fmtBytes(candidate.cloud.full_download_bytes)}。${incrementalText}</span>`;
+      detail.innerHTML = `<strong>云端${releaseKind} v${candidate.version}</strong><span>全量包 ${fmtBytes(candidate.cloud.full_download_bytes)}。${incrementalText}</span>`;
+      const fullEstimate = $('update-full-estimate');
+      const incrementalEstimate = $('update-incremental-estimate');
+      if (fullEstimate) fullEstimate.textContent = fmtBytes(candidate.cloud.full_download_bytes);
+      if (incrementalEstimate) {
+        incrementalEstimate.textContent = candidate.cloud.incremental_available ? `≤ ${fmtBytes(candidate.cloud.incremental_max_bytes)}` : '当前版本不可用';
+        incrementalEstimate.title = candidate.cloud.incremental_available ? '这是增量资源上限；执行时会扫描本地 SHA-256，只下载实际变化文件。' : '当前 Release 未提供 Web Portable 增量清单。';
+      }
     }
   }
 
@@ -109,28 +128,23 @@
     buildCandidates();
     const chip = $('web-update-capability');
     if (chip) {
+      chip.classList.remove('warning', 'danger', 'ok');
       if (!state?.frozen) { chip.textContent = '源码模式'; chip.classList.add('warning'); }
       else if (!state?.updater_available) { chip.textContent = '缺少更新器'; chip.classList.add('danger'); }
       else { chip.textContent = '自动更新可用'; chip.classList.add('ok'); }
     }
-    const fullEstimate = $('update-full-estimate');
-    const incrementalEstimate = $('update-incremental-estimate');
-    if (state?.cloud) {
-      if (fullEstimate) fullEstimate.textContent = fmtBytes(state.cloud.full_download_bytes);
-      if (incrementalEstimate) {
-        incrementalEstimate.textContent = state.cloud.incremental_available ? `≤ ${fmtBytes(state.cloud.incremental_max_bytes)}` : '当前版本不可用';
-        incrementalEstimate.title = state.cloud.incremental_available ? '这是增量资源上限；执行时会扫描本地 SHA-256，只下载实际变化文件。' : '当前 Release 未提供 Web Portable 增量清单。';
-      }
-    }
     renderSelected();
     if (state?.cloud_error) setStatus(`云端版本读取失败：${state.cloud_error}`, false);
-    else setStatus(`当前 v${state?.current_version || '?'}；发现 ${(state?.backups || []).length} 个本地可恢复版本。`);
+    else {
+      const cloudCount = Array.isArray(state?.releases) ? state.releases.length : (state?.cloud ? 1 : 0);
+      setStatus(`当前 v${state?.current_version || '?'}；已读取 ${cloudCount} 个云端通道版本和 ${(state?.backups || []).length} 个本地可恢复版本。默认选择正式版。`);
+    }
   }
 
   async function refreshState() {
     ensureUi();
     const refresh = $('web-update-refresh'); if (refresh) refresh.disabled = true;
-    setStatus('正在读取云端更新清单与本地备份…');
+    setStatus('正在读取云端正式版、测试版与本地备份…');
     try {
       state = await api('/api/control/web-update/state');
       renderState();
@@ -151,7 +165,6 @@
     const label = mode === 'restore' ? `恢复到本地备份 v${candidate.version}` : `${mode === 'incremental' ? '增量' : '全量'}更新到 v${candidate.version}`;
     if (!confirm(`${label}？\n\n更新开始后会打开独立更新页面，主 Web 服务随后会停止并替换程序文件。`)) return;
 
-    // Open synchronously to avoid browser popup blockers after the async POST.
     let popup = null;
     try { popup = window.open('about:blank', 'bilipdj-web-update'); } catch (_) { popup = null; }
     if (popup) {
@@ -162,6 +175,7 @@
     try {
       const payload = { mode };
       if (mode === 'restore') payload.backup_id = candidate.backup.id;
+      else payload.target_tag = candidate.cloud?.tag_name || '';
       const result = await post('/api/control/web-update/start', payload);
       setStatus(result.message || '独立更新器已启动。');
       if (popup && !popup.closed) popup.location.replace(result.update_url);
