@@ -10,7 +10,7 @@ import urllib.parse
 from pathlib import Path
 from typing import Any
 
-from core.update_workspace import allocate_update_session, cleanup_update_session
+from apps.update_workspace import allocate_update_session, cleanup_update_session
 
 
 def _stop_process(process: subprocess.Popen[Any] | None) -> None:
