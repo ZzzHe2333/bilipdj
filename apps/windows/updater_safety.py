@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from apps.update_workspace import validate_update_session
-from apps.windows import issue222_update_apply as apply
+from apps.windows import updater_apply as apply
 
 
 def _safe_incremental_update(
@@ -16,15 +16,7 @@ def _safe_incremental_update(
     main_exe_name: str,
     target_version: str,
 ) -> None:
-    """Apply an incremental update transactionally using the full snapshot.
-
-    The issue-222 implementation created a per-file rollback tree before any
-    mutation.  If that preparation failed part-way through, its generic rollback
-    path treated every unrecorded target as a newly-created file and could delete
-    untouched original files.  This implementation never rolls back from a
-    partially prepared per-file set: before the first mutation it creates one
-    complete snapshot, and every failure after that restores the snapshot.
-    """
+    """Apply an incremental update transactionally using the full snapshot."""
 
     legacy = apply.legacy
     incremental_apply = apply.incremental_apply
@@ -48,8 +40,6 @@ def _safe_incremental_update(
         legacy.safe_extract(zip_path, staging)
         incremental_apply._validate_staging(staging, replace)  # noqa: SLF001
 
-        # Resolve and validate every target while the original process is still
-        # untouched. Any failure here is a pure preflight failure.
         for relative in touched:
             target = incremental_apply.resolve_managed_path(app_dir, relative)
             if target.is_symlink() or target.is_dir():
@@ -59,8 +49,6 @@ def _safe_incremental_update(
             raise legacy.UpdaterError("等待主程序退出超时，请完全关闭程序后重试")
         apply.time.sleep(1.0)
 
-        # This is the transaction boundary. No application file is modified
-        # before a complete snapshot exists.
         snapshot = apply._create_snapshot(app_dir, target_version)  # noqa: SLF001
         legacy._write_log(log_path, f"增量更新前快照已完成：{snapshot}")  # noqa: SLF001
 
@@ -96,9 +84,6 @@ def _safe_incremental_update(
                 status = "rollback_failed"
                 legacy._write_log(log_path, f"增量完整快照回滚失败：{rollback_exc}")  # noqa: SLF001
         else:
-            # Crucially, do not delete/copy any target here. Snapshot creation
-            # failed before the mutation boundary, so the original files are
-            # already the correct rollback state.
             status = "preflight_failed"
             legacy._write_log(log_path, "增量更新在修改文件前失败，原文件保持不变")  # noqa: SLF001
 
@@ -123,12 +108,12 @@ def _safe_incremental_update(
             pass
 
 
-def patch_issue226_windows_update_safety() -> bool:
-    if getattr(apply, "_issue226_update_safety_installed", False):
+def install_updater_safety() -> bool:
+    if getattr(apply, "_updater_safety_installed", False):
         return True
     apply._incremental_update = _safe_incremental_update  # type: ignore[attr-defined]  # noqa: SLF001
-    apply._issue226_update_safety_installed = True
+    apply._updater_safety_installed = True
     return True
 
 
-__all__ = ["patch_issue226_windows_update_safety"]
+__all__ = ["install_updater_safety"]
