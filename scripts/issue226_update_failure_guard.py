@@ -40,6 +40,7 @@ def check_web_relaunch_wrapper() -> None:
     with tempfile.TemporaryDirectory(prefix="bilipdj-issue226-") as raw:
         app_dir = Path(raw)
         (app_dir / "main.exe").write_bytes(b"placeholder")
+
         calls: list[str] = []
 
         def stop_app(_request, _state):
@@ -49,15 +50,15 @@ def check_web_relaunch_wrapper() -> None:
             calls.append("launch")
             return object()
 
+        module = SimpleNamespace()
+
         def failing_incremental(request, state, work):
             module._stop_app(request, state)
             raise OSError("snapshot preparation failed")
 
-        module = SimpleNamespace(
-            _incremental_update=failing_incremental,
-            _stop_app=stop_app,
-            _launch_main=launch_main,
-        )
+        module._incremental_update = failing_incremental
+        module._stop_app = stop_app
+        module._launch_main = launch_main
         assert install_issue226_web_update_safety(module)
         try:
             module._incremental_update(
@@ -72,19 +73,16 @@ def check_web_relaunch_wrapper() -> None:
         assert calls == ["stop", "launch"], calls
 
         calls.clear()
+        module2 = SimpleNamespace()
 
         def handled_incremental(request, state, work):
-            module._stop_app(request, state)
-            module._launch_main(Path(request["app_dir"]), request["main_exe"])
+            module2._stop_app(request, state)
+            module2._launch_main(Path(request["app_dir"]), request["main_exe"])
             raise OSError("failure after internal relaunch")
 
-        # Reinstall around a fresh fake module to verify the outer safety layer
-        # does not launch a second instance when the inner rollback already did.
-        module2 = SimpleNamespace(
-            _incremental_update=handled_incremental,
-            _stop_app=stop_app,
-            _launch_main=launch_main,
-        )
+        module2._incremental_update = handled_incremental
+        module2._stop_app = stop_app
+        module2._launch_main = launch_main
         assert install_issue226_web_update_safety(module2)
         try:
             module2._incremental_update(
@@ -103,7 +101,7 @@ def check_entry_wiring() -> None:
     windows_entry = read("apps/windows/updater_issue222_entry.py")
     web_entry = read("apps/web/web_updater_entry.py")
     assert "patch_issue226_windows_update_safety" in windows_entry
-    assert windows_entry.index("patch_updater_v2") < windows_entry.index("patch_issue226_windows_update_safety()")
+    assert windows_entry.index("patch_updater_v2(updater_gui.updater_v2)") < windows_entry.index("patch_issue226_windows_update_safety()")
     assert "install_issue226_web_update_safety" in web_entry
     assert web_entry.index("install_issue222_update_workspace(web_updater)") < web_entry.index("install_issue226_web_update_safety(web_updater)")
 
