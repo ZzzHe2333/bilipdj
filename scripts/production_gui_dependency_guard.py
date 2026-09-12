@@ -107,7 +107,9 @@ def main() -> None:
     assert "后端指令" in command_console
 
     assert "customtkinter" not in requirements.lower()
-    assert "customtkinter" not in spec.lower()
+    assert 'collect_data_files("customtkinter")' not in spec
+    assert 'collect_submodules("customtkinter")' not in spec
+    assert '"apps.windows.customtk_ui"' not in spec
     assert 'excludes=["customtkinter"]' in spec
     assert '"apps.windows.desktop_runtime"' in spec
     assert '"apps.windows.windows_ui"' in spec
