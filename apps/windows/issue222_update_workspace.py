@@ -21,6 +21,12 @@ def _application_dir() -> Path:
 def install_windows_update_workspace() -> bool:
     """Keep full, incremental and local-restore preparation under app_dir/update."""
 
+    # The frozen JavaScript probe launches an isolated plugin runtime and must
+    # stay free of updater monkeypatches/import side effects. Normal desktop
+    # startup and the GUI startup probe still install this workspace patch.
+    if "--plugin-runtime-self-test" in sys.argv[1:]:
+        return True
+
     from . import incremental_update, update_client, update_version_selector
 
     with _PATCH_LOCK:
