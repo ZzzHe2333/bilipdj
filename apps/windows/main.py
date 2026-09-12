@@ -158,16 +158,14 @@ def _stop_probe_process(process: Any) -> None:
 
 
 def _run_gui_startup_self_test() -> None:
-    """Exercise the real frozen GUI path long enough to catch startup callbacks.
-
-    This probe intentionally uses the packaged CTk root and the real
-    ``ControlPanelApp`` constructor.  It remains hidden, runs the Tk event loop
-    for a few seconds (including portable backend autostart), and fails on any
-    Tk callback exception or unexpected root destruction.
-    """
+    """Exercise the real frozen GUI startup path, including first show events."""
 
     root = BiliPDJCTk()
     root.withdraw()
+    try:
+        root.wm_attributes("-alpha", 0)
+    except Exception:
+        pass
     callback_errors: list[str] = []
 
     def report_callback_exception(exc_type: type[BaseException], exc: BaseException, tb: Any) -> None:
@@ -185,6 +183,12 @@ def _run_gui_startup_self_test() -> None:
         root.maxsize(WINDOW_WIDTH, WINDOW_HEIGHT)
         root.resizable(False, False)
         root.update_idletasks()
+        root.deiconify()
+        try:
+            root.wm_attributes("-alpha", 1)
+        except Exception:
+            pass
+        root.update()
 
         deadline = time.monotonic() + 4.0
         while time.monotonic() < deadline:
