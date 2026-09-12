@@ -13,7 +13,6 @@ from .customtk_ui import patch_control_panel_customtkinter
 from .gui_log_sink import patch_control_panel_logging
 from .gui_stability import patch_control_panel_issue185
 from .huya_control_guard import patch_control_panel_huya
-from .log_toolbar import patch_control_panel_issue196
 from .navigation_layout import patch_control_panel_issue209
 from .platform_features import install_platform_features
 from .portable_autostart import patch_control_panel_portable_autostart
@@ -92,7 +91,6 @@ def _install_compatibility_runtime(panel_class: type[Any]) -> None:
     patch_control_panel_issue185(panel_class)
     patch_control_panel_issue187(panel_class)
     patch_control_panel_issue194(panel_class)
-    patch_control_panel_issue196(panel_class)
     patch_control_panel_unified_theme(panel_class)
     patch_control_panel_issue209(panel_class)
 
@@ -101,7 +99,7 @@ def install_desktop_runtime(panel_class: type[Any]) -> bool:
     """Install the production Windows GUI runtime exactly once.
 
     The production entry point calls this function explicitly before constructing
-    ControlPanelApp.  Compatibility adjustments run first; then key pages are
+    ControlPanelApp. Compatibility adjustments run first; then key pages are
     captured behind stable component adapters so new GUI work no longer adds
     another layer of page-level monkeypatching.
     """
