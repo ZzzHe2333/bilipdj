@@ -4,8 +4,10 @@ import hashlib
 import io
 import json
 import logging
+import os
 import sys
 import tempfile
+import threading
 import time
 import zipfile
 from pathlib import Path
@@ -55,7 +57,21 @@ def _plugin_package() -> bytes:
     return output.getvalue()
 
 
+def _arm_frozen_probe_watchdog(timeout: float = 20.0) -> None:
+    """Prevent a frozen self-test worker from hanging CI indefinitely."""
+
+    if not getattr(sys, "frozen", False) or "--plugin-runtime-self-test" not in sys.argv[1:]:
+        return
+
+    def watchdog() -> None:
+        time.sleep(max(5.0, float(timeout)))
+        os._exit(124)
+
+    threading.Thread(target=watchdog, name="bilipdj-frozen-probe-watchdog", daemon=True).start()
+
+
 def run_frozen_plugin_probe() -> None:
+    _arm_frozen_probe_watchdog()
     plugin_runtime_dual.install_dual_runtime_support()
     bundle_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2])).resolve()
     with tempfile.TemporaryDirectory(prefix="bilipdj-frozen-js-probe-") as temp:
