@@ -32,19 +32,19 @@ configure_web_assets()
 from apps.windows import control_panel, update_ui  # noqa: E402
 from apps.windows.about_page import patch_control_panel_about  # noqa: E402
 from apps.windows.bilibili_qr_dialog import patch_control_panel_qr_login  # noqa: E402
+from apps.windows.command_console_ui import patch_control_panel_command_console  # noqa: E402
 from apps.windows.customtk_ui import (  # noqa: E402
     BiliPDJCTk,
     WINDOW_HEIGHT,
     WINDOW_WIDTH,
     patch_control_panel_customtkinter,
 )
-from apps.windows.issue79_features import patch_control_panel_issue79  # noqa: E402
-from apps.windows.issue167_command_console import patch_control_panel_command_console  # noqa: E402
-from apps.windows.issue167_update_estimate import patch_update_ui  # noqa: E402
-from apps.windows.issue194_fixed_window import patch_control_panel_issue194  # noqa: E402
-from apps.windows.issue196_log_toolbar import patch_control_panel_issue196  # noqa: E402
-from apps.windows.issue209_nav_stability import patch_control_panel_issue209  # noqa: E402
-from apps.windows.issue222_update_workspace import install_windows_update_workspace  # noqa: E402
+from apps.windows.log_toolbar import patch_control_panel_issue196  # noqa: E402
+from apps.windows.navigation_layout import patch_control_panel_issue209  # noqa: E402
+from apps.windows.platform_features import patch_control_panel_issue79  # noqa: E402
+from apps.windows.update_estimate_ui import patch_update_ui  # noqa: E402
+from apps.windows.update_workspace_runtime import install_windows_update_workspace  # noqa: E402
+from apps.windows.window_policy import patch_control_panel_issue194  # noqa: E402
 
 
 GUI_STARTUP_LOG_NAME = "gui-startup-error.log"
@@ -125,21 +125,19 @@ _configure_control_panel_paths()
 install_windows_update_workspace()
 patch_update_ui(update_ui)
 
-# Install the CustomTkinter shell first. The existing feature patches then wrap
-# this stable shell, preserving business behavior while keeping navigation
+# Install the CustomTkinter shell first. Existing production feature layers then
+# wrap this stable shell, preserving business behavior while keeping navigation
 # geometry independent from label requested widths.
 patch_control_panel_customtkinter(control_panel.ControlPanelApp)
 
-# Customer-facing entry points install critical UI patches explicitly instead of
-# relying only on legacy class-construction hooks and import order.
 patch_control_panel_qr_login(control_panel.ControlPanelApp)
 patch_control_panel_about(control_panel.ControlPanelApp)
 patch_control_panel_issue79(control_panel.ControlPanelApp)
 patch_control_panel_command_console(control_panel.ControlPanelApp)
 patch_control_panel_issue194(control_panel.ControlPanelApp)
 patch_control_panel_issue196(control_panel.ControlPanelApp)
-# Kept for compatibility with older entry points. Issue #209 detects the CTk
-# marker and becomes a no-op instead of re-measuring the navigation width.
+# The navigation compatibility layer becomes a no-op on the CTk shell and is
+# retained only to protect older source-mode entry points.
 patch_control_panel_issue209(control_panel.ControlPanelApp)
 
 
@@ -255,13 +253,7 @@ def _run_desktop() -> None:
 
 
 def _run_self_test_and_exit(test: Any, label: str) -> None:
-    """Run a frozen probe and bypass interpreter shutdown on completion.
-
-    PyInstaller plugin/backend helpers may leave non-daemon runtime resources
-    alive even after the probe itself has finished. For CI-only self-test modes,
-    a deterministic process exit is safer than waiting indefinitely for Python
-    interpreter shutdown.
-    """
+    """Run a frozen probe and bypass interpreter shutdown on completion."""
 
     try:
         test()
