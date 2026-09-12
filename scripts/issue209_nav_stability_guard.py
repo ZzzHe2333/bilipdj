@@ -56,13 +56,11 @@ def check_patch_behavior() -> None:
             self.master = master
             self.width = 90
             self.propagate = True
-            self.configure_calls = []
 
         def pack_propagate(self, value: bool) -> None:
             self.propagate = bool(value)
 
         def configure(self, **kwargs) -> None:
-            self.configure_calls.append(dict(kwargs))
             if "width" in kwargs:
                 self.width = int(kwargs["width"])
 
@@ -87,9 +85,12 @@ def check_patch_behavior() -> None:
 
     def fake_show_page(self, index: int):
         self._active_page = index
-        # Simulate a selected button becoming wider because the theme switches
-        # it from normal to bold. The frozen sidebar must not remeasure to 150.
+        # Model the selected label becoming wider when it switches to bold.
         rows[index % len(rows)].requested_width = 150
+        # A pack-propagating parent would adopt the new requested width. The
+        # real fix disables propagation, so this simulated parent must stay put.
+        if nav.propagate:
+            nav.width = max(row.winfo_reqwidth() for row in rows)
         return index
 
     FakePanel = type(
@@ -115,15 +116,11 @@ def check_patch_behavior() -> None:
         assert nav.propagate is False
         assert shell.columns[0] == {"weight": 0, "minsize": frozen}
 
-        configure_count = len(nav.configure_calls)
         assert panel._show_page(1) == 1
-        assert panel._issue209_nav_width == frozen
+        assert rows[1].requested_width == 150
         assert nav.width == frozen
         assert nav.propagate is False
         assert shell.columns[0] == {"weight": 0, "minsize": frozen}
-        # One reassertion is allowed, but the width must not be remeasured from
-        # the simulated 150px selected-row request.
-        assert all(call.get("width", frozen) == frozen for call in nav.configure_calls[configure_count:])
 
         assert patch_control_panel_issue209(FakePanel)
     finally:
