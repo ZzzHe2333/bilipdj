@@ -17,6 +17,7 @@ except ImportError:  # tkinter is optional for backend-only/headless usage
         return None
 
 from .control_panel_bootstrap import install_control_panel_class_hook
+from .issue222_update_cleanup import schedule_local_update_cleanup
 from .overlay_performance_guard import install_overlay_performance_guard
 from .runtime_guards import install_runtime_guards
 from .update_network import install_update_client_network_guard
@@ -34,6 +35,11 @@ except Exception:
     pass
 install_runtime_guards()
 try:
+    schedule_local_update_cleanup()
+except Exception:
+    # Old builds may not have an app-local update result yet.
+    pass
+try:
     install_update_client_network_guard()
 except Exception:
     # Update discovery remains available through the SDK's original request
@@ -48,4 +54,5 @@ __all__ = [
     "install_slider_switches",
     "install_update_client_network_guard",
     "install_web_queue_layout_guard",
+    "schedule_local_update_cleanup",
 ]
