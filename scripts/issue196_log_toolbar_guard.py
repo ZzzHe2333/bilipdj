@@ -14,24 +14,22 @@ def read(path: str) -> str:
 
 
 def check_source_wiring() -> None:
-    patch = read("apps/windows/log_toolbar.py")
+    helper = read("apps/windows/log_toolbar.py")
+    component = read("apps/windows/components/log_page.py")
     runtime = read("apps/windows/desktop_runtime.py")
 
-    assert '_COMPACT_BUTTON_TEXTS = {"清空", "复制"}' in patch
-    assert "_COMPACT_BUTTON_WIDTH = 5" in patch
-    assert "padding=_COMPACT_BUTTON_PADDING" in patch
-    assert "grid_configure(padx=_COMPACT_BUTTON_PADX)" in patch
-    assert "from .log_toolbar import patch_control_panel_issue196" in runtime
-    assert "patch_control_panel_issue196(panel_class)" in runtime
+    assert '_COMPACT_BUTTON_TEXTS = {"清空", "复制"}' in helper
+    assert "_COMPACT_BUTTON_WIDTH = 5" in helper
+    assert "padding=_COMPACT_BUTTON_PADDING" in helper
+    assert "grid_configure(padx=_COMPACT_BUTTON_PADX)" in helper
+    assert "def compact_log_toolbar" in helper
+    assert "from ..log_toolbar import compact_log_toolbar" in component
+    assert "compact_log_toolbar(host)" in component
+    assert "patch_control_panel_issue196(panel_class)" not in runtime
 
 
-def check_patch_behavior() -> None:
-    from apps.windows.log_toolbar import patch_control_panel_issue196
-
-    module_name = "log_toolbar_fake_control_panel"
-    fake_module = types.ModuleType(module_name)
-    fake_module.__file__ = str(ROOT / "apps" / "windows" / "control_panel.py")
-    sys.modules[module_name] = fake_module
+def check_component_behavior() -> None:
+    from apps.windows.log_toolbar import compact_log_toolbar
 
     class FakeWidget:
         def __init__(self, widget_class: str, text: str = "", children=None) -> None:
@@ -68,8 +66,32 @@ def check_patch_behavior() -> None:
     toolbar = FakeWidget("TFrame", children=[clear_button, copy_button, unrelated_button, label])
     frame = FakeWidget("TFrame", children=[toolbar])
 
+    changed = compact_log_toolbar(frame)
+    assert set(changed) == {"清空", "复制"}
+    assert clear_button.options["width"] == 5
+    assert copy_button.options["width"] == 5
+    assert clear_button.options["padding"] == (5, 5)
+    assert copy_button.options["padding"] == (5, 5)
+    assert clear_button.grid_options["padx"] == (2, 1)
+    assert copy_button.grid_options["padx"] == (2, 1)
+    assert unrelated_button.options == {}
+    assert label.options == {}
+
+
+def check_legacy_adapter_still_safe() -> None:
+    from apps.windows.log_toolbar import patch_control_panel_issue196
+
+    module_name = "log_toolbar_fake_control_panel"
+    fake_module = types.ModuleType(module_name)
+    fake_module.__file__ = str(ROOT / "apps" / "windows" / "control_panel.py")
+    sys.modules[module_name] = fake_module
+
+    class FakeFrame:
+        def winfo_children(self):
+            return []
+
     def fake_build_log_tab(self, passed_frame):
-        assert passed_frame is frame
+        assert isinstance(passed_frame, FakeFrame)
         return "ok"
 
     FakePanel = type("ControlPanelApp", (), {"__module__": module_name, "_build_log_tab": fake_build_log_tab})
@@ -78,16 +100,7 @@ def check_patch_behavior() -> None:
     try:
         assert patch_control_panel_issue196(FakePanel)
         panel = FakePanel()
-        assert panel._build_log_tab(frame) == "ok"
-        assert clear_button.options["width"] == 5
-        assert copy_button.options["width"] == 5
-        assert clear_button.options["padding"] == (5, 5)
-        assert copy_button.options["padding"] == (5, 5)
-        assert clear_button.grid_options["padx"] == (2, 1)
-        assert copy_button.grid_options["padx"] == (2, 1)
-        assert unrelated_button.options == {}
-        assert label.options == {}
-        assert set(panel._issue196_compact_log_buttons) == {"清空", "复制"}
+        assert panel._build_log_tab(FakeFrame()) == "ok"
         assert patch_control_panel_issue196(FakePanel)
     finally:
         sys.modules.pop(module_name, None)
@@ -95,8 +108,9 @@ def check_patch_behavior() -> None:
 
 def main() -> None:
     check_source_wiring()
-    check_patch_behavior()
-    print("compact log toolbar guard: OK")
+    check_component_behavior()
+    check_legacy_adapter_still_safe()
+    print("component log toolbar guard: OK")
 
 
 if __name__ == "__main__":

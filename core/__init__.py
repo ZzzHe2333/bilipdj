@@ -16,16 +16,14 @@ except ImportError:  # tkinter is optional for backend-only/headless usage
     def install_slider_switches() -> None:
         return None
 
-from .control_panel_bootstrap import install_control_panel_class_hook
 from .issue222_update_cleanup import schedule_local_update_cleanup
 from .overlay_performance_guard import install_overlay_performance_guard
 from .runtime_guards import install_runtime_guards
 from .update_network import install_update_client_network_guard
 from .web_queue_layout import install_web_queue_layout_guard
 
-# The packaged entry point executes core/control_panel.py as __main__. Install
-# the narrowly scoped class hook before that script reaches ControlPanelApp.
-install_control_panel_class_hook()
+# Shared/core imports must not mutate Python class construction. Windows desktop
+# startup owns GUI initialization explicitly in apps.windows.main.
 install_web_queue_layout_guard()
 try:
     install_overlay_performance_guard()
@@ -48,7 +46,6 @@ except Exception:
 
 __all__ = [
     "SliderCheckbutton",
-    "install_control_panel_class_hook",
     "install_overlay_performance_guard",
     "install_runtime_guards",
     "install_slider_switches",
