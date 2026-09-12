@@ -90,13 +90,9 @@ def _build_redtv_frame(panel: Any, module: Any) -> None:
     panel._redtv_config_frame = config
     vars_map = _redtv_vars(panel)
     module.ttk.Label(config, text="直播链接").grid(row=0, column=0, sticky="w", pady=4)
-    module.ttk.Entry(config, textvariable=vars_map.get("room_url"), width=64).grid(
-        row=0, column=1, sticky="ew", pady=4
-    )
+    module.ttk.Entry(config, textvariable=vars_map.get("room_url"), width=64).grid(row=0, column=1, sticky="ew", pady=4)
     module.ttk.Label(config, text="Cookie（可选）").grid(row=1, column=0, sticky="w", pady=4)
-    module.ttk.Entry(config, textvariable=vars_map.get("cookie"), width=64, show="●").grid(
-        row=1, column=1, sticky="ew", pady=4
-    )
+    module.ttk.Entry(config, textvariable=vars_map.get("cookie"), width=64, show="●").grid(row=1, column=1, sticky="ew", pady=4)
     module.ttk.Label(
         config,
         text="支持直播聊天和聊天回放；保存有效直播链接后，下次启动会直接显示此配置。",
@@ -227,7 +223,7 @@ def _find_stream_frame(panel: Any) -> Any | None:
 def _install_active_checkbox(panel: Any, module: Any) -> None:
     if not _configured_from_vars(panel):
         return
-    vars_map = getattr(panel, "_issue79_platform_vars", None)
+    vars_map = getattr(panel, "_platform_vars", None)
     if not isinstance(vars_map, dict):
         return
     if "youtube" not in vars_map:
@@ -238,11 +234,7 @@ def _install_active_checkbox(panel: Any, module: Any) -> None:
     frame = _find_stream_frame(panel)
     if frame is not None:
         try:
-            module.ttk.Checkbutton(
-                frame,
-                text="红色小电视（一个直播间）",
-                variable=vars_map["youtube"],
-            ).grid(row=3, column=0, sticky="w", pady=5)
+            module.ttk.Checkbutton(frame, text="红色小电视（一个直播间）", variable=vars_map["youtube"]).grid(row=3, column=0, sticky="w", pady=5)
         except Exception:
             pass
         for widget in list(_walk(frame)):
@@ -256,7 +248,7 @@ def _install_active_checkbox(panel: Any, module: Any) -> None:
                 except Exception:
                     pass
 
-    status_var = getattr(panel, "_issue79_platform_status_var", None)
+    status_var = getattr(panel, "_platform_status_var", None)
     if status_var is not None:
         guard = {"busy": False}
 
@@ -270,9 +262,7 @@ def _install_active_checkbox(panel: Any, module: Any) -> None:
             match = re.search(r"已激活：([^；;]+)", text)
             if match:
                 raw = match.group(1).strip()
-                active = set() if raw in {"", "无"} else {
-                    item.strip().lower() for item in re.split(r"[,，+]+", raw) if item.strip()
-                }
+                active = set() if raw in {"", "无"} else {item.strip().lower() for item in re.split(r"[,，+]+", raw) if item.strip()}
                 try:
                     vars_map["youtube"].set("youtube" in active)
                 except Exception:
@@ -303,7 +293,6 @@ def patch_control_panel_redtv(panel_class: type[Any]) -> bool:
             return True
 
         _promote_redtv_labels(module)
-
         original_init = getattr(panel_class, "__init__", None)
         original_build_ui = getattr(panel_class, "_build_ui", None)
         original_set_payload = getattr(panel_class, "_set_platform_config_payload", None)
