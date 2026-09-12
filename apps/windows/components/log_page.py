@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from ..command_console_ui import _install_console_row
 from ..log_toolbar import compact_log_toolbar
 from .base import PageComponent
 
@@ -14,6 +15,13 @@ class LogPageComponent(PageComponent):
         result = super().build(panel, parent, *args, **kwargs)
         host = getattr(panel, "_component_log_host", parent)
         panel._issue196_compact_log_buttons = compact_log_toolbar(host)
+        # The old production runtime installed command_console_ui through a
+        # ControlPanel __init__ wrapper. During the component migration that
+        # wrapper was intentionally removed, but the console was not reattached,
+        # so the "后端指令" row silently disappeared. Keep page ownership explicit:
+        # once the log widgets exist, install the command console directly from
+        # the LogPageComponent.
+        _install_console_row(panel)
         return result
 
 
