@@ -42,8 +42,7 @@ hiddenimports += collect_submodules("customtkinter")
 a = Analysis(
     [str(project_root / "apps" / "windows" / "main.py")],
     pathex=[str(project_root)], binaries=[], datas=datas, hiddenimports=hiddenimports,
-    hookspath=[], hooksconfig={},
-    runtime_hooks=[str(project_root / "apps" / "windows" / "issue222_runtime_hook.py")],
+    hookspath=[], hooksconfig={}, runtime_hooks=[],
     excludes=[], noarchive=False, optimize=0,
 )
 pyz = PYZ(a.pure)
