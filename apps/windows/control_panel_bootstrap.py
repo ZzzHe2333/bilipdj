@@ -102,6 +102,7 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
                 from .control_panel_guard import patch_control_panel_class
                 from .control_panel_features import patch_control_panel_features
                 from .control_panel_ui_finish import patch_control_panel_ui_finish
+                from .customtk_ui import patch_control_panel_customtkinter
                 from .gui_log_sink import patch_control_panel_logging
                 from .huya_control_guard import patch_control_panel_huya
                 from .issue79_features import patch_control_panel_issue79
@@ -124,6 +125,11 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
                 install_style_save_transport()
                 install_update_channel_guard()
                 install_issue189_release_selector()
+                # CustomTkinter owns the root shell and fixed navigation geometry.
+                # Every existing feature layer is installed on top of it so business
+                # behavior remains unchanged while legacy Tk width propagation can no
+                # longer move the main content column.
+                patch_control_panel_customtkinter(cls)
                 patch_control_panel_class(cls)
                 patch_control_panel_features(cls)
                 patch_control_panel_about(cls)
@@ -145,8 +151,8 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
                 patch_control_panel_issue194(cls)
                 patch_control_panel_issue196(cls)
                 patch_control_panel_unified_theme(cls)
-                # Freeze the final themed navigation geometry last so later
-                # normal/bold state changes cannot resize the sidebar.
+                # Kept for compatibility with old entry points.  On the CTk shell
+                # Issue #209 is a no-op and never re-measures navigation width.
                 patch_control_panel_issue209(cls)
                 _install_final_support_renderer(cls, module)
             finally:

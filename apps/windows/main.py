@@ -28,6 +28,7 @@ configure_web_assets()
 from apps.windows import control_panel, update_ui  # noqa: E402
 from apps.windows.about_page import patch_control_panel_about  # noqa: E402
 from apps.windows.bilibili_qr_dialog import patch_control_panel_qr_login  # noqa: E402
+from apps.windows.customtk_ui import patch_control_panel_customtkinter, run_control_panel  # noqa: E402
 from apps.windows.issue79_features import patch_control_panel_issue79  # noqa: E402
 from apps.windows.issue167_command_console import patch_control_panel_command_console  # noqa: E402
 from apps.windows.issue167_update_estimate import patch_update_ui  # noqa: E402
@@ -62,6 +63,11 @@ def _configure_control_panel_paths() -> None:
 _configure_control_panel_paths()
 patch_update_ui(update_ui)
 
+# Install the CustomTkinter shell first.  The existing feature patches then wrap
+# this stable shell, preserving business behavior while keeping navigation
+# geometry independent from label requested widths.
+patch_control_panel_customtkinter(control_panel.ControlPanelApp)
+
 # Customer-facing entry points install critical UI patches explicitly instead of
 # relying only on legacy class-construction hooks and import order.
 patch_control_panel_qr_login(control_panel.ControlPanelApp)
@@ -70,6 +76,8 @@ patch_control_panel_issue79(control_panel.ControlPanelApp)
 patch_control_panel_command_console(control_panel.ControlPanelApp)
 patch_control_panel_issue194(control_panel.ControlPanelApp)
 patch_control_panel_issue196(control_panel.ControlPanelApp)
+# Kept for compatibility with older entry points.  Issue #209 detects the CTk
+# marker and becomes a no-op instead of re-measuring the navigation width.
 patch_control_panel_issue209(control_panel.ControlPanelApp)
 
 
@@ -79,7 +87,7 @@ def main() -> None:
 
         run_frozen_plugin_probe()
         return
-    control_panel.main()
+    run_control_panel(control_panel)
 
 
 if __name__ == "__main__":
