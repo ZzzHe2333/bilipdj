@@ -53,6 +53,25 @@ try {
     Copy-Item "dist\paiduijitm.exe" "dist\bilipdj\paiduijitm.exe" -Force
     Copy-Item "dist\updater.exe" "dist\bilipdj\updater.exe" -Force
 
+    # A successful PyInstaller build is not enough: v3.0.9-test proved that the
+    # frozen GUI can still fail immediately at runtime. Exercise the real CTk
+    # root + ControlPanelApp startup path on the Windows runner before any bundle
+    # is considered releasable.
+    $mainExe = (Resolve-Path "dist\bilipdj\main.exe").Path
+    $startupProbe = Start-Process -FilePath $mainExe -ArgumentList "--gui-startup-self-test" -Wait -PassThru
+    if ($startupProbe.ExitCode -ne 0) {
+        $startupLog = "dist\bilipdj\log\gui-startup-error.log"
+        Write-Host "===== BiliPDJ GUI startup diagnostics ====="
+        if (Test-Path $startupLog) {
+            Get-Content -LiteralPath $startupLog -Raw | Write-Host
+        }
+        else {
+            Write-Host "No GUI startup log was produced."
+        }
+        Write-Host "===== end diagnostics ====="
+        throw "Frozen Windows GUI startup self-test failed with exit code $($startupProbe.ExitCode)"
+    }
+
     New-Item -ItemType Directory -Path "dist\bilipdj\key" -Force | Out-Null
     @"
 BiliPDJ 更新元数据目录
