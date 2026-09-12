@@ -6,6 +6,27 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+function Invoke-FrozenProbe {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [Parameter(Mandatory = $true)][string]$Arguments,
+        [Parameter(Mandatory = $true)][string]$Label,
+        [int]$TimeoutSeconds = 30
+    )
+
+    $process = Start-Process -FilePath $FilePath -ArgumentList $Arguments -PassThru
+    $deadline = (Get-Date).AddSeconds([Math]::Max(5, $TimeoutSeconds))
+    while (-not $process.HasExited -and (Get-Date) -lt $deadline) {
+        Start-Sleep -Milliseconds 200
+        $process.Refresh()
+    }
+    if (-not $process.HasExited) {
+        try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch {}
+        throw "$Label timed out after $TimeoutSeconds seconds"
+    }
+    return [int]$process.ExitCode
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 Push-Location $repoRoot
 
@@ -53,13 +74,11 @@ try {
     Copy-Item "dist\paiduijitm.exe" "dist\bilipdj\paiduijitm.exe" -Force
     Copy-Item "dist\updater.exe" "dist\bilipdj\updater.exe" -Force
 
-    # A successful PyInstaller build is not enough: v3.0.9-test proved that the
-    # frozen GUI can still fail immediately at runtime. Exercise the real CTk
-    # root + ControlPanelApp startup path on the Windows runner before any bundle
-    # is considered releasable.
+    # A successful PyInstaller build is not enough: exercise the exact CTk
+    # startup path, but never let a frozen child/background resource hang CI.
     $mainExe = (Resolve-Path "dist\bilipdj\main.exe").Path
-    $startupProbe = Start-Process -FilePath $mainExe -ArgumentList "--gui-startup-self-test" -Wait -PassThru
-    if ($startupProbe.ExitCode -ne 0) {
+    $startupExit = Invoke-FrozenProbe -FilePath $mainExe -Arguments "--gui-startup-self-test" -Label "Frozen Windows GUI startup self-test" -TimeoutSeconds 30
+    if ($startupExit -ne 0) {
         $startupLog = "dist\bilipdj\log\gui-startup-error.log"
         Write-Host "===== BiliPDJ GUI startup diagnostics ====="
         if (Test-Path $startupLog) {
@@ -69,7 +88,7 @@ try {
             Write-Host "No GUI startup log was produced."
         }
         Write-Host "===== end diagnostics ====="
-        throw "Frozen Windows GUI startup self-test failed with exit code $($startupProbe.ExitCode)"
+        throw "Frozen Windows GUI startup self-test failed with exit code $startupExit"
     }
 
     New-Item -ItemType Directory -Path "dist\bilipdj\key" -Force | Out-Null
