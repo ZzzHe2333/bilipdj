@@ -9,7 +9,7 @@ _PATCH_LOCK = threading.RLock()
 _NAV_WIDTH_HEADROOM_PX = 12
 
 
-def _freeze_navigation_width(panel: Any, *, remeasure: bool = False) -> int | None:
+def _freeze_navigation_width(panel: Any) -> int | None:
     """Freeze the left navigation at its final natural width.
 
     The navigation rows are managed with ``pack``. If pack propagation remains
@@ -21,38 +21,35 @@ def _freeze_navigation_width(panel: Any, *, remeasure: bool = False) -> int | No
     if nav is None or not items:
         return None
 
-    width = getattr(panel, "_issue209_nav_width", None)
-    if remeasure or not isinstance(width, int) or width <= 0:
+    try:
+        # Measure once after all navigation labels/theme patches have finished.
+        # The root is still hidden during normal startup, so this settling pass
+        # is not visible to the user.
+        nav.pack_propagate(True)
+    except Exception:
+        pass
+    try:
+        panel.root.update_idletasks()
+    except Exception:
         try:
-            # Re-enable propagation only while the (normally hidden) build pass
-            # is settling so we can capture the final natural row width.
-            nav.pack_propagate(True)
+            nav.update_idletasks()
         except Exception:
             pass
+
+    requested: list[int] = []
+    for row, _button, _indicator in items:
         try:
-            panel.root.update_idletasks()
+            requested.append(max(1, int(row.winfo_reqwidth())))
         except Exception:
-            try:
-                nav.update_idletasks()
-            except Exception:
-                pass
+            continue
 
-        requested: list[int] = []
-        for row, _button, _indicator in items:
-            try:
-                requested.append(max(1, int(row.winfo_reqwidth())))
-            except Exception:
-                continue
-        if requested:
-            width = max(requested) + _NAV_WIDTH_HEADROOM_PX
-        else:
-            try:
-                width = max(1, int(nav.winfo_width()))
-            except Exception:
-                width = None
-
-    if not isinstance(width, int) or width <= 0:
-        return None
+    if requested:
+        width = max(requested) + _NAV_WIDTH_HEADROOM_PX
+    else:
+        try:
+            width = max(1, int(nav.winfo_width()))
+        except Exception:
+            return None
 
     shell = getattr(nav, "master", None)
     try:
@@ -86,28 +83,16 @@ def patch_control_panel_issue209(panel_class: type[Any]) -> bool:
             return True
 
         original_build_ui = getattr(panel_class, "_build_ui", None)
-        original_show_page = getattr(panel_class, "_show_page", None)
-        if not callable(original_build_ui) or not callable(original_show_page):
+        if not callable(original_build_ui):
             return False
 
         @functools.wraps(original_build_ui)
         def build_ui_with_stable_nav(self: Any, *args: Any, **kwargs: Any) -> Any:
             result = original_build_ui(self, *args, **kwargs)
-            _freeze_navigation_width(self, remeasure=True)
-            return result
-
-        @functools.wraps(original_show_page)
-        def show_page_with_stable_nav(self: Any, *args: Any, **kwargs: Any) -> Any:
-            result = original_show_page(self, *args, **kwargs)
-            # The sidebar is already frozen after the build. Reassert the
-            # geometry boundary without remeasuring, so a newly bold selected
-            # label cannot move the split between navigation and content.
-            if isinstance(getattr(self, "_issue209_nav_width", None), int):
-                _freeze_navigation_width(self, remeasure=False)
+            _freeze_navigation_width(self)
             return result
 
         setattr(panel_class, "_build_ui", build_ui_with_stable_nav)
-        setattr(panel_class, "_show_page", show_page_with_stable_nav)
         setattr(panel_class, "_issue209_nav_stability_installed", True)
         return True
 
