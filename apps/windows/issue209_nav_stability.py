@@ -67,6 +67,19 @@ def _freeze_navigation_width(panel: Any) -> int | None:
         except Exception:
             pass
 
+    # Configuring ``width`` and the shell column's ``minsize`` only changes Tk's
+    # requested geometry. Without one final idle-layout pass the old actual width
+    # can remain visible until the next <Configure> event, which makes the sidebar
+    # jump right after the window has already appeared. Settle that geometry while
+    # startup is still hidden so the first painted frame already has its final size.
+    try:
+        panel.root.update_idletasks()
+    except Exception:
+        try:
+            nav.update_idletasks()
+        except Exception:
+            pass
+
     panel._issue209_nav_width = width
     return width
 
