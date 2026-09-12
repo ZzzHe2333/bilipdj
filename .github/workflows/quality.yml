@@ -73,7 +73,7 @@ jobs:
         run: python scripts/issue196_log_toolbar_guard.py
       - name: Validate stable Windows navigation geometry
         run: python scripts/issue209_nav_stability_guard.py
-      - name: Validate CustomTkinter desktop migration
+      - name: Validate Tk/ttk desktop rollback
         run: python scripts/issue217_customtkinter_guard.py
       - name: Validate issue 213 updater/theme/version regressions
         run: python scripts/issue213_regression_guard.py
