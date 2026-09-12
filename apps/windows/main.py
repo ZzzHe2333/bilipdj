@@ -26,21 +26,10 @@ from apps.server.runtime_layout import ensure_runtime_layout  # noqa: E402
 configure_web_assets()
 
 from apps.windows import control_panel, update_ui  # noqa: E402
-from apps.windows.about_page import patch_control_panel_about  # noqa: E402
-from apps.windows.bilibili_qr_dialog import patch_control_panel_qr_login  # noqa: E402
-from apps.windows.command_console_ui import patch_control_panel_command_console  # noqa: E402
-from apps.windows.customtk_ui import (  # noqa: E402
-    BiliPDJCTk,
-    WINDOW_HEIGHT,
-    WINDOW_WIDTH,
-    patch_control_panel_customtkinter,
-)
-from apps.windows.log_toolbar import patch_control_panel_issue196  # noqa: E402
-from apps.windows.navigation_layout import patch_control_panel_issue209  # noqa: E402
-from apps.windows.platform_features import patch_control_panel_issue79  # noqa: E402
+from apps.windows.customtk_ui import BiliPDJCTk, WINDOW_HEIGHT, WINDOW_WIDTH  # noqa: E402
+from apps.windows.desktop_runtime import install_desktop_runtime  # noqa: E402
 from apps.windows.update_estimate_ui import patch_update_ui  # noqa: E402
 from apps.windows.update_workspace_runtime import install_windows_update_workspace  # noqa: E402
-from apps.windows.window_policy import patch_control_panel_issue194  # noqa: E402
 
 GUI_STARTUP_LOG_NAME = "gui-startup-error.log"
 
@@ -116,14 +105,7 @@ def _configure_control_panel_paths() -> None:
 _configure_control_panel_paths()
 install_windows_update_workspace()
 patch_update_ui(update_ui)
-patch_control_panel_customtkinter(control_panel.ControlPanelApp)
-patch_control_panel_qr_login(control_panel.ControlPanelApp)
-patch_control_panel_about(control_panel.ControlPanelApp)
-patch_control_panel_issue79(control_panel.ControlPanelApp)
-patch_control_panel_command_console(control_panel.ControlPanelApp)
-patch_control_panel_issue194(control_panel.ControlPanelApp)
-patch_control_panel_issue196(control_panel.ControlPanelApp)
-patch_control_panel_issue209(control_panel.ControlPanelApp)
+install_desktop_runtime(control_panel.ControlPanelApp)
 
 
 def _install_callback_error_logger(root: Any) -> list[str]:
