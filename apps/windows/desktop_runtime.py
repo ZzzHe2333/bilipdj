@@ -26,7 +26,6 @@ from .update_channel import install_update_channel_guard
 from .update_stability import patch_control_panel_issue187
 from .webdav_backup_ui import patch_control_panel_webdav_backup
 from .window_policy import patch_control_panel_issue194
-from .windows_ui import patch_control_panel_issue180
 
 
 def _install_final_support_renderer(panel_class: type[Any], module: Any) -> None:
@@ -87,7 +86,6 @@ def _install_platform_runtime(panel_class: type[Any]) -> None:
 def _install_compatibility_runtime(panel_class: type[Any]) -> None:
     """Apply remaining compatibility policies before components capture builders."""
 
-    patch_control_panel_issue180(panel_class)
     patch_control_panel_issue185(panel_class)
     patch_control_panel_issue187(panel_class)
     patch_control_panel_issue194(panel_class)
