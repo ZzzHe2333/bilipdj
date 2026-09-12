@@ -5,6 +5,7 @@ from typing import Any
 
 from .about_page import patch_control_panel_about
 from .bilibili_qr_dialog import patch_control_panel_qr_login
+from .components import install_page_components
 from .control_panel_features import patch_control_panel_features
 from .control_panel_guard import patch_control_panel_class
 from .control_panel_ui_finish import patch_control_panel_ui_finish
@@ -56,15 +57,8 @@ def _install_final_support_renderer(panel_class: type[Any], module: Any) -> None
     setattr(panel_class, "_build_ui", build_ui_with_final_support)
 
 
-def install_desktop_runtime(panel_class: type[Any]) -> bool:
-    """Install the production Windows GUI feature stack exactly once."""
-
-    if not isinstance(panel_class, type):
-        return False
-    if bool(getattr(panel_class, "_bilipdj_desktop_runtime_installed", False)):
-        return True
-
-    module = __import__(str(panel_class.__module__), fromlist=["*"])
+def _install_core_runtime(panel_class: type[Any]) -> None:
+    """Install shell, persistence and common desktop behavior in fixed order."""
 
     install_style_save_transport()
     install_update_channel_guard()
@@ -80,10 +74,20 @@ def install_desktop_runtime(panel_class: type[Any]) -> bool:
     patch_control_panel_support_us(panel_class)
     patch_control_panel_ui_finish(panel_class)
     patch_control_panel_logging(panel_class)
+
+
+def _install_platform_runtime(panel_class: type[Any]) -> None:
+    """Install platform-specific settings integrations before page finalization."""
+
     install_platform_features(panel_class)
     patch_control_panel_huya(panel_class)
     patch_control_panel_redtv(panel_class)
     patch_control_panel_purple_mouse(panel_class)
+
+
+def _install_compatibility_runtime(panel_class: type[Any]) -> None:
+    """Apply remaining compatibility policies before components capture builders."""
+
     patch_control_panel_issue180(panel_class)
     patch_control_panel_issue185(panel_class)
     patch_control_panel_issue187(panel_class)
@@ -91,7 +95,31 @@ def install_desktop_runtime(panel_class: type[Any]) -> bool:
     patch_control_panel_issue196(panel_class)
     patch_control_panel_unified_theme(panel_class)
     patch_control_panel_issue209(panel_class)
+
+
+def install_desktop_runtime(panel_class: type[Any]) -> bool:
+    """Install the production Windows GUI runtime exactly once.
+
+    The production entry point calls this function explicitly before constructing
+    ControlPanelApp.  Compatibility adjustments run first; then key pages are
+    captured behind stable component adapters so new GUI work no longer adds
+    another layer of page-level monkeypatching.
+    """
+
+    if not isinstance(panel_class, type):
+        return False
+    if bool(getattr(panel_class, "_bilipdj_desktop_runtime_installed", False)):
+        return True
+
+    module = __import__(str(panel_class.__module__), fromlist=["*"])
+
+    _install_core_runtime(panel_class)
+    _install_platform_runtime(panel_class)
+    _install_compatibility_runtime(panel_class)
     _install_final_support_renderer(panel_class, module)
+
+    if not install_page_components(panel_class):
+        raise RuntimeError("Windows GUI page component initialization failed")
 
     setattr(panel_class, "_bilipdj_desktop_runtime_installed", True)
     return True
