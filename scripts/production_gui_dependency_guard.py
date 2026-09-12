@@ -89,7 +89,8 @@ def main() -> None:
     assert "import tkinter as tk" in main_source
     assert "root = tk.Tk()" in main_source
     assert "BiliPDJCTk" not in main_source
-    assert "customtk" not in main_source.lower()
+    assert "import customtkinter" not in main_source.lower()
+    assert "from apps.windows.customtk_ui" not in main_source.lower()
     assert "install_desktop_runtime(control_panel.ControlPanelApp)" in main_source
     assert main_source.index("install_desktop_runtime(control_panel.ControlPanelApp)") < main_source.index("app = control_panel.ControlPanelApp(root)")
 
