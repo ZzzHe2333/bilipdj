@@ -9,7 +9,7 @@ import zlib
 from pathlib import Path
 from typing import Any
 
-from core.update_workspace import validate_update_session
+from apps.update_workspace import validate_update_session
 
 
 def _session(request: dict[str, Any], work: Path) -> tuple[Path, Path]:
@@ -27,8 +27,6 @@ def _remove_managed(module: Any, root: Path, relative: Path = Path()) -> None:
         text = rel.as_posix()
         if module._is_preserved(text):  # noqa: SLF001
             continue
-        # core itself contains preserved config/cd paths, so recurse whenever a
-        # preserved prefix/file lives below this directory.
         prefix = text.casefold().rstrip("/") + "/"
         preserved_children = any(
             item.startswith(prefix)
@@ -96,16 +94,7 @@ def _restore_snapshot(module: Any, app_dir: Path, snapshot: Path) -> None:
         module._copy_entry(child, app_dir / child.name)  # noqa: SLF001
 
 
-def _write_result(
-    module: Any,
-    app_dir: Path,
-    *,
-    status: str,
-    version: str,
-    backup: Path | None,
-    session: Path,
-    error: str = "",
-) -> None:
+def _write_result(module: Any, app_dir: Path, *, status: str, version: str, backup: Path | None, session: Path, error: str = "") -> None:
     payload = {
         "status": status,
         "version": version,
@@ -116,10 +105,7 @@ def _write_result(
     }
     if error:
         payload["error"] = str(error)
-    (app_dir / "update-result.json").write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    (app_dir / "update-result.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _apply_full_tree(module: Any, request: dict[str, Any], state: Any, staging: Path, session: Path) -> None:
@@ -129,7 +115,6 @@ def _apply_full_tree(module: Any, request: dict[str, Any], state: Any, staging: 
     updater_exe = str(request["updater_exe"])
     if not (staging / main_exe).is_file() or not (staging / updater_exe).is_file():
         raise module.WebUpdaterError(f"目标版本缺少 {main_exe} 或 {updater_exe}")
-
     snapshot = _snapshot(module, app_dir, target_version, state)
     try:
         state.set(stage="installing", percent=78, message="正在程序目录内切换版本文件…", current_file="")
@@ -147,15 +132,7 @@ def _apply_full_tree(module: Any, request: dict[str, Any], state: Any, staging: 
             except Exception:
                 pass
         except Exception as rollback_exc:
-            _write_result(
-                module,
-                app_dir,
-                status="rollback_failed",
-                version=target_version,
-                backup=snapshot,
-                session=session,
-                error=f"{exc}; rollback: {rollback_exc}",
-            )
+            _write_result(module, app_dir, status="rollback_failed", version=target_version, backup=snapshot, session=session, error=f"{exc}; rollback: {rollback_exc}")
             raise module.WebUpdaterError(f"更新失败且自动回滚失败：{exc}；回滚错误：{rollback_exc}") from exc
         raise
 
@@ -167,20 +144,12 @@ def install_issue222_update_workspace(module: Any) -> bool:
         module.PRESERVED_PREFIXES = tuple(module.PRESERVED_PREFIXES) + ("update/",)
 
     def full_update(request: dict[str, Any], state: Any, work: Path) -> None:
-        app_dir, session = _session(request, work)
+        _app_dir, session = _session(request, work)
         package = request.get("package")
         if not isinstance(package, dict):
             raise module.WebUpdaterError("缺少 Web 完整包元数据")
         zip_path = Path(work) / str(package.get("filename", "web-update.zip"))
-        module._download(  # noqa: SLF001
-            str(package.get("url", "")),
-            zip_path,
-            expected_size=int(package.get("size", 0) or 0),
-            state=state,
-            start_pct=3,
-            end_pct=56,
-            label=zip_path.name,
-        )
+        module._download(str(package.get("url", "")), zip_path, expected_size=int(package.get("size", 0) or 0), state=state, start_pct=3, end_pct=56, label=zip_path.name)  # noqa: SLF001
         state.set(stage="verifying", percent=58, message="正在校验完整更新包 SHA-256…")
         module._verify(zip_path, str(package.get("sha256", "")), "完整更新包")  # noqa: SLF001
         staging = Path(work) / "full-staging"
@@ -221,23 +190,10 @@ def install_issue222_update_workspace(module: Any) -> bool:
             raise module.WebUpdaterError("当前 Release 不支持 Web 增量更新")
         if str(pack_asset.get("transport", "") or "").lower() != "http-range":
             raise module.WebUpdaterError("Web 增量资源不是 HTTP Range 格式")
-
         manifest_path = Path(work) / "web-files.json"
-        module._download(  # noqa: SLF001
-            str(manifest_asset.get("url", "")),
-            manifest_path,
-            expected_size=int(manifest_asset.get("size", 0) or 0),
-            state=state,
-            start_pct=3,
-            end_pct=7,
-            label="逐文件清单",
-        )
+        module._download(str(manifest_asset.get("url", "")), manifest_path, expected_size=int(manifest_asset.get("size", 0) or 0), state=state, start_pct=3, end_pct=7, label="逐文件清单")  # noqa: SLF001
         module._verify(manifest_path, str(manifest_asset.get("sha256", "")), "逐文件清单")  # noqa: SLF001
-        files, removed = module._load_file_manifest(  # noqa: SLF001
-            manifest_path,
-            request,
-            int(pack_asset.get("size", 0) or 0),
-        )
+        files, removed = module._load_file_manifest(manifest_path, request, int(pack_asset.get("size", 0) or 0))  # noqa: SLF001
         state.set(stage="scanning", percent=9, message="正在扫描本地文件 SHA-256…", downloaded=0, total=0, speed=0)
         needed: list[str] = []
         for i, (relative, metadata) in enumerate(files.items(), 1):
@@ -252,7 +208,6 @@ def install_issue222_update_workspace(module: Any) -> bool:
                 needed.append(relative)
             if i % 20 == 0 or i == len(files):
                 state.set(percent=9 + int(6 * i / max(1, len(files))), current_file=relative)
-
         total_download = sum(int(files[path]["packed_size"]) for path in needed)
         patch_root = Path(work) / "patch"
         patch_root.mkdir(parents=True, exist_ok=True)
@@ -260,11 +215,7 @@ def install_issue222_update_workspace(module: Any) -> bool:
         started = time.monotonic()
         for relative in needed:
             metadata = files[relative]
-            packed = module._download_range(  # noqa: SLF001
-                str(pack_asset.get("url", "")),
-                int(metadata["offset"]),
-                int(metadata["packed_size"]),
-            )
+            packed = module._download_range(str(pack_asset.get("url", "")), int(metadata["offset"]), int(metadata["packed_size"]))  # noqa: SLF001
             if hashlib.sha256(packed).hexdigest().lower() != str(metadata["packed_sha256"]):
                 raise module.WebUpdaterError(f"增量片段校验失败：{relative}")
             raw = packed if metadata["compression"] == "store" else zlib.decompress(packed)
@@ -276,22 +227,10 @@ def install_issue222_update_workspace(module: Any) -> bool:
             done += len(packed)
             elapsed = max(0.001, time.monotonic() - started)
             ratio = done / total_download if total_download else 1.0
-            state.set(
-                stage="downloading",
-                percent=15 + int(45 * min(1.0, ratio)),
-                current_file=relative,
-                downloaded=done,
-                total=total_download,
-                speed=int(done / elapsed),
-                message=f"增量下载：{len(needed)} 个文件，仅传输本地发生变化的内容",
-            )
-
+            state.set(stage="downloading", percent=15 + int(45 * min(1.0, ratio)), current_file=relative, downloaded=done, total=total_download, speed=int(done / elapsed), message=f"增量下载：{len(needed)} 个文件，仅传输本地发生变化的内容")
         module._stop_app(request, state)  # noqa: SLF001
         snapshot = _snapshot(module, app_dir, str(request.get("target_version", "")), state)
-        remove_existing = [
-            path for path in removed
-            if module._resolve_managed(app_dir, path).exists() or module._resolve_managed(app_dir, path).is_symlink()  # noqa: SLF001
-        ]
+        remove_existing = [path for path in removed if module._resolve_managed(app_dir, path).exists() or module._resolve_managed(app_dir, path).is_symlink()]  # noqa: SLF001
         touched = needed + remove_existing
         rollback_root = Path(work) / "rollback-files"
         existed: set[str] = set()
@@ -315,14 +254,7 @@ def install_issue222_update_workspace(module: Any) -> bool:
             for j, relative in enumerate(remove_existing, len(needed) + 1):
                 module._remove(module._resolve_managed(app_dir, relative))  # noqa: SLF001
                 state.set(stage="installing", percent=78 + int(14 * j / total_ops), current_file=relative, message="正在清理旧版本文件…")
-            _write_result(
-                module,
-                app_dir,
-                status="installed",
-                version=str(request.get("target_version", "")),
-                backup=snapshot,
-                session=session,
-            )
+            _write_result(module, app_dir, status="installed", version=str(request.get("target_version", "")), backup=snapshot, session=session)
             process = module._launch_main(app_dir, str(request["main_exe"]))  # noqa: SLF001
             module._wait_started(process, state)  # noqa: SLF001
         except Exception as exc:
@@ -334,25 +266,16 @@ def install_issue222_update_workspace(module: Any) -> bool:
                     shutil.copy2(source, target)
                 else:
                     module._remove(target)  # noqa: SLF001
-            _write_result(
-                module,
-                app_dir,
-                status="rolled_back",
-                version=str(request.get("target_version", "")),
-                backup=snapshot,
-                session=session,
-                error=str(exc),
-            )
+            _write_result(module, app_dir, status="rolled_back", version=str(request.get("target_version", "")), backup=snapshot, session=session, error=str(exc))
             try:
                 module._launch_main(app_dir, str(request["main_exe"]))  # noqa: SLF001
             except Exception:
                 pass
             raise
 
-    module._snapshot = lambda app_dir, target_version, state: _snapshot(module, app_dir, target_version, state)
     module._full_update = full_update
-    module._incremental_update = incremental_update
     module._restore_update = restore_update
+    module._incremental_update = incremental_update
     module._issue222_update_workspace_installed = True
     return True
 
