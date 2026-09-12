@@ -16,8 +16,8 @@ def check_sources() -> None:
     desktop_spec = read("apps/windows/bilipdj_onedir.spec")
     desktop_main = read("apps/windows/main.py")
     updater_spec = read("apps/windows/updater.spec")
-    windows_workspace = read("apps/windows/issue222_update_workspace.py")
-    windows_apply = read("apps/windows/issue222_update_apply.py")
+    windows_workspace = read("apps/windows/update_workspace_runtime.py")
+    windows_apply = read("apps/windows/updater_apply.py")
     web_guard = read("apps/server/issue187_web_update_guard.py")
     web_entry = read("apps/web/web_updater_entry.py")
     web_workspace = read("apps/web/issue222_update_workspace.py")
@@ -29,7 +29,8 @@ def check_sources() -> None:
     assert "issue222_runtime_hook.py" not in desktop_spec
     assert "install_windows_update_workspace" in desktop_main
     assert desktop_main.index("install_windows_update_workspace()") < desktop_main.index("patch_update_ui(update_ui)")
-    assert "updater_issue222_entry.py" in updater_spec
+    assert "updater_entry.py" in updater_spec
+    assert "updater_issue222_entry.py" not in updater_spec
     assert "allocate_update_session" in windows_workspace
     assert "windows-full" in windows_workspace and "windows-incremental" in windows_workspace
     assert "windows-restore" in windows_workspace
@@ -47,7 +48,7 @@ def check_sources() -> None:
 
 def _load_workspace_module():
     path = ROOT / "apps" / "update_workspace.py"
-    spec = importlib.util.spec_from_file_location("bilipdj_issue222_update_workspace_helper", path)
+    spec = importlib.util.spec_from_file_location("bilipdj_update_workspace_helper", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -56,7 +57,7 @@ def _load_workspace_module():
 
 def check_allocator() -> None:
     workspace = _load_workspace_module()
-    with tempfile.TemporaryDirectory(prefix="bilipdj-issue222-") as raw:
+    with tempfile.TemporaryDirectory(prefix="bilipdj-update-") as raw:
         app = Path(raw) / "bilipdj"
         app.mkdir()
         session = workspace.allocate_update_session(app, "full")
@@ -78,7 +79,7 @@ def check_allocator() -> None:
 def main() -> None:
     check_sources()
     check_allocator()
-    print("issue222 update workdir guard: OK")
+    print("local update workdir guard: OK")
 
 
 if __name__ == "__main__":
