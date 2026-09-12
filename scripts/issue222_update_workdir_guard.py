@@ -22,6 +22,7 @@ def check_sources() -> None:
     web_entry = read("apps/web/web_updater_entry.py")
     web_workspace = read("apps/web/issue222_update_workspace.py")
     core_init = read("core/__init__.py")
+    core_workspace = read("core/update_workspace.py")
 
     assert '"update/"' in manifest
     assert "runtime_hooks=[]" in desktop_spec
@@ -41,10 +42,11 @@ def check_sources() -> None:
     assert "validate_update_session" in web_workspace
     assert 'not in {"backup", "update"}' in web_workspace
     assert "schedule_local_update_cleanup" in core_init
+    assert "from apps.update_workspace import" in core_workspace
 
 
 def _load_workspace_module():
-    path = ROOT / "core" / "update_workspace.py"
+    path = ROOT / "apps" / "update_workspace.py"
     spec = importlib.util.spec_from_file_location("bilipdj_issue222_update_workspace_helper", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

@@ -6,7 +6,7 @@ import threading
 import time
 from pathlib import Path
 
-from .update_workspace import cleanup_update_session, validate_update_session
+from apps.update_workspace import cleanup_update_session, validate_update_session
 
 _LOCK = threading.RLock()
 _ACTIVE: set[str] = set()
