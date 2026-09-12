@@ -120,12 +120,12 @@ def _configure_control_panel_paths() -> None:
 
 _configure_control_panel_paths()
 # Install the app-local updater workspace only in the actual desktop entry
-# process.  Do not use a PyInstaller runtime hook here: runtime hooks also run in
+# process. Do not use a PyInstaller runtime hook here: runtime hooks also run in
 # frozen multiprocessing/plugin children and can keep self-test workers alive.
 install_windows_update_workspace()
 patch_update_ui(update_ui)
 
-# Install the CustomTkinter shell first.  The existing feature patches then wrap
+# Install the CustomTkinter shell first. The existing feature patches then wrap
 # this stable shell, preserving business behavior while keeping navigation
 # geometry independent from label requested widths.
 patch_control_panel_customtkinter(control_panel.ControlPanelApp)
@@ -138,7 +138,7 @@ patch_control_panel_issue79(control_panel.ControlPanelApp)
 patch_control_panel_command_console(control_panel.ControlPanelApp)
 patch_control_panel_issue194(control_panel.ControlPanelApp)
 patch_control_panel_issue196(control_panel.ControlPanelApp)
-# Kept for compatibility with older entry points.  Issue #209 detects the CTk
+# Kept for compatibility with older entry points. Issue #209 detects the CTk
 # marker and becomes a no-op instead of re-measuring the navigation width.
 patch_control_panel_issue209(control_panel.ControlPanelApp)
 
@@ -157,15 +157,7 @@ def _install_callback_error_logger(root: Any) -> list[str]:
 
 
 def _finish_root_show(root: Any) -> None:
-    """Show the CTk root without alpha transitions.
-
-    The previous CTk migration reused the old Tk startup trick of setting the
-    whole window alpha to 0 and restoring it after ``deiconify``.  On some
-    Windows 10/DWM combinations the CTk top-level stayed transparent after that
-    transition: the process and backend kept running while the GUI appeared to
-    flash and disappear.  A withdrawn root already prevents partial layout from
-    being painted, so an alpha transition is unnecessary here.
-    """
+    """Show the CTk root without alpha transitions."""
 
     root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
     root.minsize(WINDOW_WIDTH, WINDOW_HEIGHT)
@@ -188,9 +180,6 @@ def _create_desktop() -> tuple[Any, Any, list[str]]:
     root.withdraw()
     callback_errors = _install_callback_error_logger(root)
     app = control_panel.ControlPanelApp(root)
-    # Keep an explicit lifetime reference on the root.  Tk callbacks normally
-    # retain the panel as well, but making ownership explicit avoids GC-sensitive
-    # behavior between Tk and CustomTkinter implementations.
     root._bilipdj_control_panel = app  # type: ignore[attr-defined]
     _finish_root_show(root)
     return root, app, callback_errors
@@ -265,15 +254,30 @@ def _run_desktop() -> None:
     root.mainloop()
 
 
+def _run_self_test_and_exit(test: Any, label: str) -> None:
+    """Run a frozen probe and bypass interpreter shutdown on completion.
+
+    PyInstaller plugin/backend helpers may leave non-daemon runtime resources
+    alive even after the probe itself has finished. For CI-only self-test modes,
+    a deterministic process exit is safer than waiting indefinitely for Python
+    interpreter shutdown.
+    """
+
+    try:
+        test()
+    except BaseException as exc:
+        _write_startup_error(f"{label} failed: {exc}", exc=exc)
+        os._exit(1)
+    os._exit(0)
+
+
 def main() -> None:
     if "--plugin-runtime-self-test" in sys.argv[1:]:
         from apps.windows.frozen_plugin_probe import run_frozen_plugin_probe
 
-        run_frozen_plugin_probe()
-        return
+        _run_self_test_and_exit(run_frozen_plugin_probe, "plugin runtime self-test")
     if "--gui-startup-self-test" in sys.argv[1:]:
-        _run_gui_startup_self_test()
-        return
+        _run_self_test_and_exit(_run_gui_startup_self_test, "GUI startup self-test")
     _run_desktop()
 
 
