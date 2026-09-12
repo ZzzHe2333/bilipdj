@@ -174,6 +174,8 @@ def _run_gui_startup_self_test() -> None:
     try:
         root, app, callback_errors = _create_desktop()
         root.update()
+        if getattr(app, "_issue167_console_row", None) is None or not hasattr(app, "backend_command_var"):
+            raise RuntimeError("backend command console was not installed in the production log page")
         deadline = time.monotonic() + 4.0
         while time.monotonic() < deadline:
             if callback_errors:
