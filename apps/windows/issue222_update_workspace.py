@@ -7,7 +7,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from core.update_workspace import allocate_update_session, cleanup_update_session
+from apps.update_workspace import allocate_update_session, cleanup_update_session
 
 _PATCH_LOCK = threading.RLock()
 
