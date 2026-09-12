@@ -1,5 +1,0 @@
-from __future__ import annotations
-
-from apps.windows.issue222_update_workspace import install_windows_update_workspace
-
-install_windows_update_workspace()
