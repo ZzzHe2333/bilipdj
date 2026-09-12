@@ -1,4 +1,4 @@
-"""Install control-panel patches during the packaged entry script."""
+"""Install the production control-panel runtime during legacy entry imports."""
 from __future__ import annotations
 
 import builtins
@@ -46,38 +46,8 @@ def _restore_hook() -> None:
             timer.cancel()
 
 
-def _install_final_support_renderer(panel_class: type[Any], module: Any) -> None:
-    """Render the canonical support page after legacy navigation patches finish."""
-    current = getattr(panel_class, "_build_ui", None)
-    if not callable(current) or bool(getattr(current, "_bilipdj_support_final", False)):
-        return
-
-    from .support_us import _render_support_content
-
-    @functools.wraps(current)
-    def build_ui_with_final_support(self: Any, *args: Any, **kwargs: Any) -> Any:
-        result = current(self, *args, **kwargs)
-        items = list(getattr(self, "_nav_items", []) or [])
-        pages = list(getattr(self, "_content_pages", []) or [])
-        for index, item in enumerate(items):
-            try:
-                label = str(item[1].cget("text") or "").strip()
-            except Exception:
-                continue
-            if label == "支持我们" and index < len(pages):
-                try:
-                    _render_support_content(self, pages[index], module)
-                except Exception:
-                    pass
-                break
-        return result
-
-    setattr(build_ui_with_final_support, "_bilipdj_support_final", True)
-    setattr(panel_class, "_build_ui", build_ui_with_final_support)
-
-
 def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
-    """Patch ``ControlPanelApp`` immediately after Python creates the class."""
+    """Apply the same production desktop runtime to legacy source entry points."""
 
     global _ORIGINAL_BUILD_CLASS, _BUILD_CLASS_WRAPPER, _RESTORE_TIMER
     if not _control_panel_entry_expected():
@@ -97,64 +67,9 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
             if os.path.basename(str(getattr(module, "__file__", ""))) != "control_panel.py":
                 return cls
             try:
-                from .about_page import patch_control_panel_about
-                from .bilibili_qr_dialog import patch_control_panel_qr_login
-                from .control_panel_guard import patch_control_panel_class
-                from .control_panel_features import patch_control_panel_features
-                from .control_panel_ui_finish import patch_control_panel_ui_finish
-                from .customtk_ui import patch_control_panel_customtkinter
-                from .gui_log_sink import patch_control_panel_logging
-                from .huya_control_guard import patch_control_panel_huya
-                from .issue79_features import patch_control_panel_issue79
-                from .issue180_windows_ui import patch_control_panel_issue180
-                from .issue185_stability import patch_control_panel_issue185
-                from .issue187_stability import patch_control_panel_issue187
-                from .issue187_update_channel import install_update_channel_guard
-                from .issue189_release_selector import install_issue189_release_selector
-                from .issue194_fixed_window import patch_control_panel_issue194
-                from .issue196_log_toolbar import patch_control_panel_issue196
-                from .issue209_nav_stability import patch_control_panel_issue209
-                from .portable_autostart import patch_control_panel_portable_autostart
-                from .purple_mouse_control_guard import patch_control_panel_purple_mouse
-                from .redtv_control_guard import patch_control_panel_redtv
-                from .style_save_transport import install_style_save_transport
-                from .support_us import patch_control_panel_support_us
-                from .unified_theme import patch_control_panel_unified_theme
-                from .webdav_backup_ui import patch_control_panel_webdav_backup
+                from .desktop_runtime import install_desktop_runtime
 
-                install_style_save_transport()
-                install_update_channel_guard()
-                install_issue189_release_selector()
-                # CustomTkinter owns the root shell and fixed navigation geometry.
-                # Every existing feature layer is installed on top of it so business
-                # behavior remains unchanged while legacy Tk width propagation can no
-                # longer move the main content column.
-                patch_control_panel_customtkinter(cls)
-                patch_control_panel_class(cls)
-                patch_control_panel_features(cls)
-                patch_control_panel_about(cls)
-                patch_control_panel_portable_autostart(cls)
-                patch_control_panel_qr_login(cls)
-                patch_control_panel_webdav_backup(cls)
-                patch_control_panel_support_us(cls)
-                patch_control_panel_ui_finish(cls)
-                patch_control_panel_logging(cls)
-                # Navigation/queue normalization stays before the final shared
-                # theme layer so the theme can style the final widget tree.
-                patch_control_panel_issue79(cls)
-                patch_control_panel_huya(cls)
-                patch_control_panel_redtv(cls)
-                patch_control_panel_purple_mouse(cls)
-                patch_control_panel_issue180(cls)
-                patch_control_panel_issue185(cls)
-                patch_control_panel_issue187(cls)
-                patch_control_panel_issue194(cls)
-                patch_control_panel_issue196(cls)
-                patch_control_panel_unified_theme(cls)
-                # Kept for compatibility with old entry points.  On the CTk shell
-                # Issue #209 is a no-op and never re-measures navigation width.
-                patch_control_panel_issue209(cls)
-                _install_final_support_renderer(cls, module)
+                install_desktop_runtime(cls)
             finally:
                 _restore_hook()
             return cls
