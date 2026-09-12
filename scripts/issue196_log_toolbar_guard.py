@@ -15,7 +15,6 @@ def read(path: str) -> str:
 
 def check_source_wiring() -> None:
     helper = read("apps/windows/log_toolbar.py")
-    component = read("apps/windows/components/log_page.py")
     runtime = read("apps/windows/desktop_runtime.py")
 
     assert '_COMPACT_BUTTON_TEXTS = {"清空", "复制"}' in helper
@@ -23,12 +22,15 @@ def check_source_wiring() -> None:
     assert "padding=_COMPACT_BUTTON_PADDING" in helper
     assert "grid_configure(padx=_COMPACT_BUTTON_PADX)" in helper
     assert "def compact_log_toolbar" in helper
-    assert "from ..log_toolbar import compact_log_toolbar" in component
-    assert "compact_log_toolbar(host)" in component
-    assert "patch_control_panel_issue196(panel_class)" not in runtime
+    # The Tk/ttk rollback intentionally restores the legacy adapter around the
+    # original ControlPanelApp log builder. Component ownership is no longer
+    # part of the production Windows path.
+    assert "from .log_toolbar import patch_control_panel_issue196" in runtime
+    assert "patch_control_panel_issue196(panel_class)" in runtime
+    assert "install_page_components" not in runtime
 
 
-def check_component_behavior() -> None:
+def check_tk_behavior() -> None:
     from apps.windows.log_toolbar import compact_log_toolbar
 
     class FakeWidget:
@@ -78,7 +80,7 @@ def check_component_behavior() -> None:
     assert label.options == {}
 
 
-def check_legacy_adapter_still_safe() -> None:
+def check_adapter_still_safe() -> None:
     from apps.windows.log_toolbar import patch_control_panel_issue196
 
     module_name = "log_toolbar_fake_control_panel"
@@ -108,9 +110,9 @@ def check_legacy_adapter_still_safe() -> None:
 
 def main() -> None:
     check_source_wiring()
-    check_component_behavior()
-    check_legacy_adapter_still_safe()
-    print("component log toolbar guard: OK")
+    check_tk_behavior()
+    check_adapter_still_safe()
+    print("Tk/ttk log toolbar guard: OK")
 
 
 if __name__ == "__main__":

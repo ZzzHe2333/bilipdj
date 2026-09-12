@@ -4,6 +4,7 @@ import multiprocessing as mp
 import os
 import sys
 import time
+import tkinter as tk
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -26,10 +27,10 @@ from apps.server.runtime_layout import ensure_runtime_layout  # noqa: E402
 configure_web_assets()
 
 from apps.windows import control_panel, update_ui  # noqa: E402
-from apps.windows.customtk_ui import BiliPDJCTk, WINDOW_HEIGHT, WINDOW_WIDTH  # noqa: E402
 from apps.windows.desktop_runtime import install_desktop_runtime  # noqa: E402
 from apps.windows.update_estimate_ui import patch_update_ui  # noqa: E402
 from apps.windows.update_workspace_runtime import install_windows_update_workspace  # noqa: E402
+from apps.windows.window_policy import WINDOW_HEIGHT, WINDOW_WIDTH  # noqa: E402
 
 GUI_STARTUP_LOG_NAME = "gui-startup-error.log"
 
@@ -55,6 +56,7 @@ def _write_startup_error(message: str, *, exc: BaseException | None = None, trac
         f"frozen: {bool(getattr(sys, 'frozen', False))}",
         f"executable: {sys.executable}",
         f"cwd: {Path.cwd()}",
+        "ui: tkinter/ttk",
     ]
     if trace:
         lines.extend(("traceback:", trace.rstrip()))
@@ -121,7 +123,7 @@ def _install_callback_error_logger(root: Any) -> list[str]:
     return errors
 
 
-def _finish_root_show(root: Any) -> None:
+def _finish_root_show(root: tk.Tk) -> None:
     root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
     root.minsize(WINDOW_WIDTH, WINDOW_HEIGHT)
     root.maxsize(WINDOW_WIDTH, WINDOW_HEIGHT)
@@ -138,8 +140,10 @@ def _finish_root_show(root: Any) -> None:
         pass
 
 
-def _create_desktop() -> tuple[Any, Any, list[str]]:
-    root = BiliPDJCTk()
+def _create_desktop() -> tuple[tk.Tk, Any, list[str]]:
+    # Native Tk is intentionally used here.  CustomTkinter previously owned the
+    # root window and could disappear immediately on some frozen Windows builds.
+    root = tk.Tk()
     root.withdraw()
     callback_errors = _install_callback_error_logger(root)
     app = control_panel.ControlPanelApp(root)
@@ -167,15 +171,22 @@ def _stop_probe_process(process: Any) -> None:
 
 
 def _run_gui_startup_self_test() -> None:
-    root: Any | None = None
+    root: tk.Tk | None = None
     app: Any | None = None
     callback_errors: list[str] = []
     started = time.monotonic()
     try:
         root, app, callback_errors = _create_desktop()
         root.update()
+        if type(root) is not tk.Tk:
+            raise RuntimeError(f"production root is not tkinter.Tk: {type(root)!r}")
+        if not bool(getattr(type(app), "_bilipdj_tk_ui_installed", False)):
+            raise RuntimeError("Tk desktop runtime marker is missing")
         if getattr(app, "_issue167_console_row", None) is None or not hasattr(app, "backend_command_var"):
-            raise RuntimeError("backend command console was not installed in the production log page")
+            raise RuntimeError("backend command console was not installed in the Tk log page")
+        if not list(getattr(app, "_content_pages", []) or []):
+            raise RuntimeError("Tk desktop pages were not created")
+
         deadline = time.monotonic() + 4.0
         while time.monotonic() < deadline:
             if callback_errors:
@@ -186,13 +197,8 @@ def _run_gui_startup_self_test() -> None:
                 raise RuntimeError("GUI root became unavailable during startup") from exc
             if not exists:
                 raise RuntimeError("GUI root was destroyed during startup")
-            try:
-                if str(root.state()) == "withdrawn":
-                    raise RuntimeError("GUI root returned to withdrawn state after first show")
-            except RuntimeError:
-                raise
-            except Exception:
-                pass
+            if str(root.state()) == "withdrawn":
+                raise RuntimeError("GUI root returned to withdrawn state after first show")
             root.update()
             time.sleep(0.02)
         if time.monotonic() - started < 3.5:

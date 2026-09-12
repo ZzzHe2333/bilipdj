@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tkinter as tk
 import types
 from pathlib import Path
 
@@ -15,79 +16,92 @@ def read(path: str) -> str:
 
 def check_source_wiring() -> None:
     requirements = read("requirements.txt")
-    custom = read("apps/windows/customtk_ui.py")
     main = read("apps/windows/main.py")
-    bootstrap = read("apps/windows/control_panel_bootstrap.py")
     runtime = read("apps/windows/desktop_runtime.py")
     navigation = read("apps/windows/navigation_layout.py")
     spec = read("apps/windows/bilipdj_onedir.spec")
     quality = read(".github/workflows/quality.yml")
 
-    assert "customtkinter>=5.2,<6" in requirements
-    assert "import customtkinter as ctk" in custom
-    assert "NAV_WIDTH = 178" in custom
-    assert "shell.grid_columnconfigure(0, weight=0, minsize=NAV_WIDTH)" in custom
-    assert "nav.grid_propagate(False)" in custom
-    assert "nav.pack_propagate(False)" in custom
-    assert "winfo_reqwidth" not in custom
-    assert "class BiliPDJCTk(ctk.CTk)" in custom
+    assert "customtkinter" not in requirements.lower()
+    assert "import tkinter as tk" in main
+    assert "root = tk.Tk()" in main
+    assert "BiliPDJCTk" not in main
+    assert "patch_control_panel_customtkinter" not in runtime
+    assert "install_page_components" not in runtime
+    assert "patch_control_panel_issue180(panel_class)" in runtime
+    assert "patch_control_panel_issue196(panel_class)" in runtime
+    assert "patch_control_panel_command_console(panel_class)" in runtime
+    assert "_bilipdj_tk_ui_installed" in runtime
 
-    assert "install_desktop_runtime(control_panel.ControlPanelApp)" in main
-    assert "from .desktop_runtime import install_desktop_runtime" in bootstrap
-    runtime_custom = runtime.index("patch_control_panel_customtkinter(panel_class)")
-    runtime_legacy = runtime.index("patch_control_panel_issue209(panel_class)")
-    assert runtime_custom < runtime_legacy
-    assert "_issue209_superseded_by_customtkinter" in navigation
+    # Navigation stays on the original Tk/ttk compatibility path. The legacy
+    # CustomTkinter short-circuit may remain for source compatibility, but it is
+    # never activated by the production runtime.
+    assert "patch_control_panel_issue209" in runtime
     assert "_bilipdj_customtkinter_ui_installed" in navigation
 
-    assert 'collect_data_files("customtkinter")' in spec
-    assert 'collect_submodules("customtkinter")' in spec
-    assert '"apps.windows.customtk_ui"' in spec
+    assert 'collect_data_files("customtkinter")' not in spec
+    assert 'collect_submodules("customtkinter")' not in spec
+    assert '"apps.windows.customtk_ui"' not in spec
+    assert 'excludes=["customtkinter"]' in spec
     assert '"apps.windows.desktop_runtime"' in spec
     assert "python scripts/issue217_customtkinter_guard.py" in quality
 
 
-def check_patch_interop() -> None:
-    import customtkinter as ctk
+def check_runtime_marker() -> None:
+    # Use a lightweight fake control-panel module to prove the production
+    # runtime can be imported and installed without importing CustomTkinter.
+    from apps.windows.desktop_runtime import install_desktop_runtime
 
-    from apps.windows.customtk_ui import BiliPDJCTk, CompatButton, CompatFrame, CompatLabel, NAV_WIDTH, patch_control_panel_customtkinter
-    from apps.windows.navigation_layout import patch_control_panel_issue209
-
-    assert NAV_WIDTH == 178
-    assert issubclass(BiliPDJCTk, ctk.CTk)
-    assert issubclass(CompatFrame, ctk.CTkFrame)
-    assert issubclass(CompatButton, ctk.CTkButton)
-    assert issubclass(CompatLabel, ctk.CTkLabel)
-
-    module_name = "customtk_fake_control_panel"
+    module_name = "tk_fake_control_panel"
     fake_module = types.ModuleType(module_name)
     fake_module.__file__ = str(ROOT / "apps" / "windows" / "control_panel.py")
+    fake_module.tk = tk
     sys.modules[module_name] = fake_module
 
     class FakePanel:
         __module__ = module_name
+
+        def __init__(self, root=None):
+            self.root = root
+            self._nav_items = []
+            self._content_pages = []
+
         def _build_ui(self):
-            return "legacy"
-        def _apply_theme(self, dark: bool = True):
+            return None
+
+        def _build_log_tab(self, frame):
+            return None
+
+        def _build_settings_tab(self, frame):
+            return None
+
+        def _build_quanxian_tab(self, frame):
+            return None
+
+        def _build_perf_tab(self, frame):
+            return None
+
+        def _apply_theme(self, dark=True):
             return dark
+
         def _apply_ui_font_size(self):
             return None
 
     fake_module.ControlPanelApp = FakePanel
     try:
-        assert patch_control_panel_customtkinter(FakePanel)
-        assert getattr(FakePanel, "_bilipdj_customtkinter_ui_installed", False)
-        assert patch_control_panel_issue209(FakePanel)
-        assert getattr(FakePanel, "_issue209_superseded_by_customtkinter", False)
-        assert getattr(FakePanel, "_issue209_nav_stability_installed", False)
+        try:
+            install_desktop_runtime(FakePanel)
+        except Exception as exc:
+            assert "customtkinter" not in repr(exc).lower(), repr(exc)
+        assert "customtkinter" not in sys.modules
     finally:
         sys.modules.pop(module_name, None)
 
 
 def main() -> None:
     check_source_wiring()
-    check_patch_interop()
-    print("CustomTkinter desktop UI guard: OK")
+    check_runtime_marker()
+    print("Tk/ttk desktop rollback guard: OK")
 
 
 if __name__ == "__main__":
