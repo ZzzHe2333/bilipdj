@@ -1,0 +1,37 @@
+name: Validate local update workspace
+
+on:
+  pull_request:
+    paths:
+      - 'apps/windows/**'
+      - 'apps/web/**'
+      - 'apps/server/**'
+      - 'core/**'
+      - 'scripts/issue222_update_workdir_guard.py'
+      - '.github/workflows/issue222-update-workdir.yml'
+  push:
+    branches:
+      - now
+    paths:
+      - 'apps/windows/**'
+      - 'apps/web/**'
+      - 'apps/server/**'
+      - 'core/**'
+      - 'scripts/issue222_update_workdir_guard.py'
+      - '.github/workflows/issue222-update-workdir.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile update modules
+        run: python -m compileall -q apps/windows apps/web apps/server core
+      - name: Validate update workspace routing
+        run: python scripts/issue222_update_workdir_guard.py
