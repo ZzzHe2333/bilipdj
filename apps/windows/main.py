@@ -10,16 +10,12 @@ from pathlib import Path
 from typing import Any
 
 if __name__ == "__main__":
-    # Required by PyInstaller when JavaScript plugins spawn their isolated worker.
     mp.freeze_support()
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-# Customer-facing frozen builds are portable bundles: launching the Tk frontend
-# must always bring up its embedded backend automatically. Source/developer runs
-# keep the existing configurable auto-start behavior.
 if getattr(sys, "frozen", False):
     os.environ.setdefault("BILIPDJ_PORTABLE_AUTO_BACKEND", "1")
 
@@ -45,7 +41,6 @@ from apps.windows.platform_features import patch_control_panel_issue79  # noqa: 
 from apps.windows.update_estimate_ui import patch_update_ui  # noqa: E402
 from apps.windows.update_workspace_runtime import install_windows_update_workspace  # noqa: E402
 from apps.windows.window_policy import patch_control_panel_issue194  # noqa: E402
-
 
 GUI_STARTUP_LOG_NAME = "gui-startup-error.log"
 
@@ -119,25 +114,15 @@ def _configure_control_panel_paths() -> None:
 
 
 _configure_control_panel_paths()
-# Install the app-local updater workspace only in the actual desktop entry
-# process. Do not use a PyInstaller runtime hook here: runtime hooks also run in
-# frozen multiprocessing/plugin children and can keep self-test workers alive.
 install_windows_update_workspace()
 patch_update_ui(update_ui)
-
-# Install the CustomTkinter shell first. Existing production feature layers then
-# wrap this stable shell, preserving business behavior while keeping navigation
-# geometry independent from label requested widths.
 patch_control_panel_customtkinter(control_panel.ControlPanelApp)
-
 patch_control_panel_qr_login(control_panel.ControlPanelApp)
 patch_control_panel_about(control_panel.ControlPanelApp)
 patch_control_panel_issue79(control_panel.ControlPanelApp)
 patch_control_panel_command_console(control_panel.ControlPanelApp)
 patch_control_panel_issue194(control_panel.ControlPanelApp)
 patch_control_panel_issue196(control_panel.ControlPanelApp)
-# The navigation compatibility layer becomes a no-op on the CTk shell and is
-# retained only to protect older source-mode entry points.
 patch_control_panel_issue209(control_panel.ControlPanelApp)
 
 
@@ -155,8 +140,6 @@ def _install_callback_error_logger(root: Any) -> list[str]:
 
 
 def _finish_root_show(root: Any) -> None:
-    """Show the CTk root without alpha transitions."""
-
     root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
     root.minsize(WINDOW_WIDTH, WINDOW_HEIGHT)
     root.maxsize(WINDOW_WIDTH, WINDOW_HEIGHT)
@@ -202,8 +185,6 @@ def _stop_probe_process(process: Any) -> None:
 
 
 def _run_gui_startup_self_test() -> None:
-    """Exercise the exact frozen GUI path, including the first visible WM events."""
-
     root: Any | None = None
     app: Any | None = None
     callback_errors: list[str] = []
@@ -253,8 +234,6 @@ def _run_desktop() -> None:
 
 
 def _run_self_test_and_exit(test: Any, label: str) -> None:
-    """Run a frozen probe and bypass interpreter shutdown on completion."""
-
     try:
         test()
     except BaseException as exc:
