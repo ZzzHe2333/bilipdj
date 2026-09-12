@@ -1,0 +1,39 @@
+name: Validate updater failure recovery
+
+on:
+  pull_request:
+    paths:
+      - 'apps/windows/**'
+      - 'apps/web/**'
+      - 'apps/update_workspace.py'
+      - 'core/update_workspace.py'
+      - 'core/issue222_update_cleanup.py'
+      - 'scripts/issue226_update_failure_guard.py'
+      - '.github/workflows/issue226-update-failure.yml'
+  push:
+    branches:
+      - now
+    paths:
+      - 'apps/windows/**'
+      - 'apps/web/**'
+      - 'apps/update_workspace.py'
+      - 'core/update_workspace.py'
+      - 'core/issue222_update_cleanup.py'
+      - 'scripts/issue226_update_failure_guard.py'
+      - '.github/workflows/issue226-update-failure.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile updater safety modules
+        run: python -m compileall -q apps/windows apps/web apps/update_workspace.py core
+      - name: Validate failure recovery paths
+        run: python scripts/issue226_update_failure_guard.py
