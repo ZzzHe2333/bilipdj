@@ -18,7 +18,7 @@ from .platform_features import install_platform_features
 from .portable_autostart import patch_control_panel_portable_autostart
 from .purple_mouse_control_guard import patch_control_panel_purple_mouse
 from .redtv_control_guard import patch_control_panel_redtv
-from .release_selector import install_issue189_release_selector
+from .release_selector import install_release_selector
 from .style_save_transport import install_style_save_transport
 from .support_us import _render_support_content, patch_control_panel_support_us
 from .unified_theme import patch_control_panel_unified_theme
@@ -57,12 +57,7 @@ def _install_final_support_renderer(panel_class: type[Any], module: Any) -> None
 
 
 def install_desktop_runtime(panel_class: type[Any]) -> bool:
-    """Install the production Windows GUI feature stack exactly once.
-
-    Production entry points import this module instead of historical Issue
-    implementation files. CI regression scripts may remain issue-numbered, but
-    they are not runtime dependencies of the packaged desktop application.
-    """
+    """Install the production Windows GUI feature stack exactly once."""
 
     if not isinstance(panel_class, type):
         return False
@@ -73,9 +68,8 @@ def install_desktop_runtime(panel_class: type[Any]) -> bool:
 
     install_style_save_transport()
     install_update_channel_guard()
-    install_issue189_release_selector()
+    install_release_selector()
 
-    # Shell first, then functional pages, then stability/theme normalization.
     patch_control_panel_customtkinter(panel_class)
     patch_control_panel_class(panel_class)
     patch_control_panel_features(panel_class)
