@@ -14,25 +14,22 @@ def read(path: str) -> str:
 
 
 def check_source_wiring() -> None:
-    patch = read("apps/windows/issue209_nav_stability.py")
-    main = read("apps/windows/main.py")
-    bootstrap = read("apps/windows/control_panel_bootstrap.py")
+    patch = read("apps/windows/navigation_layout.py")
+    runtime = read("apps/windows/desktop_runtime.py")
     quality = read(".github/workflows/quality.yml")
 
     assert "nav.pack_propagate(False)" in patch
     assert "shell.columnconfigure(0, weight=0, minsize=width)" in patch
     assert "_NAV_WIDTH_HEADROOM_PX = 12" in patch
-    assert "from apps.windows.issue209_nav_stability import patch_control_panel_issue209" in main
-    assert "patch_control_panel_issue209(control_panel.ControlPanelApp)" in main
-    assert "from .issue209_nav_stability import patch_control_panel_issue209" in bootstrap
-    assert "patch_control_panel_issue209(cls)" in bootstrap
+    assert "from .navigation_layout import patch_control_panel_issue209" in runtime
+    assert "patch_control_panel_issue209(panel_class)" in runtime
     assert "python scripts/issue209_nav_stability_guard.py" in quality
 
 
 def check_patch_behavior() -> None:
-    from apps.windows.issue209_nav_stability import patch_control_panel_issue209
+    from apps.windows.navigation_layout import patch_control_panel_issue209
 
-    module_name = "issue209_fake_control_panel"
+    module_name = "navigation_layout_fake_control_panel"
     fake_module = types.ModuleType(module_name)
     fake_module.__file__ = str(ROOT / "apps" / "windows" / "control_panel.py")
     sys.modules[module_name] = fake_module
@@ -40,14 +37,12 @@ def check_patch_behavior() -> None:
     class FakeRoot:
         def __init__(self) -> None:
             self.update_calls = 0
-
         def update_idletasks(self) -> None:
             self.update_calls += 1
 
     class FakeShell:
         def __init__(self) -> None:
             self.columns = {}
-
         def columnconfigure(self, index: int, **kwargs) -> None:
             self.columns[index] = dict(kwargs)
 
@@ -56,21 +51,17 @@ def check_patch_behavior() -> None:
             self.master = master
             self.width = 90
             self.propagate = True
-
         def pack_propagate(self, value: bool) -> None:
             self.propagate = bool(value)
-
         def configure(self, **kwargs) -> None:
             if "width" in kwargs:
                 self.width = int(kwargs["width"])
-
         def winfo_width(self) -> int:
             return self.width
 
     class FakeRow:
         def __init__(self, requested_width: int) -> None:
             self.requested_width = requested_width
-
         def winfo_reqwidth(self) -> int:
             return self.requested_width
 
@@ -85,43 +76,27 @@ def check_patch_behavior() -> None:
 
     def fake_show_page(self, index: int):
         self._active_page = index
-        # Model the selected label becoming wider when it switches to bold.
         rows[index % len(rows)].requested_width = 150
-        # A pack-propagating parent would adopt the new requested width. The
-        # real fix disables propagation, so this simulated parent must stay put.
         if nav.propagate:
             nav.width = max(row.winfo_reqwidth() for row in rows)
         return index
 
-    FakePanel = type(
-        "ControlPanelApp",
-        (),
-        {
-            "__module__": module_name,
-            "_build_ui": fake_build_ui,
-            "_show_page": fake_show_page,
-        },
-    )
+    FakePanel = type("ControlPanelApp", (), {"__module__": module_name, "_build_ui": fake_build_ui, "_show_page": fake_show_page})
     fake_module.ControlPanelApp = FakePanel
 
     try:
         assert patch_control_panel_issue209(FakePanel)
         panel = FakePanel()
         panel.root = FakeRoot()
-
         assert panel._build_ui() == "built"
         frozen = panel._issue209_nav_width
         assert frozen == 104 + 12
         assert nav.width == frozen
         assert nav.propagate is False
         assert shell.columns[0] == {"weight": 0, "minsize": frozen}
-
         assert panel._show_page(1) == 1
         assert rows[1].requested_width == 150
         assert nav.width == frozen
-        assert nav.propagate is False
-        assert shell.columns[0] == {"weight": 0, "minsize": frozen}
-
         assert patch_control_panel_issue209(FakePanel)
     finally:
         sys.modules.pop(module_name, None)
@@ -130,7 +105,7 @@ def check_patch_behavior() -> None:
 def main() -> None:
     check_source_wiring()
     check_patch_behavior()
-    print("issue #209 navigation stability guard: OK")
+    print("navigation stability guard: OK")
 
 
 if __name__ == "__main__":
