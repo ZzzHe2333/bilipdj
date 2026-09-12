@@ -36,6 +36,8 @@
 - Windows：https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.10-test/BiliPDJ-v3.0.10-test-Windows-Tk-Portable-x64.zip
 - Web：https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.10-test/BiliPDJ-v3.0.10-test-Web-Portable-x64.zip
 
+`Windows-Tk-files.json`、`Windows-Tk-Incremental-x64.pack`、Web 对应 manifest / incremental pack 及其 `.sha256` 均由内置更新器使用，**普通用户无需手动下载**。
+
 ## 更新与数据安全
 
 - `v3.0.10-test` 为测试通道 Release，不替代 v3.0.6 稳定版；
