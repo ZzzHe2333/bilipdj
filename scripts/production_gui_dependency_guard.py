@@ -5,7 +5,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WINDOWS = ROOT / "apps" / "windows"
-COMPONENTS = WINDOWS / "components"
 
 PRODUCTION_ENTRY_FILES = [
     WINDOWS / "main.py",
@@ -54,15 +53,6 @@ REQUIRED_PRODUCTION_MODULES = [
     "updater_entry.py",
 ]
 
-REQUIRED_COMPONENTS = [
-    "__init__.py",
-    "base.py",
-    "registry.py",
-    "log_page.py",
-    "settings_page.py",
-    "update_page.py",
-]
-
 
 def _production_python_files() -> list[Path]:
     return sorted(
@@ -81,27 +71,25 @@ def main() -> None:
 
     for name in REMOVED_RUNTIME_ISSUE_MODULES:
         assert not (WINDOWS / name).exists(), f"historical runtime issue module still exists: {name}"
-
     for name in REQUIRED_PRODUCTION_MODULES:
         assert (WINDOWS / name).is_file(), f"missing production module: {name}"
-    for name in REQUIRED_COMPONENTS:
-        assert (COMPONENTS / name).is_file(), f"missing GUI component module: {name}"
 
     main_source = (WINDOWS / "main.py").read_text(encoding="utf-8")
     bootstrap = (WINDOWS / "control_panel_bootstrap.py").read_text(encoding="utf-8")
     runtime = (WINDOWS / "desktop_runtime.py").read_text(encoding="utf-8")
-    component_base = (COMPONENTS / "base.py").read_text(encoding="utf-8")
-    component_registry = (COMPONENTS / "registry.py").read_text(encoding="utf-8")
-    log_component = (COMPONENTS / "log_page.py").read_text(encoding="utf-8")
-    settings_component = (COMPONENTS / "settings_page.py").read_text(encoding="utf-8")
     command_console = (WINDOWS / "command_console_ui.py").read_text(encoding="utf-8")
     platform = (WINDOWS / "platform_features.py").read_text(encoding="utf-8")
     huya = (WINDOWS / "huya_control_guard.py").read_text(encoding="utf-8")
     redtv = (WINDOWS / "redtv_control_guard.py").read_text(encoding="utf-8")
     purple = (WINDOWS / "purple_mouse_control_guard.py").read_text(encoding="utf-8")
     spec = (WINDOWS / "bilipdj_onedir.spec").read_text(encoding="utf-8")
+    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
     core_init = (ROOT / "core" / "__init__.py").read_text(encoding="utf-8")
 
+    assert "import tkinter as tk" in main_source
+    assert "root = tk.Tk()" in main_source
+    assert "BiliPDJCTk" not in main_source
+    assert "customtk" not in main_source.lower()
     assert "install_desktop_runtime(control_panel.ControlPanelApp)" in main_source
     assert main_source.index("install_desktop_runtime(control_panel.ControlPanelApp)") < main_source.index("app = control_panel.ControlPanelApp(root)")
 
@@ -110,28 +98,19 @@ def main() -> None:
     assert "install_control_panel_class_hook()" not in core_init
     assert "install_control_panel_runtime" in bootstrap
 
-    assert "from .components import install_page_components" in runtime
-    assert "install_page_components(panel_class)" in runtime
-    assert runtime.index("_install_compatibility_runtime(panel_class)") < runtime.index("install_page_components(panel_class)")
-    assert "patch_control_panel_issue180(panel_class)" not in runtime
-    assert "patch_control_panel_issue196(panel_class)" not in runtime
-
-    assert "class PageComponent" in component_base
-    assert "CompatFrame" in component_base
-    assert "LogPageComponent" in component_registry
-    assert "SettingsPageComponent" in component_registry
-    assert "UpdatePageComponent" in component_registry
-    assert 'setattr(panel_class, "_build_log_tab"' in component_registry
-    assert 'setattr(panel_class, "_build_settings_tab"' in component_registry
-    assert 'setattr(panel_class, "_build_quanxian_tab"' in component_registry
-    assert 'setattr(panel_class, "_build_perf_tab"' in component_registry
-    assert "update_page_module.build_update_tab =" in component_registry
-    assert "_install_stable_update_layout()" in component_registry
-    assert "compact_log_toolbar(host)" in log_component
-    assert "from ..command_console_ui import _install_console_row" in log_component
-    assert "_install_console_row(panel)" in log_component
+    assert "patch_control_panel_customtkinter" not in runtime
+    assert "install_page_components" not in runtime
+    assert "patch_control_panel_issue180(panel_class)" in runtime
+    assert "patch_control_panel_issue196(panel_class)" in runtime
+    assert "patch_control_panel_command_console(panel_class)" in runtime
+    assert "_bilipdj_tk_ui_installed" in runtime
     assert "后端指令" in command_console
-    assert "_build_plugin_manager_tab(panel, module)" in settings_component
+
+    assert "customtkinter" not in requirements.lower()
+    assert "customtkinter" not in spec.lower()
+    assert 'excludes=["customtkinter"]' in spec
+    assert '"apps.windows.desktop_runtime"' in spec
+    assert '"apps.windows.windows_ui"' in spec
 
     assert "install_platform_features(panel_class)" in runtime
     assert "lambda exc=exc" in platform
@@ -139,9 +118,8 @@ def main() -> None:
         assert "_issue79_platform_vars" not in source
         assert "_issue79_platform_status_var" not in source
     assert "issue79_features" not in spec
-    assert "apps.windows.desktop_runtime" in spec
 
-    print("production GUI dependency/component guard: OK")
+    print("production Tk/ttk GUI dependency guard: OK")
 
 
 if __name__ == "__main__":
