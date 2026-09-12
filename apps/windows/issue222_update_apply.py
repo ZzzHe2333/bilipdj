@@ -6,7 +6,7 @@ import time
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from core.update_workspace import validate_update_session
+from apps.update_workspace import validate_update_session
 
 try:
     from . import incremental_apply, updater as legacy
