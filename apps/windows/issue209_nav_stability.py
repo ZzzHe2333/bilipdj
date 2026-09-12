@@ -10,21 +10,13 @@ _NAV_WIDTH_HEADROOM_PX = 12
 
 
 def _freeze_navigation_width(panel: Any) -> int | None:
-    """Freeze the left navigation at its final natural width.
-
-    The navigation rows are managed with ``pack``. If pack propagation remains
-    enabled, switching the selected button between normal/bold font weights can
-    change the frame's requested width and push the right content column.
-    """
+    """Freeze the legacy Tk left navigation at its final natural width."""
     nav = getattr(panel, "_nav_frame", None)
     items = list(getattr(panel, "_nav_items", []) or [])
     if nav is None or not items:
         return None
 
     try:
-        # Measure once after all navigation labels/theme patches have finished.
-        # The root is still hidden during normal startup, so this settling pass
-        # is not visible to the user.
         nav.pack_propagate(True)
     except Exception:
         pass
@@ -54,9 +46,6 @@ def _freeze_navigation_width(panel: Any) -> int | None:
     shell = getattr(nav, "master", None)
     try:
         nav.configure(width=width)
-        # nav's direct children use pack(), so pack propagation is the switch
-        # that actually prevents text/font requested-width changes from
-        # resizing the sidebar. grid_propagate(False) alone does not do this.
         nav.pack_propagate(False)
     except Exception:
         return None
@@ -67,11 +56,6 @@ def _freeze_navigation_width(panel: Any) -> int | None:
         except Exception:
             pass
 
-    # Configuring ``width`` and the shell column's ``minsize`` only changes Tk's
-    # requested geometry. Without one final idle-layout pass the old actual width
-    # can remain visible until the next <Configure> event, which makes the sidebar
-    # jump right after the window has already appeared. Settle that geometry while
-    # startup is still hidden so the first painted frame already has its final size.
     try:
         panel.root.update_idletasks()
     except Exception:
@@ -93,6 +77,15 @@ def patch_control_panel_issue209(panel_class: type[Any]) -> bool:
 
     with _PATCH_LOCK:
         if bool(getattr(panel_class, "_issue209_nav_stability_installed", False)):
+            return True
+
+        # Issue #217 uses a structural fixed-width CustomTkinter sidebar.  The
+        # old Issue #209 algorithm briefly re-enables pack propagation and
+        # measures requested label widths; doing that on the new shell would
+        # reintroduce the exact left-to-right geometry jump we are removing.
+        if bool(getattr(panel_class, "_bilipdj_customtkinter_ui_installed", False)):
+            setattr(panel_class, "_issue209_nav_stability_installed", True)
+            setattr(panel_class, "_issue209_superseded_by_customtkinter", True)
             return True
 
         original_build_ui = getattr(panel_class, "_build_ui", None)
