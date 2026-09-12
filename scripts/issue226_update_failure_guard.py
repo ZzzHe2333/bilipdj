@@ -15,7 +15,7 @@ def read(path: str) -> str:
 
 
 def check_windows_transaction_boundary() -> None:
-    source = read("apps/windows/issue226_update_safety.py")
+    source = read("apps/windows/updater_safety.py")
     snapshot_at = source.index("snapshot = apply._create_snapshot")
     first_copy_at = source.index("apply._copy_with_retry(source, destination)")
     first_remove_at = source.index("incremental_apply._remove_target(destination)")
@@ -43,7 +43,6 @@ def check_web_relaunch_wrapper() -> None:
     with tempfile.TemporaryDirectory(prefix="bilipdj-issue226-") as raw:
         app_dir = Path(raw)
         (app_dir / "main.exe").write_bytes(b"placeholder")
-
         calls: list[str] = []
 
         def stop_app(_request, _state):
@@ -64,11 +63,7 @@ def check_web_relaunch_wrapper() -> None:
         module._launch_main = launch_main
         assert install_issue226_web_update_safety(module)
         try:
-            module._incremental_update(
-                {"app_dir": str(app_dir), "main_exe": "main.exe"},
-                object(),
-                app_dir / "update" / "probe",
-            )
+            module._incremental_update({"app_dir": str(app_dir), "main_exe": "main.exe"}, object(), app_dir / "update" / "probe")
         except OSError:
             pass
         else:
@@ -88,11 +83,7 @@ def check_web_relaunch_wrapper() -> None:
         module2._launch_main = launch_main
         assert install_issue226_web_update_safety(module2)
         try:
-            module2._incremental_update(
-                {"app_dir": str(app_dir), "main_exe": "main.exe"},
-                object(),
-                app_dir / "update" / "probe2",
-            )
+            module2._incremental_update({"app_dir": str(app_dir), "main_exe": "main.exe"}, object(), app_dir / "update" / "probe2")
         except OSError:
             pass
         else:
@@ -101,10 +92,10 @@ def check_web_relaunch_wrapper() -> None:
 
 
 def check_entry_wiring() -> None:
-    windows_entry = read("apps/windows/updater_issue222_entry.py")
+    windows_entry = read("apps/windows/updater_entry.py")
     web_entry = read("apps/web/web_updater_entry.py")
-    assert "patch_issue226_windows_update_safety" in windows_entry
-    assert windows_entry.index("patch_updater_v2(updater_gui.updater_v2)") < windows_entry.index("patch_issue226_windows_update_safety()")
+    assert "install_updater_safety" in windows_entry
+    assert windows_entry.index("patch_updater_v2(updater_gui.updater_v2)") < windows_entry.index("install_updater_safety()")
     assert "install_issue226_web_update_safety" in web_entry
     assert web_entry.index("install_issue222_update_workspace(web_updater)") < web_entry.index("install_issue226_web_update_safety(web_updater)")
 
