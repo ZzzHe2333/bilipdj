@@ -29,6 +29,10 @@ PRESERVED_PREFIXES = (
     "backup/",
     "plugins/",
     "key/",
+    # Update downloads, extracted staging trees and detached updater copies live
+    # beside the application under app_dir/update. They are runtime state, not
+    # package-managed files, and must never be replaced by an incremental plan.
+    "update/",
 )
 
 

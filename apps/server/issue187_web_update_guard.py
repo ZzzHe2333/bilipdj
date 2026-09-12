@@ -5,11 +5,12 @@ import os
 import secrets
 import shutil
 import subprocess
-import tempfile
 import time
 import urllib.parse
 from pathlib import Path
 from typing import Any
+
+from apps.update_workspace import allocate_update_session, cleanup_update_session
 
 
 def _stop_process(process: subprocess.Popen[Any] | None) -> None:
@@ -57,7 +58,7 @@ def install_issue187_web_update_guard(server_module: Any) -> bool:
         if mode not in {"full", "incremental", "restore"}:
             raise ValueError("mode 必须是 full / incremental / restore")
 
-        session_dir = Path(tempfile.mkdtemp(prefix="bilipdj-web-update-launch-"))
+        session_dir = allocate_update_session(app_dir, f"web-{mode}")
         process: subprocess.Popen[Any] | None = None
         try:
             updater_copy = session_dir / web_update_api.WEB_UPDATER_EXE
@@ -136,11 +137,12 @@ def install_issue187_web_update_guard(server_module: Any) -> bool:
             raise RuntimeError("等待独立 Web 更新器启动超时")
         except Exception:
             _stop_process(process)
-            shutil.rmtree(session_dir, ignore_errors=True)
+            cleanup_update_session(app_dir, session_dir)
             raise
 
     web_update_api._launch_update = launch_update_safe  # type: ignore[attr-defined]  # noqa: SLF001
     web_update_api._issue187_safe_launch_installed = True
+    web_update_api._issue222_local_workspace_installed = True
     return True
 
 

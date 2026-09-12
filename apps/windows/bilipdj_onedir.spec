@@ -27,11 +27,11 @@ hiddenimports = [
     "apps.windows.control_panel_features", "apps.windows.control_panel_ui_finish", "apps.windows.gui_log_sink", "apps.windows.customtk_ui",
     "apps.windows.about_page", "apps.windows.bilibili_qr_dialog", "apps.windows.portable_autostart", "apps.windows.style_save_transport",
     "apps.windows.support_us", "apps.windows.webdav_backup_ui", "apps.windows.issue79_features", "apps.windows.redtv_control_guard", "apps.windows.purple_mouse_control_guard", "apps.windows.unified_theme",
-    "apps.windows.issue187_update_channel", "apps.windows.issue189_release_selector",
+    "apps.windows.issue187_update_channel", "apps.windows.issue189_release_selector", "apps.windows.issue222_update_workspace",
     "apps.windows.update_client", "apps.windows.update_ui", "apps.windows.update_network", "apps.windows.update_page",
     "apps.windows.incremental_update", "apps.windows.update_manifest",
     "apps.windows.overlay_refresh_guard", "apps.windows.overlay_performance_guard", "apps.windows.slider_switches",
-    "core.server", "core.update_ui", "core.youtube_protocol", "core.twitch_protocol",
+    "core.server", "core.update_ui", "core.youtube_protocol", "core.twitch_protocol", "core.update_workspace", "core.issue222_update_cleanup",
     "qrcode", "qrcode.main", "qrcode.constants", "qrcode.util", "qrcode.image.base",
     "qrcode.image.pil", "qrcode.image.pure", "PIL", "PIL.Image", "PIL.ImageTk", "PIL.PngImagePlugin",
     "brotli", "psutil", "google.protobuf", "google.protobuf.internal.builder",
@@ -42,7 +42,8 @@ hiddenimports += collect_submodules("customtkinter")
 a = Analysis(
     [str(project_root / "apps" / "windows" / "main.py")],
     pathex=[str(project_root)], binaries=[], datas=datas, hiddenimports=hiddenimports,
-    hookspath=[], hooksconfig={}, runtime_hooks=[], excludes=[], noarchive=False, optimize=0,
+    hookspath=[], hooksconfig={}, runtime_hooks=[],
+    excludes=[], noarchive=False, optimize=0,
 )
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="main",

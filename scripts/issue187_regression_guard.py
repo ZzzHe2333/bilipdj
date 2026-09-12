@@ -106,7 +106,7 @@ def check_web_portable_shutdown() -> None:
 def check_failed_launch_cleanup() -> None:
     source = read("apps/server/issue187_web_update_guard.py")
     assert "_stop_process(process)" in source
-    assert "shutil.rmtree(session_dir, ignore_errors=True)" in source
+    assert "cleanup_update_session(app_dir, session_dir)" in source
     assert "等待独立 Web 更新器启动超时" in source
     main = read("apps/server/main.py")
     assert "install_issue187_web_update_guard(backend)" in main

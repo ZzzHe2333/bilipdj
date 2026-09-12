@@ -5,12 +5,14 @@ spec_dir = Path(SPECPATH).resolve()
 project_root = spec_dir.parents[1]
 
 a = Analysis(
-    [str(project_root / "apps" / "windows" / "updater_gui.py")],
+    [str(project_root / "apps" / "windows" / "updater_issue222_entry.py")],
     pathex=[str(project_root), str(project_root / "apps" / "windows")], binaries=[], datas=[],
     hiddenimports=[
+        "apps.windows.updater_gui", "apps.windows.issue222_update_apply",
         "apps.windows.updater_v2", "apps.windows.updater", "apps.windows.updater_model",
         "apps.windows.incremental_apply", "apps.windows.update_manifest",
         "apps.server.log_manager", "core.updater_v2", "core.updater", "core.updater_model", "core.log_manager",
+        "core.update_workspace", "core.issue222_update_cleanup",
     ],
     hookspath=[], hooksconfig={}, runtime_hooks=[], excludes=[], noarchive=False, optimize=0,
 )
