@@ -14,6 +14,7 @@ def read(path: str) -> str:
 def check_sources() -> None:
     manifest = read("apps/windows/update_manifest.py")
     desktop_spec = read("apps/windows/bilipdj_onedir.spec")
+    desktop_main = read("apps/windows/main.py")
     updater_spec = read("apps/windows/updater.spec")
     windows_workspace = read("apps/windows/issue222_update_workspace.py")
     windows_apply = read("apps/windows/issue222_update_apply.py")
@@ -23,7 +24,10 @@ def check_sources() -> None:
     core_init = read("core/__init__.py")
 
     assert '"update/"' in manifest
-    assert "issue222_runtime_hook.py" in desktop_spec
+    assert "runtime_hooks=[]" in desktop_spec
+    assert "issue222_runtime_hook.py" not in desktop_spec
+    assert "install_windows_update_workspace" in desktop_main
+    assert desktop_main.index("install_windows_update_workspace()") < desktop_main.index("patch_update_ui(update_ui)")
     assert "updater_issue222_entry.py" in updater_spec
     assert "allocate_update_session" in windows_workspace
     assert "windows-full" in windows_workspace and "windows-incremental" in windows_workspace
