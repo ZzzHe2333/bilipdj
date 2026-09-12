@@ -18,7 +18,8 @@ def check_source_wiring() -> None:
     custom = read("apps/windows/customtk_ui.py")
     main = read("apps/windows/main.py")
     bootstrap = read("apps/windows/control_panel_bootstrap.py")
-    issue209 = read("apps/windows/issue209_nav_stability.py")
+    runtime = read("apps/windows/desktop_runtime.py")
+    navigation = read("apps/windows/navigation_layout.py")
     spec = read("apps/windows/bilipdj_onedir.spec")
     quality = read(".github/workflows/quality.yml")
 
@@ -28,37 +29,29 @@ def check_source_wiring() -> None:
     assert "shell.grid_columnconfigure(0, weight=0, minsize=NAV_WIDTH)" in custom
     assert "nav.grid_propagate(False)" in custom
     assert "nav.pack_propagate(False)" in custom
-    assert "winfo_reqwidth" not in custom, "CTk navigation must not derive width from requested label geometry"
+    assert "winfo_reqwidth" not in custom
     assert "class BiliPDJCTk(ctk.CTk)" in custom
-    assert "def run_control_panel(module: Any)" in custom
 
-    main_custom = main.index("patch_control_panel_customtkinter(control_panel.ControlPanelApp)")
-    main_legacy = main.index("patch_control_panel_issue209(control_panel.ControlPanelApp)")
-    assert main_custom < main_legacy
-    boot_custom = bootstrap.index("patch_control_panel_customtkinter(cls)")
-    boot_legacy = bootstrap.index("patch_control_panel_issue209(cls)")
-    assert boot_custom < boot_legacy
-    assert "_issue209_superseded_by_customtkinter" in issue209
-    assert "_bilipdj_customtkinter_ui_installed" in issue209
+    assert "install_desktop_runtime(control_panel.ControlPanelApp)" in main
+    assert "from .desktop_runtime import install_desktop_runtime" in bootstrap
+    runtime_custom = runtime.index("patch_control_panel_customtkinter(panel_class)")
+    runtime_legacy = runtime.index("patch_control_panel_issue209(panel_class)")
+    assert runtime_custom < runtime_legacy
+    assert "_issue209_superseded_by_customtkinter" in navigation
+    assert "_bilipdj_customtkinter_ui_installed" in navigation
 
     assert 'collect_data_files("customtkinter")' in spec
     assert 'collect_submodules("customtkinter")' in spec
     assert '"apps.windows.customtk_ui"' in spec
+    assert '"apps.windows.desktop_runtime"' in spec
     assert "python scripts/issue217_customtkinter_guard.py" in quality
 
 
 def check_patch_interop() -> None:
     import customtkinter as ctk
 
-    from apps.windows.customtk_ui import (
-        BiliPDJCTk,
-        CompatButton,
-        CompatFrame,
-        CompatLabel,
-        NAV_WIDTH,
-        patch_control_panel_customtkinter,
-    )
-    from apps.windows.issue209_nav_stability import patch_control_panel_issue209
+    from apps.windows.customtk_ui import BiliPDJCTk, CompatButton, CompatFrame, CompatLabel, NAV_WIDTH, patch_control_panel_customtkinter
+    from apps.windows.navigation_layout import patch_control_panel_issue209
 
     assert NAV_WIDTH == 178
     assert issubclass(BiliPDJCTk, ctk.CTk)
@@ -66,20 +59,17 @@ def check_patch_interop() -> None:
     assert issubclass(CompatButton, ctk.CTkButton)
     assert issubclass(CompatLabel, ctk.CTkLabel)
 
-    module_name = "issue217_fake_control_panel"
+    module_name = "customtk_fake_control_panel"
     fake_module = types.ModuleType(module_name)
     fake_module.__file__ = str(ROOT / "apps" / "windows" / "control_panel.py")
     sys.modules[module_name] = fake_module
 
     class FakePanel:
         __module__ = module_name
-
         def _build_ui(self):
             return "legacy"
-
         def _apply_theme(self, dark: bool = True):
             return dark
-
         def _apply_ui_font_size(self):
             return None
 
@@ -97,7 +87,7 @@ def check_patch_interop() -> None:
 def main() -> None:
     check_source_wiring()
     check_patch_interop()
-    print("issue #217 CustomTkinter desktop UI guard: OK")
+    print("CustomTkinter desktop UI guard: OK")
 
 
 if __name__ == "__main__":
