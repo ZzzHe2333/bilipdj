@@ -56,7 +56,7 @@ def check_command_and_estimate_polish() -> None:
     assert "ensureStyles" not in js, "issue #171 moved extension styling into canonical CSS"
     assert "update-estimate-full" in js and "update-estimate-incremental" in js
 
-    windows = (ROOT / "apps" / "windows" / "issue167_command_console.py").read_text(encoding="utf-8")
+    windows = (ROOT / "apps" / "windows" / "command_console_ui.py").read_text(encoding="utf-8")
     assert "ttk.LabelFrame" in windows, "Windows command area should have a clear visual group"
     assert 'text="后端指令"' in windows
     assert "wraplength=720" in windows
