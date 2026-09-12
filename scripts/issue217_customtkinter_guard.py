@@ -39,7 +39,9 @@ def check_source_wiring() -> None:
     assert "patch_control_panel_issue209" in runtime
     assert "_bilipdj_customtkinter_ui_installed" in navigation
 
-    assert "customtkinter" not in spec.lower()
+    assert 'collect_data_files("customtkinter")' not in spec
+    assert 'collect_submodules("customtkinter")' not in spec
+    assert '"apps.windows.customtk_ui"' not in spec
     assert 'excludes=["customtkinter"]' in spec
     assert '"apps.windows.desktop_runtime"' in spec
     assert "python scripts/issue217_customtkinter_guard.py" in quality
@@ -47,7 +49,7 @@ def check_source_wiring() -> None:
 
 def check_runtime_marker() -> None:
     # Use a lightweight fake control-panel module to prove the production
-    # runtime installs the native Tk path without importing CustomTkinter.
+    # runtime can be imported and installed without importing CustomTkinter.
     from apps.windows.desktop_runtime import install_desktop_runtime
 
     module_name = "tk_fake_control_panel"
@@ -87,8 +89,6 @@ def check_runtime_marker() -> None:
 
     fake_module.ControlPanelApp = FakePanel
     try:
-        # Individual feature patches may decline an intentionally incomplete
-        # fake panel, but installation must never import/require customtkinter.
         try:
             install_desktop_runtime(FakePanel)
         except Exception as exc:
