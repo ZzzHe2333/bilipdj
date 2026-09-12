@@ -13,7 +13,7 @@ def read(path: str) -> str:
 
 
 def check_windows_release_choice() -> None:
-    from apps.windows.issue189_release_selector import _newest_release
+    from apps.windows.release_selector import _newest_release
 
     releases = [
         {"tag_name": "v3.0.4-test", "draft": False, "prerelease": True},
@@ -25,17 +25,18 @@ def check_windows_release_choice() -> None:
     assert _newest_release(releases, prerelease=False)["tag_name"] == "v3.0.3"
     assert _newest_release(releases, prerelease=True)["tag_name"] == "v3.0.5-beta.1"
 
-    source = read("apps/windows/issue189_release_selector.py")
+    source = read("apps/windows/release_selector.py")
     assert '"云端正式版"' in source
     assert '"云端测试版"' in source
     assert "_newest_release(releases, prerelease=False)" in source
     assert "_newest_release(releases, prerelease=True)" in source
     assert "default_release = releases[0]" in source
 
-    bootstrap = read("apps/windows/control_panel_bootstrap.py")
-    assert "install_issue189_release_selector()" in bootstrap
+    runtime = read("apps/windows/desktop_runtime.py")
+    assert "install_release_selector()" in runtime
     spec = read("apps/windows/bilipdj_onedir.spec")
-    assert "apps.windows.issue189_release_selector" in spec
+    assert "apps.windows.release_selector" in spec
+    assert "apps.windows.issue189_release_selector" not in spec
 
 
 def check_web_release_choice() -> None:

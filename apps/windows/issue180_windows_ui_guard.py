@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-UI = ROOT / "issue180_windows_ui.py"
-BOOTSTRAP = ROOT / "control_panel_bootstrap.py"
+UI = ROOT / "windows_ui.py"
+RUNTIME = ROOT / "desktop_runtime.py"
 
 
 def require(path: Path, fragments: tuple[str, ...]) -> None:
@@ -39,14 +39,14 @@ def main() -> None:
         ),
     )
     require(
-        BOOTSTRAP,
+        RUNTIME,
         (
-            "from .issue180_windows_ui import patch_control_panel_issue180",
-            "patch_control_panel_issue180(cls)",
-            "patch_control_panel_unified_theme(cls)",
+            "from .windows_ui import patch_control_panel_issue180",
+            "patch_control_panel_issue180(panel_class)",
+            "patch_control_panel_unified_theme(panel_class)",
         ),
     )
-    print("issue #180 Windows UI guard: OK")
+    print("Windows UI production module guard: OK")
 
 
 if __name__ == "__main__":

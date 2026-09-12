@@ -14,24 +14,21 @@ def read(path: str) -> str:
 
 
 def check_source_wiring() -> None:
-    patch = read("apps/windows/issue196_log_toolbar.py")
-    main = read("apps/windows/main.py")
-    bootstrap = read("apps/windows/control_panel_bootstrap.py")
+    patch = read("apps/windows/log_toolbar.py")
+    runtime = read("apps/windows/desktop_runtime.py")
 
     assert '_COMPACT_BUTTON_TEXTS = {"清空", "复制"}' in patch
     assert "_COMPACT_BUTTON_WIDTH = 5" in patch
     assert "padding=_COMPACT_BUTTON_PADDING" in patch
     assert "grid_configure(padx=_COMPACT_BUTTON_PADX)" in patch
-    assert "from apps.windows.issue196_log_toolbar import patch_control_panel_issue196" in main
-    assert "patch_control_panel_issue196(control_panel.ControlPanelApp)" in main
-    assert "from .issue196_log_toolbar import patch_control_panel_issue196" in bootstrap
-    assert "patch_control_panel_issue196(cls)" in bootstrap
+    assert "from .log_toolbar import patch_control_panel_issue196" in runtime
+    assert "patch_control_panel_issue196(panel_class)" in runtime
 
 
 def check_patch_behavior() -> None:
-    from apps.windows.issue196_log_toolbar import patch_control_panel_issue196
+    from apps.windows.log_toolbar import patch_control_panel_issue196
 
-    module_name = "issue196_fake_control_panel"
+    module_name = "log_toolbar_fake_control_panel"
     fake_module = types.ModuleType(module_name)
     fake_module.__file__ = str(ROOT / "apps" / "windows" / "control_panel.py")
     sys.modules[module_name] = fake_module
@@ -75,14 +72,7 @@ def check_patch_behavior() -> None:
         assert passed_frame is frame
         return "ok"
 
-    FakePanel = type(
-        "ControlPanelApp",
-        (),
-        {
-            "__module__": module_name,
-            "_build_log_tab": fake_build_log_tab,
-        },
-    )
+    FakePanel = type("ControlPanelApp", (), {"__module__": module_name, "_build_log_tab": fake_build_log_tab})
     fake_module.ControlPanelApp = FakePanel
 
     try:
@@ -106,7 +96,7 @@ def check_patch_behavior() -> None:
 def main() -> None:
     check_source_wiring()
     check_patch_behavior()
-    print("issue #196 compact log toolbar guard: OK")
+    print("compact log toolbar guard: OK")
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ def read(path: str) -> str:
 
 
 def check_version_semantics() -> None:
-    from apps.windows.issue187_update_channel import select_channel_release, version_key
+    from apps.windows.update_channel import select_channel_release, version_key
 
     assert version_key("3.0.4-test") < version_key("3.0.4")
     assert version_key("3.0.4-test") != version_key("3.0.4-test2")
@@ -39,7 +39,7 @@ def check_version_semantics() -> None:
 
 
 def check_desktop_guards() -> None:
-    source = read("apps/windows/issue187_stability.py")
+    source = read("apps/windows/update_stability.py")
     assert "threading.Thread" in source
     assert "panel_class.stop_server = stop_server_async" in source
     assert "panel_class.on_close = on_close_async" in source
@@ -47,9 +47,9 @@ def check_desktop_guards() -> None:
     assert "_launch_prepared_incremental = launch_incremental" in source
     assert "self.root.after(45, flush)" in source
 
-    bootstrap = read("apps/windows/control_panel_bootstrap.py")
-    assert "install_update_channel_guard()" in bootstrap
-    assert "patch_control_panel_issue187(cls)" in bootstrap
+    runtime = read("apps/windows/desktop_runtime.py")
+    assert "install_update_channel_guard()" in runtime
+    assert "patch_control_panel_issue187(panel_class)" in runtime
 
 
 def check_web_page_handoff() -> None:
@@ -71,12 +71,7 @@ def check_web_page_handoff() -> None:
     def original(*_args, **_kwargs) -> None:
         calls.append("called")
 
-    module = SimpleNamespace(
-        WebUpdaterError=RuntimeError,
-        _full_update=original,
-        _incremental_update=original,
-        _restore_update=original,
-    )
+    module = SimpleNamespace(WebUpdaterError=RuntimeError, _full_update=original, _incremental_update=original, _restore_update=original)
     assert patch_web_updater(module)
     for name in ("_full_update", "_incremental_update", "_restore_update"):
         try:

@@ -5,7 +5,7 @@ import threading
 from typing import Any
 
 from . import update_client, update_ui, update_version_selector
-from .issue187_update_channel import RELEASES_API, is_prerelease_version, version_key
+from .update_channel import RELEASES_API, is_prerelease_version, version_key
 
 RECENT_RELEASE_LIMIT = 10
 _RELEASE_INCREMENTAL_META: dict[str, tuple[str, str]] = {}
@@ -37,21 +37,14 @@ def _read_release_list(*, timeout: float = 15.0) -> list[dict[str, Any]]:
     if not isinstance(payload, list):
         raise update_client.UpdateError("GitHub Release 列表格式无效")
     releases = [item for item in payload if isinstance(item, dict) and not bool(item.get("draft"))]
-    releases.sort(
-        key=lambda item: str(item.get("published_at") or item.get("created_at") or ""),
-        reverse=True,
-    )
+    releases.sort(key=lambda item: str(item.get("published_at") or item.get("created_at") or ""), reverse=True)
     return releases
 
 
 def _newest_release(releases: list[dict[str, Any]], *, prerelease: bool) -> dict[str, Any] | None:
-    """Compatibility helper retained for existing channel guards/tests."""
-
     candidates: list[tuple[Any, dict[str, Any]]] = []
     for raw in releases:
-        if bool(raw.get("draft")):
-            continue
-        if bool(raw.get("prerelease")) != prerelease:
+        if bool(raw.get("draft")) or bool(raw.get("prerelease")) != prerelease:
             continue
         version = _release_version(raw)
         try:
@@ -97,17 +90,7 @@ def _release_info(raw: dict[str, Any], *, timeout: float = 15.0) -> update_clien
 
 
 def fetch_release_choices(*, timeout: float = 15.0) -> list[update_client.ReleaseInfo]:
-    """Return up to ten most-recent installable GitHub Releases.
-
-    Both stable and prerelease entries are kept. The list is chronological by
-    GitHub publication/creation time, so users may select a version newer than,
-    equal to, or older than the currently installed build.
-    """
-
     releases = _read_release_list(timeout=timeout)
-
-    # Keep the former stable/test channel anchors available for compatibility
-    # with existing guards and callers; the actual picker now uses recent history.
     _stable_anchor = _newest_release(releases, prerelease=False)
     _test_anchor = _newest_release(releases, prerelease=True)
     del _stable_anchor, _test_anchor
@@ -147,14 +130,7 @@ def _build_version_candidates(app_dir, cloud_releases):
         if label in used_labels:
             continue
         used_labels.add(label)
-        candidates.append(
-            update_version_selector.VersionCandidate(
-                label=label,
-                source="cloud",
-                version=release.version,
-                release=release,
-            )
-        )
+        candidates.append(update_version_selector.VersionCandidate(label=label, source="cloud", version=release.version, release=release))
 
     for backup in update_version_selector.discover_local_backups(app_dir):
         base = f"本地备份 · v{backup.version} · {backup.created_at}"
@@ -164,21 +140,11 @@ def _build_version_candidates(app_dir, cloud_releases):
             label = f"{base} · #{suffix}"
             suffix += 1
         used_labels.add(label)
-        candidates.append(
-            update_version_selector.VersionCandidate(
-                label=label,
-                source="local",
-                version=backup.version,
-                backup=backup,
-            )
-        )
+        candidates.append(update_version_selector.VersionCandidate(label=label, source="local", version=backup.version, backup=backup))
     return candidates
 
 
-def _incremental_eligible_tags(
-    current_version: str,
-    releases: list[update_client.ReleaseInfo],
-) -> set[str]:
+def _incremental_eligible_tags(current_version: str, releases: list[update_client.ReleaseInfo]) -> set[str]:
     try:
         current_key = version_key(current_version)
     except ValueError:
@@ -211,7 +177,7 @@ def _operation_text(candidate_version: str, current_version: str) -> str:
 
 def _install_candidate_button_policy() -> None:
     current = getattr(update_version_selector, "_configure_buttons_for_candidate", None)
-    if callable(current) and not bool(getattr(current, "_issue213_recent_release_policy", False)):
+    if callable(current) and not bool(getattr(current, "_recent_release_policy", False)):
         def configure_buttons(app: Any, candidate: Any) -> None:
             current(app, candidate)
             if getattr(app, "_update_busy", False) or candidate is None or getattr(candidate, "source", "") != "cloud":
@@ -220,38 +186,32 @@ def _install_candidate_button_policy() -> None:
             incremental_button = getattr(app, "_update_incremental_button", None)
             operation = _operation_text(str(getattr(candidate, "version", "")), str(getattr(app, "_update_current_version", "")))
             if full_button is not None:
-                label = {
-                    "升级": "全量升级",
-                    "降级": "全量降级",
-                    "重新安装": "重新安装",
-                }.get(operation, "全量安装")
+                label = {"升级": "全量升级", "降级": "全量降级", "重新安装": "重新安装"}.get(operation, "全量安装")
                 full_button.configure(text=label, state="normal")
             release = getattr(candidate, "release", None)
             tag = str(getattr(release, "tag_name", "") or "")
-            eligible = tag in set(getattr(app, "_issue213_incremental_tags", set()) or set())
+            eligible = tag in set(getattr(app, "_incremental_eligible_tags", set()) or set())
             if incremental_button is not None:
                 incremental_button.configure(state="normal" if eligible else "disabled")
 
-        setattr(configure_buttons, "_issue213_recent_release_policy", True)
+        setattr(configure_buttons, "_recent_release_policy", True)
         update_version_selector._configure_buttons_for_candidate = configure_buttons  # type: ignore[attr-defined]
 
     current_selected = getattr(update_version_selector, "on_version_selected", None)
-    if callable(current_selected) and not bool(getattr(current_selected, "_issue213_recent_release_status", False)):
+    if callable(current_selected) and not bool(getattr(current_selected, "_recent_release_status", False)):
         def on_version_selected(app: Any) -> None:
             current_selected(app)
             candidate = update_version_selector._selected_candidate(app)  # noqa: SLF001
             if candidate is None or candidate.source != "cloud" or candidate.release is None:
                 return
             operation = _operation_text(candidate.version, str(getattr(app, "_update_current_version", "")))
-            incremental = candidate.release.tag_name in set(getattr(app, "_issue213_incremental_tags", set()) or set())
+            incremental = candidate.release.tag_name in set(getattr(app, "_incremental_eligible_tags", set()) or set())
             size_mb = candidate.release.zip_asset.size / 1024**2
             suffix = "增量可用" if incremental else "该目标与当前版本无兼容增量基线，仅支持全量"
-            app.update_status_var.set(
-                f"已选择 v{candidate.version} · {operation} · 完整包约 {size_mb:.1f} MB；{suffix}。"
-            )
+            app.update_status_var.set(f"已选择 v{candidate.version} · {operation} · 完整包约 {size_mb:.1f} MB；{suffix}。")
             update_version_selector._configure_buttons_for_candidate(app, candidate)  # noqa: SLF001
 
-        setattr(on_version_selected, "_issue213_recent_release_status", True)
+        setattr(on_version_selected, "_recent_release_status", True)
         update_version_selector.on_version_selected = on_version_selected
 
 
@@ -274,35 +234,28 @@ def _check_for_versions(app: Any, *, silent: bool = False) -> None:
             releases = fetch_release_choices()
         except Exception as exc:  # noqa: BLE001
             cloud_error = str(exc)
-        app._issue213_incremental_tags = _incremental_eligible_tags(
-            str(getattr(app, "_update_current_version", "")),
-            releases,
-        )
+        app._incremental_eligible_tags = _incremental_eligible_tags(str(getattr(app, "_update_current_version", "")), releases)
         candidates = _build_version_candidates(app._update_app_dir, releases)
         default_release = releases[0] if releases else None
         app.root.after(
             0,
             lambda: update_version_selector._finish_version_check(  # noqa: SLF001
-                app,
-                candidates,
-                default_release,
-                cloud_error,
-                silent,
+                app, candidates, default_release, cloud_error, silent
             ),
         )
 
     threading.Thread(target=worker, name="bilipdj-version-catalog", daemon=True).start()
 
 
-def install_issue189_release_selector() -> bool:
-    if bool(getattr(update_version_selector, "_issue189_release_selector_installed", False)):
+def install_release_selector() -> bool:
+    if bool(getattr(update_version_selector, "_release_selector_installed", False)):
         return True
     update_version_selector.build_version_candidates = _build_version_candidates  # type: ignore[assignment]
     update_version_selector.check_for_versions = _check_for_versions  # type: ignore[assignment]
-    update_version_selector._issue189_fetch_release_choices = fetch_release_choices
+    update_version_selector._fetch_release_choices = fetch_release_choices
     _install_candidate_button_policy()
-    update_version_selector._issue189_release_selector_installed = True
+    update_version_selector._release_selector_installed = True
     return True
 
 
-__all__ = ["RECENT_RELEASE_LIMIT", "fetch_release_choices", "install_issue189_release_selector"]
+__all__ = ["RECENT_RELEASE_LIMIT", "fetch_release_choices", "install_release_selector"]

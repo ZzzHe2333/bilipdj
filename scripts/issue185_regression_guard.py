@@ -68,15 +68,17 @@ def check_server_installation() -> None:
 
 
 def check_desktop_stability() -> None:
-    source = read("apps/windows/issue185_stability.py")
+    source = read("apps/windows/gui_stability.py")
     assert "def _stop_server_nonblocking" in source
     assert "threading.Thread(target=worker" in source
     assert "panel.root.after(0" in source
     assert "canvas.after_idle(flush)" in source
     assert "abs(width - int(state[\"width\"])) > 1" in source
+    runtime = read("apps/windows/desktop_runtime.py")
+    assert "from .gui_stability import patch_control_panel_issue185" in runtime
+    assert "patch_control_panel_issue185(panel_class)" in runtime
     bootstrap = read("apps/windows/control_panel_bootstrap.py")
-    assert "from .issue185_stability import patch_control_panel_issue185" in bootstrap
-    assert "patch_control_panel_issue185(cls)" in bootstrap
+    assert "from .desktop_runtime import install_desktop_runtime" in bootstrap
 
 
 def main() -> None:

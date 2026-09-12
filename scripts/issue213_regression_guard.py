@@ -12,19 +12,17 @@ if str(ROOT) not in sys.path:
 
 
 def check_navigation_geometry_settles_before_return() -> None:
-    from apps.windows.issue209_nav_stability import _freeze_navigation_width
+    from apps.windows.navigation_layout import _freeze_navigation_width
 
     class FakeRow:
         def __init__(self, requested_width: int) -> None:
             self.requested_width = requested_width
-
         def winfo_reqwidth(self) -> int:
             return self.requested_width
 
     class FakeShell:
         def __init__(self) -> None:
             self.columns: dict[int, dict[str, int]] = {}
-
         def columnconfigure(self, index: int, **kwargs) -> None:
             self.columns[index] = dict(kwargs)
 
@@ -36,22 +34,15 @@ def check_navigation_geometry_settles_before_return() -> None:
             self.actual_width = 90
             self.configured_width = 90
             self.propagate = True
-
         def pack_propagate(self, value: bool) -> None:
             self.propagate = bool(value)
-
         def configure(self, **kwargs) -> None:
             if "width" in kwargs:
-                # Tk does not necessarily change the actual width until the next
-                # idle-layout pass. Model that delayed geometry explicitly.
                 self.configured_width = int(kwargs["width"])
-
         def winfo_width(self) -> int:
             return self.actual_width
-
         def update_idletasks(self) -> None:
             self.settle()
-
         def settle(self) -> None:
             if self.propagate:
                 self.actual_width = max(row.winfo_reqwidth() for row in rows)
@@ -64,22 +55,17 @@ def check_navigation_geometry_settles_before_return() -> None:
     class FakeRoot:
         def __init__(self) -> None:
             self.update_calls = 0
-
         def update_idletasks(self) -> None:
             self.update_calls += 1
             nav.settle()
 
-    panel = types.SimpleNamespace(
-        root=FakeRoot(),
-        _nav_frame=nav,
-        _nav_items=[(row, object(), object()) for row in rows],
-    )
+    panel = types.SimpleNamespace(root=FakeRoot(), _nav_frame=nav, _nav_items=[(row, object(), object()) for row in rows])
     width = _freeze_navigation_width(panel)
     assert width == 116
     assert nav.configured_width == 116
-    assert nav.actual_width == 116, "final requested sidebar width must settle before _build_ui returns"
+    assert nav.actual_width == 116
     assert nav.propagate is False
-    assert panel.root.update_calls >= 2, "one pre-measure and one post-lock idle pass are required"
+    assert panel.root.update_calls >= 2
     assert shell.columns[0] == {"weight": 0, "minsize": 116}
 
 
@@ -118,13 +104,7 @@ def check_full_update_preserves_appearance() -> None:
                 archive.writestr("appearance.json", '{"mode":"dark"}\n')
                 archive.writestr("core/appearance.json", '{"mode":"dark"}\n')
 
-            updater.perform_update(
-                pid=0,
-                app_dir=app_dir,
-                zip_path=zip_path,
-                main_exe_name="main.exe",
-                target_version="3.0.8-test",
-            )
+            updater.perform_update(pid=0, app_dir=app_dir, zip_path=zip_path, main_exe_name="main.exe", target_version="3.0.8-test")
 
             assert (app_dir / "main.exe").read_bytes() == b"new-main"
             assert (app_dir / "appearance.json").read_text(encoding="utf-8") == old_root_appearance
@@ -137,12 +117,7 @@ def check_full_update_preserves_appearance() -> None:
 def _fake_release(version: str):
     from apps.windows import update_client
 
-    asset = update_client.ReleaseAsset(
-        name=f"BiliPDJ-v{version}-Windows-Tk-Portable-x64.zip",
-        download_url=f"https://example.invalid/{version}.zip",
-        size=1024,
-        sha256="a" * 64,
-    )
+    asset = update_client.ReleaseAsset(name=f"BiliPDJ-v{version}-Windows-Tk-Portable-x64.zip", download_url=f"https://example.invalid/{version}.zip", size=1024, sha256="a" * 64)
     return update_client.ReleaseInfo(
         version=version,
         tag_name=f"v{version}",
@@ -150,38 +125,20 @@ def _fake_release(version: str):
         body="",
         page_url="",
         zip_asset=asset,
-        checksum_asset=update_client.ReleaseAsset(
-            name=f"{asset.name}.sha256",
-            download_url="",
-            size=0,
-            sha256="a" * 64,
-        ),
+        checksum_asset=update_client.ReleaseAsset(name=f"{asset.name}.sha256", download_url="", size=0, sha256="a" * 64),
         sha256="a" * 64,
         manifest_url="",
     )
 
 
 def check_recent_ten_release_catalog() -> None:
-    from apps.windows import issue189_release_selector as selector
+    from apps.windows import release_selector as selector
 
     raw = [
-        {
-            "tag_name": f"v3.0.{index}{'-test' if index % 2 else ''}",
-            "draft": False,
-            "prerelease": bool(index % 2),
-            "published_at": f"2026-09-{30 - index:02d}T00:00:00Z",
-        }
+        {"tag_name": f"v3.0.{index}{'-test' if index % 2 else ''}", "draft": False, "prerelease": bool(index % 2), "published_at": f"2026-09-{30 - index:02d}T00:00:00Z"}
         for index in range(12)
     ]
-    raw.insert(
-        2,
-        {
-            "tag_name": "v99.0.0-draft",
-            "draft": True,
-            "prerelease": True,
-            "published_at": "2026-12-31T00:00:00Z",
-        },
-    )
+    raw.insert(2, {"tag_name": "v99.0.0-draft", "draft": True, "prerelease": True, "published_at": "2026-12-31T00:00:00Z"})
 
     original_read = selector._read_release_list
     original_info = selector._release_info

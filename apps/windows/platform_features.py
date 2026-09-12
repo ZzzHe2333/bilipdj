@@ -4,7 +4,6 @@ import functools
 import json
 import re
 import threading
-import urllib.error
 import urllib.request
 import webbrowser
 from pathlib import Path
@@ -33,11 +32,7 @@ def _build_about_project(panel: Any, frame: Any, module: Any) -> None:
     card = module.ttk.Frame(frame, padding=(30, 24))
     card.grid(row=0, column=0, sticky="nsew")
     card.columnconfigure(0, weight=1)
-    module.ttk.Label(
-        card,
-        text="关于项目",
-        font=("Microsoft YaHei UI", 18, "bold"),
-    ).grid(row=0, column=0, sticky="w", pady=(0, 12))
+    module.ttk.Label(card, text="关于项目", font=("Microsoft YaHei UI", 18, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 12))
     module.ttk.Label(
         card,
         text="弹幕排队姬是面向 Bilibili / 抖音直播间的弹幕排队管理工具。后端负责统一业务状态，Windows 与 Web 负责管理和展示。",
@@ -58,7 +53,7 @@ def _build_support_page(panel: Any, frame: Any, module: Any) -> None:
     frame.columnconfigure(0, weight=1)
     try:
         from .support_us import SUPPORT_COPY, SUPPORT_URL, _make_qr_photo
-    except Exception:  # pragma: no cover - fallback only
+    except Exception:  # pragma: no cover
         SUPPORT_COPY = "项目免费开源使用，感谢支持。"
         SUPPORT_URL = REPOSITORY_URL
         _make_qr_photo = None
@@ -71,7 +66,7 @@ def _build_support_page(panel: Any, frame: Any, module: Any) -> None:
     if callable(_make_qr_photo):
         try:
             photo = _make_qr_photo(panel.root, size=220)
-            panel._issue79_support_qr = photo
+            panel._platform_support_qr = photo
             module.ttk.Label(card, image=photo).grid(row=2, column=0, pady=(0, 16))
         except Exception:
             pass
@@ -91,11 +86,6 @@ def _normalize_navigation(panel: Any, module: Any) -> None:
         except Exception:
             pass
 
-    # The current layout contains exactly these last three logical pages:
-    # updater, support page and about page. ui_finish previously renamed the
-    # final two to “08 更新软件 / 09 关于”, which is why the screenshots show
-    # duplicated update entries. Make the intended information architecture
-    # explicit and rebuild the final two pages accordingly.
     if len(items) >= 9 and len(pages) >= 9:
         desired = {
             0: "日志",
@@ -144,14 +134,14 @@ def _platform_request(panel: Any, method: str = "GET", payload: dict[str, Any] |
 
 def _install_active_platform_tab(panel: Any, module: Any) -> None:
     notebook = getattr(panel, "settings_notebook", None)
-    if notebook is None or bool(getattr(panel, "_issue79_active_platform_tab", False)):
+    if notebook is None or bool(getattr(panel, "_platform_features_tab_installed", False)):
         return
     try:
         existing = [str(notebook.tab(tab_id, "text")) for tab_id in notebook.tabs()]
     except Exception:
         existing = []
     if "激活平台" in existing:
-        panel._issue79_active_platform_tab = True
+        panel._platform_features_tab_installed = True
         return
 
     frame = module.ttk.Frame(notebook, padding=(20, 18))
@@ -173,7 +163,7 @@ def _install_active_platform_tab(panel: Any, module: Any) -> None:
         "bilibili": module.tk.BooleanVar(value=True),
         "douyin": module.tk.BooleanVar(value=False),
     }
-    panel._issue79_platform_vars = vars_map
+    panel._platform_vars = vars_map
     choices = module.ttk.LabelFrame(frame, text="弹幕流", padding=14)
     choices.grid(row=2, column=0, sticky="ew")
     module.ttk.Checkbutton(choices, text="Bilibili（一个直播间）", variable=vars_map["bilibili"]).grid(row=0, column=0, sticky="w", pady=5)
@@ -181,7 +171,7 @@ def _install_active_platform_tab(panel: Any, module: Any) -> None:
     module.ttk.Label(choices, text="虎牙 / 快手 / 斗鱼 / 视频号：当前仅预留配置，尚未接入弹幕流。", wraplength=720).grid(row=2, column=0, sticky="w", pady=(8, 0))
 
     status_var = module.tk.StringVar(value="尚未读取后端状态")
-    panel._issue79_platform_status_var = status_var
+    panel._platform_status_var = status_var
     module.ttk.Label(frame, textvariable=status_var, wraplength=780).grid(row=3, column=0, sticky="w", pady=(12, 8))
     actions = module.ttk.Frame(frame)
     actions.grid(row=4, column=0, sticky="w")
@@ -198,30 +188,36 @@ def _install_active_platform_tab(panel: Any, module: Any) -> None:
 
     def refresh() -> None:
         status_var.set("正在读取后端平台状态……")
+
         def worker() -> None:
             try:
                 payload = _platform_request(panel)
             except Exception as exc:  # noqa: BLE001
-                panel.root.after(0, lambda: status_var.set(f"读取失败：{exc}"))
+                # Bind the exception now. Python clears the except target after
+                # leaving the handler, while Tk executes this callback later.
+                panel.root.after(0, lambda exc=exc: status_var.set(f"读取失败：{exc}"))
                 return
-            panel.root.after(0, lambda: apply_payload(payload))
+            panel.root.after(0, lambda payload=payload: apply_payload(payload))
+
         threading.Thread(target=worker, name="bilipdj-platform-refresh", daemon=True).start()
 
     def save() -> None:
         active = [name for name, var in vars_map.items() if bool(var.get())]
         status_var.set("正在保存并重连弹幕流……")
+
         def worker() -> None:
             try:
                 payload = _platform_request(panel, "POST", {"active": active})
             except Exception as exc:  # noqa: BLE001
-                panel.root.after(0, lambda: status_var.set(f"保存失败：{exc}"))
+                panel.root.after(0, lambda exc=exc: status_var.set(f"保存失败：{exc}"))
                 return
-            panel.root.after(0, lambda: apply_payload(payload))
+            panel.root.after(0, lambda payload=payload: apply_payload(payload))
+
         threading.Thread(target=worker, name="bilipdj-platform-save", daemon=True).start()
 
     module.ttk.Button(actions, text="保存激活平台", command=save).pack(side="left", padx=(0, 8))
     module.ttk.Button(actions, text="刷新状态", command=refresh).pack(side="left")
-    panel._issue79_active_platform_tab = True
+    panel._platform_features_tab_installed = True
     panel.root.after(500, refresh)
 
 
@@ -317,7 +313,7 @@ def _queue_insert_dialog(panel: Any, module: Any) -> None:
     username_entry.focus_set()
 
 
-def patch_control_panel_issue79(panel_class: type[Any]) -> bool:
+def install_platform_features(panel_class: type[Any]) -> bool:
     if not isinstance(panel_class, type):
         return False
     module = __import__(str(panel_class.__module__), fromlist=["*"])
@@ -325,14 +321,14 @@ def patch_control_panel_issue79(panel_class: type[Any]) -> bool:
         return False
 
     with _PATCH_LOCK:
-        if bool(getattr(panel_class, "_issue79_features_installed", False)):
+        if bool(getattr(panel_class, "_platform_features_installed", False)):
             return True
         current_build_ui = getattr(panel_class, "_build_ui", None)
         if not callable(current_build_ui):
             return False
 
         @functools.wraps(current_build_ui)
-        def build_ui_issue79(self: Any, *args: Any, **kwargs: Any) -> Any:
+        def build_ui_with_platform_features(self: Any, *args: Any, **kwargs: Any) -> Any:
             result = current_build_ui(self, *args, **kwargs)
             _normalize_navigation(self, module)
             _install_active_platform_tab(self, module)
@@ -343,13 +339,13 @@ def patch_control_panel_issue79(panel_class: type[Any]) -> bool:
                 pass
             return result
 
-        def queue_insert_issue79(self: Any) -> None:
+        def queue_insert(self: Any) -> None:
             _queue_insert_dialog(self, module)
 
-        setattr(panel_class, "_build_ui", build_ui_issue79)
-        setattr(panel_class, "_queue_insert", queue_insert_issue79)
-        setattr(panel_class, "_issue79_features_installed", True)
+        setattr(panel_class, "_build_ui", build_ui_with_platform_features)
+        setattr(panel_class, "_queue_insert", queue_insert)
+        setattr(panel_class, "_platform_features_installed", True)
         return True
 
 
-__all__ = ["patch_control_panel_issue79"]
+__all__ = ["install_platform_features"]

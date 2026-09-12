@@ -14,9 +14,8 @@ def read(path: str) -> str:
 
 
 def check_source_wiring() -> None:
-    patch = read("apps/windows/issue194_fixed_window.py")
-    main = read("apps/windows/main.py")
-    bootstrap = read("apps/windows/control_panel_bootstrap.py")
+    patch = read("apps/windows/window_policy.py")
+    runtime = read("apps/windows/desktop_runtime.py")
 
     assert "WINDOW_WIDTH = 1180" in patch
     assert "WINDOW_HEIGHT = 720" in patch
@@ -25,21 +24,14 @@ def check_source_wiring() -> None:
     assert "root.resizable(False, False)" in patch
     assert "root.geometry(WINDOW_GEOMETRY)" in patch
     assert "root.after_idle(enforce)" in patch
-
-    assert "from apps.windows.issue194_fixed_window import patch_control_panel_issue194" in main
-    assert "patch_control_panel_issue194(control_panel.ControlPanelApp)" in main
-    assert "from .issue194_fixed_window import patch_control_panel_issue194" in bootstrap
-    assert "patch_control_panel_issue194(cls)" in bootstrap
+    assert "from .window_policy import patch_control_panel_issue194" in runtime
+    assert "patch_control_panel_issue194(panel_class)" in runtime
 
 
 def check_patch_behavior() -> None:
-    from apps.windows.issue194_fixed_window import (
-        WINDOW_HEIGHT,
-        WINDOW_WIDTH,
-        patch_control_panel_issue194,
-    )
+    from apps.windows.window_policy import WINDOW_HEIGHT, WINDOW_WIDTH, patch_control_panel_issue194
 
-    module_name = "issue194_fake_control_panel"
+    module_name = "window_policy_fake_control_panel"
     fake_module = types.ModuleType(module_name)
     fake_module.__file__ = str(ROOT / "apps" / "windows" / "control_panel.py")
     sys.modules[module_name] = fake_module
@@ -80,14 +72,7 @@ def check_patch_behavior() -> None:
     def fake_init(self, root) -> None:
         self.root = root
 
-    FakePanel = type(
-        "ControlPanelApp",
-        (),
-        {
-            "__module__": module_name,
-            "__init__": fake_init,
-        },
-    )
+    FakePanel = type("ControlPanelApp", (), {"__module__": module_name, "__init__": fake_init})
     fake_module.ControlPanelApp = FakePanel
 
     try:
@@ -100,7 +85,7 @@ def check_patch_behavior() -> None:
         assert root.geometry_calls
         assert root.geometry_calls[-1] == f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}"
         assert panel._issue194_fixed_window_size == (WINDOW_WIDTH, WINDOW_HEIGHT)
-        assert patch_control_panel_issue194(FakePanel), "patch must remain idempotent"
+        assert patch_control_panel_issue194(FakePanel)
     finally:
         sys.modules.pop(module_name, None)
 
@@ -108,7 +93,7 @@ def check_patch_behavior() -> None:
 def main() -> None:
     check_source_wiring()
     check_patch_behavior()
-    print("issue #194 fixed Windows window guard: OK")
+    print("fixed Windows window policy guard: OK")
 
 
 if __name__ == "__main__":

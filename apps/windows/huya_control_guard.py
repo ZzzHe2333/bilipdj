@@ -30,12 +30,7 @@ def _promote_huya_labels(module: Any) -> None:
     meta = getattr(module, "RESERVED_PLATFORM_UI_META", None)
     if isinstance(meta, dict):
         huya = dict(meta.get("huya", {}) or {})
-        huya.update(
-            {
-                "title": "虎牙参数",
-                "hint": "可填写虎牙直播间链接；房间号和主播 ID 可留空自动解析，也可手动填写作为兜底。",
-            }
-        )
+        huya.update({"title": "虎牙参数", "hint": "可填写虎牙直播间链接；房间号和主播 ID 可留空自动解析，也可手动填写作为兜底。"})
         meta["huya"] = huya
 
 
@@ -63,8 +58,8 @@ def _find_stream_frame(panel: Any) -> Any | None:
 
 
 def _sync_huya_var_from_status(panel: Any) -> None:
-    vars_map = getattr(panel, "_issue79_platform_vars", None)
-    status_var = getattr(panel, "_issue79_platform_status_var", None)
+    vars_map = getattr(panel, "_platform_vars", None)
+    status_var = getattr(panel, "_platform_status_var", None)
     if not isinstance(vars_map, dict) or "huya" not in vars_map or status_var is None:
         return
     try:
@@ -75,9 +70,7 @@ def _sync_huya_var_from_status(panel: Any) -> None:
     if not match:
         return
     raw = match.group(1).strip()
-    active = set() if raw in {"", "无"} else {
-        item.strip().lower() for item in re.split(r"[,，+]+", raw) if item.strip()
-    }
+    active = set() if raw in {"", "无"} else {item.strip().lower() for item in re.split(r"[,，+]+", raw) if item.strip()}
     try:
         vars_map["huya"].set("huya" in active)
     except Exception:
@@ -87,7 +80,7 @@ def _sync_huya_var_from_status(panel: Any) -> None:
 def _install_huya_active_checkbox(panel: Any, module: Any) -> None:
     if bool(getattr(panel, "_huya_active_platform_ui_installed", False)):
         return
-    vars_map = getattr(panel, "_issue79_platform_vars", None)
+    vars_map = getattr(panel, "_platform_vars", None)
     if not isinstance(vars_map, dict):
         return
     if "huya" not in vars_map:
@@ -107,15 +100,11 @@ def _install_huya_active_checkbox(panel: Any, module: Any) -> None:
                 except Exception:
                     pass
         try:
-            module.ttk.Checkbutton(
-                frame,
-                text="虎牙（一个直播间）",
-                variable=vars_map["huya"],
-            ).grid(row=2, column=0, sticky="w", pady=5)
+            module.ttk.Checkbutton(frame, text="虎牙（一个直播间）", variable=vars_map["huya"]).grid(row=2, column=0, sticky="w", pady=5)
         except Exception:
             pass
 
-    status_var = getattr(panel, "_issue79_platform_status_var", None)
+    status_var = getattr(panel, "_platform_status_var", None)
     if status_var is not None:
         try:
             status_var.trace_add("write", lambda *_args: _sync_huya_var_from_status(panel))
