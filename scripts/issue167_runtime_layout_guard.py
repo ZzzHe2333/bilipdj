@@ -20,7 +20,7 @@ def _load_file_module(name: str, path: Path):
 
 
 def check_runtime_migration() -> None:
-    layout = _load_file_module("issue167_runtime_layout", ROOT / "apps/server/runtime_layout.py")
+    layout = _load_file_module("runtime_layout_probe", ROOT / "apps/server/runtime_layout.py")
     with tempfile.TemporaryDirectory() as raw:
         app = Path(raw)
         (app / "config.yaml").write_text("server:\n  port: 9988\n", encoding="utf-8")
@@ -34,7 +34,6 @@ def check_runtime_migration() -> None:
         assert (key / "update-result.json").is_file()
         assert not (app / "update-result.json").exists()
 
-    # If both old and new files exist, keep the newer content and preserve the loser.
     with tempfile.TemporaryDirectory() as raw:
         app = Path(raw)
         core = app / "core"
@@ -55,16 +54,9 @@ def check_runtime_migration() -> None:
 
 
 def check_command_console() -> None:
-    module = _load_file_module("issue167_command_console", ROOT / "apps/server/command_console.py")
+    module = _load_file_module("command_console_probe", ROOT / "apps/server/command_console.py")
     source = (ROOT / "apps/server/command_console.py").read_text(encoding="utf-8").lower()
-    for forbidden in (
-        "import subprocess",
-        "from subprocess",
-        "subprocess.",
-        "os.system(",
-        "eval(",
-        "exec(",
-    ):
+    for forbidden in ("import subprocess", "from subprocess", "subprocess.", "os.system(", "eval(", "exec("):
         assert forbidden not in source, f"unsafe command execution primitive found: {forbidden}"
 
     captured = []
@@ -92,7 +84,7 @@ def check_command_console() -> None:
 
 
 def check_update_estimates_and_key_layout() -> None:
-    estimate = (ROOT / "apps/windows/issue167_update_estimate.py").read_text(encoding="utf-8")
+    estimate = (ROOT / "apps/windows/update_estimate_ui.py").read_text(encoding="utf-8")
     assert "packed_size" in estimate and "range_bytes" in estimate
     assert 'key_dir / "update-estimate.json"' in estimate
     assert "全量更新预估" in estimate and "增量更新预估" in estimate
