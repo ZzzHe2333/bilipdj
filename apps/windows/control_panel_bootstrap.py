@@ -112,6 +112,7 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
                 from .issue189_release_selector import install_issue189_release_selector
                 from .issue194_fixed_window import patch_control_panel_issue194
                 from .issue196_log_toolbar import patch_control_panel_issue196
+                from .issue209_nav_stability import patch_control_panel_issue209
                 from .portable_autostart import patch_control_panel_portable_autostart
                 from .purple_mouse_control_guard import patch_control_panel_purple_mouse
                 from .redtv_control_guard import patch_control_panel_redtv
@@ -144,6 +145,9 @@ def install_control_panel_class_hook(*, timeout: float = 120.0) -> bool:
                 patch_control_panel_issue194(cls)
                 patch_control_panel_issue196(cls)
                 patch_control_panel_unified_theme(cls)
+                # Freeze the final themed navigation geometry last so later
+                # normal/bold state changes cannot resize the sidebar.
+                patch_control_panel_issue209(cls)
                 _install_final_support_renderer(cls, module)
             finally:
                 _restore_hook()
