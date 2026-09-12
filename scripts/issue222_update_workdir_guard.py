@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import sys
+import importlib.util
 import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 
 def read(path: str) -> str:
@@ -41,22 +39,30 @@ def check_sources() -> None:
     assert "schedule_local_update_cleanup" in core_init
 
 
-def check_allocator() -> None:
-    from core.update_workspace import allocate_update_session, cleanup_update_session, validate_update_session
+def _load_workspace_module():
+    path = ROOT / "core" / "update_workspace.py"
+    spec = importlib.util.spec_from_file_location("bilipdj_issue222_update_workspace_helper", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
+
+def check_allocator() -> None:
+    workspace = _load_workspace_module()
     with tempfile.TemporaryDirectory(prefix="bilipdj-issue222-") as raw:
         app = Path(raw) / "bilipdj"
         app.mkdir()
-        session = allocate_update_session(app, "full")
+        session = workspace.allocate_update_session(app, "full")
         assert session.parent == app.resolve() / "update"
-        assert validate_update_session(app, session) == session.resolve()
+        assert workspace.validate_update_session(app, session) == session.resolve()
         marker = session / "payload.bin"
         marker.write_bytes(b"ok")
         assert marker.is_file()
-        assert cleanup_update_session(app, session)
+        assert workspace.cleanup_update_session(app, session)
         assert not session.exists()
         try:
-            validate_update_session(app, Path(raw) / "outside")
+            workspace.validate_update_session(app, Path(raw) / "outside")
         except ValueError:
             pass
         else:
