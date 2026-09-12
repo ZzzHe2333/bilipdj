@@ -94,6 +94,7 @@ def main() -> None:
     component_registry = (COMPONENTS / "registry.py").read_text(encoding="utf-8")
     log_component = (COMPONENTS / "log_page.py").read_text(encoding="utf-8")
     settings_component = (COMPONENTS / "settings_page.py").read_text(encoding="utf-8")
+    command_console = (WINDOWS / "command_console_ui.py").read_text(encoding="utf-8")
     platform = (WINDOWS / "platform_features.py").read_text(encoding="utf-8")
     huya = (WINDOWS / "huya_control_guard.py").read_text(encoding="utf-8")
     redtv = (WINDOWS / "redtv_control_guard.py").read_text(encoding="utf-8")
@@ -127,6 +128,9 @@ def main() -> None:
     assert "update_page_module.build_update_tab =" in component_registry
     assert "_install_stable_update_layout()" in component_registry
     assert "compact_log_toolbar(host)" in log_component
+    assert "from ..command_console_ui import _install_console_row" in log_component
+    assert "_install_console_row(panel)" in log_component
+    assert "后端指令" in command_console
     assert "_build_plugin_manager_tab(panel, module)" in settings_component
 
     assert "install_platform_features(panel_class)" in runtime

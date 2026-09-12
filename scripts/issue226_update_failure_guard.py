@@ -100,11 +100,26 @@ def check_entry_wiring() -> None:
     assert web_entry.index("install_issue222_update_workspace(web_updater)") < web_entry.index("install_issue226_web_update_safety(web_updater)")
 
 
+def check_incremental_baseline_selection() -> None:
+    workflow = read(".github/workflows/package-windows-x64.yml")
+    # GitHub /releases/latest intentionally excludes prereleases. Using it made
+    # every *-test build declare the stable channel as its exact incremental
+    # base, so v3.0.10-test could not incrementally update to the next test build.
+    assert "releases/latest" not in workflow
+    assert "releases?per_page=50" in workflow
+    assert '$targetTag = "v$version"' in workflow
+    assert '$prereleaseTarget = $version.Contains("-")' in workflow
+    assert "[string]$candidate.tag_name -ne $targetTag" in workflow
+    assert "($prereleaseTarget -or -not [bool]$candidate.prerelease)" in workflow
+    assert "$hasTk" in workflow and "$hasWeb" in workflow
+
+
 def main() -> None:
     check_windows_transaction_boundary()
     check_single_workspace_implementation()
     check_web_relaunch_wrapper()
     check_entry_wiring()
+    check_incremental_baseline_selection()
     print("issue226 update failure guard: OK")
 
 

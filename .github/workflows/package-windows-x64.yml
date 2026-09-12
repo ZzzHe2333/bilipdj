@@ -144,7 +144,7 @@ jobs:
           $webProbe = Start-Process -FilePath $webExe -ArgumentList "--plugin-runtime-self-test" -Wait -PassThru
           if ($webProbe.ExitCode -ne 0) { throw "Web frozen JavaScript plugin self-test failed: $($webProbe.ExitCode)" }
 
-      - name: Download previous portable release baselines
+      - name: Download previous compatible portable release baselines
         id: previous_release
         shell: pwsh
         env:
@@ -153,7 +153,23 @@ jobs:
           $ErrorActionPreference = "Stop"
           New-Item -ItemType Directory -Path "previous-release" -Force | Out-Null
           try {
-            $release = gh api repos/ZzzHe2333/bilipdj/releases/latest | ConvertFrom-Json
+            $version = "${{ steps.resolve_tag.outputs.version }}"
+            $targetTag = "v$version"
+            $prereleaseTarget = $version.Contains("-")
+            $releases = @(gh api "repos/ZzzHe2333/bilipdj/releases?per_page=50" | ConvertFrom-Json)
+            $release = $releases | Where-Object {
+              $candidate = $_
+              $hasTk = @($candidate.assets | Where-Object { [string]$_.name -match '^BiliPDJ-v.+-Windows-Tk-Portable-x64\.zip$' }).Count -gt 0
+              $hasWeb = @($candidate.assets | Where-Object { [string]$_.name -match '^BiliPDJ-v.+-Web-Portable-x64\.zip$' }).Count -gt 0
+              -not [bool]$candidate.draft -and
+                [string]$candidate.tag_name -ne $targetTag -and
+                ($prereleaseTarget -or -not [bool]$candidate.prerelease) -and
+                $hasTk -and $hasWeb
+            } | Select-Object -First 1
+            if ($null -eq $release) {
+              throw "No previous compatible portable Release found for $version"
+            }
+
             $tag = [string]$release.tag_name
             $baseVersion = if ($tag.StartsWith('v')) { $tag.Substring(1) } else { $tag }
             "base_version=$baseVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
