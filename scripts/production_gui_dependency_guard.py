@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WINDOWS = ROOT / "apps" / "windows"
+COMPONENTS = WINDOWS / "components"
 
 PRODUCTION_ENTRY_FILES = [
     WINDOWS / "main.py",
@@ -53,12 +54,25 @@ REQUIRED_PRODUCTION_MODULES = [
     "updater_entry.py",
 ]
 
+REQUIRED_COMPONENTS = [
+    "__init__.py",
+    "base.py",
+    "registry.py",
+    "log_page.py",
+    "settings_page.py",
+    "update_page.py",
+]
+
 
 def _production_python_files() -> list[Path]:
     # Files whose own name starts with ``issue`` are historical regression/test
     # helpers and are allowed to mention Issue identifiers. Everything else is
     # part of the production/module surface and must not import an issue runtime.
-    return sorted(path for path in WINDOWS.glob("*.py") if not path.name.startswith("issue"))
+    return sorted(
+        path
+        for path in WINDOWS.rglob("*.py")
+        if not path.name.startswith("issue") and "__pycache__" not in path.parts
+    )
 
 
 def main() -> None:
@@ -73,18 +87,44 @@ def main() -> None:
 
     for name in REQUIRED_PRODUCTION_MODULES:
         assert (WINDOWS / name).is_file(), f"missing production module: {name}"
+    for name in REQUIRED_COMPONENTS:
+        assert (COMPONENTS / name).is_file(), f"missing GUI component module: {name}"
 
     main_source = (WINDOWS / "main.py").read_text(encoding="utf-8")
     bootstrap = (WINDOWS / "control_panel_bootstrap.py").read_text(encoding="utf-8")
     runtime = (WINDOWS / "desktop_runtime.py").read_text(encoding="utf-8")
+    component_base = (COMPONENTS / "base.py").read_text(encoding="utf-8")
+    component_registry = (COMPONENTS / "registry.py").read_text(encoding="utf-8")
     platform = (WINDOWS / "platform_features.py").read_text(encoding="utf-8")
     huya = (WINDOWS / "huya_control_guard.py").read_text(encoding="utf-8")
     redtv = (WINDOWS / "redtv_control_guard.py").read_text(encoding="utf-8")
     purple = (WINDOWS / "purple_mouse_control_guard.py").read_text(encoding="utf-8")
     spec = (WINDOWS / "bilipdj_onedir.spec").read_text(encoding="utf-8")
+    core_init = (ROOT / "core" / "__init__.py").read_text(encoding="utf-8")
 
     assert "install_desktop_runtime(control_panel.ControlPanelApp)" in main_source
-    assert "from .desktop_runtime import install_desktop_runtime" in bootstrap
+    assert main_source.index("install_desktop_runtime(control_panel.ControlPanelApp)") < main_source.index("app = control_panel.ControlPanelApp(root)")
+
+    # Production imports must never replace Python's global class constructor.
+    assert "__build_class__" not in bootstrap
+    assert "import builtins" not in bootstrap
+    assert "install_control_panel_class_hook()" not in core_init
+    assert "install_control_panel_runtime" in bootstrap
+
+    # Key pages are finalized behind explicit component adapters after all
+    # compatibility policies have run.
+    assert "from .components import install_page_components" in runtime
+    assert "install_page_components(panel_class)" in runtime
+    assert runtime.index("_install_compatibility_runtime(panel_class)") < runtime.index("install_page_components(panel_class)")
+    assert "class PageComponent" in component_base
+    assert "CompatFrame" in component_base
+    assert "LogPageComponent" in component_registry
+    assert "SettingsPageComponent" in component_registry
+    assert "UpdatePageComponent" in component_registry
+    assert 'setattr(panel_class, "_build_log_tab"' in component_registry
+    assert 'setattr(panel_class, "_build_settings_tab"' in component_registry
+    assert "update_page_module.build_update_tab =" in component_registry
+
     assert "install_platform_features(panel_class)" in runtime
     assert "lambda exc=exc" in platform
     for source in (platform, huya, redtv, purple):
@@ -93,7 +133,7 @@ def main() -> None:
     assert "issue79_features" not in spec
     assert "apps.windows.desktop_runtime" in spec
 
-    print("production GUI dependency guard: OK")
+    print("production GUI dependency/component guard: OK")
 
 
 if __name__ == "__main__":
