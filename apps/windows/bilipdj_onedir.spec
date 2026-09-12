@@ -1,6 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+
 spec_dir = Path(SPECPATH).resolve()
 project_root = spec_dir.parents[1]
 
@@ -9,6 +11,7 @@ datas = [
     (str(project_root / "core" / "appearance.json"), "."),
     (str(project_root / "apps" / "web" / "static"), "apps/web/static"),
 ]
+datas += collect_data_files("customtkinter")
 
 hiddenimports = [
     "apps.server.server", "apps.server.bilibili_protocol", "apps.server.bilibili_gifts",
@@ -21,7 +24,7 @@ hiddenimports = [
     "apps.server.issue79_guard", "apps.server.appearance_guard",
     "apps.server.danmu_plugins", "apps.server.plugin_manager", "apps.server.plugin_runtime_dual", "apps.server.javascript_plugin_runtime", "apps.server.plugin_data_quota",
     "apps.windows.control_panel", "apps.windows.control_panel_bootstrap", "apps.windows.control_panel_guard", "apps.windows.frozen_plugin_probe",
-    "apps.windows.control_panel_features", "apps.windows.control_panel_ui_finish", "apps.windows.gui_log_sink",
+    "apps.windows.control_panel_features", "apps.windows.control_panel_ui_finish", "apps.windows.gui_log_sink", "apps.windows.customtk_ui",
     "apps.windows.about_page", "apps.windows.bilibili_qr_dialog", "apps.windows.portable_autostart", "apps.windows.style_save_transport",
     "apps.windows.support_us", "apps.windows.webdav_backup_ui", "apps.windows.issue79_features", "apps.windows.redtv_control_guard", "apps.windows.purple_mouse_control_guard", "apps.windows.unified_theme",
     "apps.windows.issue187_update_channel", "apps.windows.issue189_release_selector",
@@ -34,6 +37,7 @@ hiddenimports = [
     "brotli", "psutil", "google.protobuf", "google.protobuf.internal.builder",
     "quickjs", "_quickjs",
 ]
+hiddenimports += collect_submodules("customtkinter")
 
 a = Analysis(
     [str(project_root / "apps" / "windows" / "main.py")],
