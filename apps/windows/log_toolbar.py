@@ -27,7 +27,7 @@ def _iter_descendants(widget: Any):
             pass
 
 
-def _compact_log_toolbar(frame: Any) -> tuple[str, ...]:
+def compact_log_toolbar(frame: Any) -> tuple[str, ...]:
     """Shrink only the log-page clear/copy buttons so the toolbar fits 1180px."""
 
     changed: list[str] = []
@@ -56,7 +56,17 @@ def _compact_log_toolbar(frame: Any) -> tuple[str, ...]:
     return tuple(changed)
 
 
+# Compatibility alias for older source-mode callers/tests.
+_compact_log_toolbar = compact_log_toolbar
+
+
 def patch_control_panel_issue196(panel_class: type[Any]) -> bool:
+    """Legacy compatibility adapter.
+
+    Production desktop startup no longer installs this method wrapper; the log
+    page component calls ``compact_log_toolbar`` directly after construction.
+    """
+
     if not isinstance(panel_class, type):
         return False
     module = sys.modules.get(str(getattr(panel_class, "__module__", "") or ""))
@@ -73,7 +83,7 @@ def patch_control_panel_issue196(panel_class: type[Any]) -> bool:
         @functools.wraps(original)
         def build_log_tab_compact(self: Any, frame: Any, *args: Any, **kwargs: Any) -> Any:
             result = original(self, frame, *args, **kwargs)
-            self._issue196_compact_log_buttons = _compact_log_toolbar(frame)
+            self._issue196_compact_log_buttons = compact_log_toolbar(frame)
             return result
 
         panel_class._build_log_tab = build_log_tab_compact
@@ -81,4 +91,4 @@ def patch_control_panel_issue196(panel_class: type[Any]) -> bool:
         return True
 
 
-__all__ = ["patch_control_panel_issue196"]
+__all__ = ["compact_log_toolbar", "patch_control_panel_issue196"]
