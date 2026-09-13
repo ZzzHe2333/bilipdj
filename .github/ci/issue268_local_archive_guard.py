@@ -1,7 +1,23 @@
 from __future__ import annotations
 
+import importlib.util
+import sys
 import tempfile
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+
+def _load_local_archive_module():
+    path = ROOT / "apps/server/local_data_archive.py"
+    spec = importlib.util.spec_from_file_location("issue268_local_data_archive", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("unable to load local_data_archive.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _write(path: Path, text: str) -> None:
@@ -10,7 +26,9 @@ def _write(path: Path, text: str) -> None:
 
 
 def check_appdata_sync() -> None:
-    from apps.server.local_data_archive import SYNC_MARKER_RELATIVE, sync_local_data_archive
+    archive_module = _load_local_archive_module()
+    marker_relative = archive_module.SYNC_MARKER_RELATIVE
+    sync_local_data_archive = archive_module.sync_local_data_archive
 
     # Existing portable data with no roaming archive: portable -> AppData.
     with tempfile.TemporaryDirectory() as temp:
@@ -23,7 +41,7 @@ def check_appdata_sync() -> None:
         assert result["mode"] == "mirror"
         assert (archive / "core/config.yaml").read_text(encoding="utf-8") == "local-config\n"
         assert (archive / "core/cd/queue_archive_slot_1.csv").read_text(encoding="utf-8") == "local-queue\n"
-        assert (app / SYNC_MARKER_RELATIVE).is_file()
+        assert (app / marker_relative).is_file()
 
         # Both exist on a known installation: local/core is authoritative and
         # the archive directory is replaced exactly, including deletion state.
@@ -47,14 +65,14 @@ def check_appdata_sync() -> None:
         assert result["mode"] == "restore"
         assert (app / "core/config.yaml").read_text(encoding="utf-8") == "old-user-config\n"
         assert (app / "core/cd/queue_archive_slot_1.csv").read_text(encoding="utf-8") == "old-user-queue\n"
-        assert (app / SYNC_MARKER_RELATIVE).is_file()
+        assert (app / marker_relative).is_file()
 
     # Per-item recovery: a missing local file is restored even on a known install.
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp)
         app = root / "app"
         archive = root / "roaming" / "bilipdj"
-        _write(app / SYNC_MARKER_RELATIVE, "1\n")
+        _write(app / marker_relative, "1\n")
         _write(archive / "core/config.yaml", "saved-only\n")
         sync_local_data_archive(app, archive_root=archive, enabled=True)
         assert (app / "core/config.yaml").read_text(encoding="utf-8") == "saved-only\n"
@@ -105,9 +123,8 @@ def check_double_confirmation() -> None:
 
 
 def check_runtime_wiring() -> None:
-    root = Path(__file__).resolve().parents[2]
-    desktop = (root / "apps/windows/desktop_runtime.py").read_text(encoding="utf-8")
-    runtime_layout = (root / "apps/server/runtime_layout.py").read_text(encoding="utf-8")
+    desktop = (ROOT / "apps/windows/desktop_runtime.py").read_text(encoding="utf-8")
+    runtime_layout = (ROOT / "apps/server/runtime_layout.py").read_text(encoding="utf-8")
     assert "install_backup_cleanup_ui()" in desktop
     assert "install_queue_clear_dialog(panel_class)" in desktop
     assert "sync_local_data_archive(app_root" in runtime_layout
