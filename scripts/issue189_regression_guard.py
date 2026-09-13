@@ -13,24 +13,29 @@ def read(path: str) -> str:
 
 
 def check_windows_release_choice() -> None:
-    from apps.windows.release_selector import _newest_release
+    from apps.windows.release_selector import CHANNEL_ORDER, display_version, release_channel
 
-    releases = [
-        {"tag_name": "v3.0.4-test", "draft": False, "prerelease": True},
-        {"tag_name": "v3.0.2", "draft": False, "prerelease": False},
-        {"tag_name": "v3.0.3", "draft": False, "prerelease": False},
-        {"tag_name": "v3.0.5-beta.1", "draft": False, "prerelease": True},
-        {"tag_name": "v9.9.9", "draft": True, "prerelease": False},
-    ]
-    assert _newest_release(releases, prerelease=False)["tag_name"] == "v3.0.3"
-    assert _newest_release(releases, prerelease=True)["tag_name"] == "v3.0.5-beta.1"
+    assert CHANNEL_ORDER == ("正式版", "公测版", "创新版", "内测版", "废弃版")
+    assert release_channel("3.0.6") == "正式版"
+    assert release_channel("3.1.0-gc") == "公测版"
+    assert release_channel("3.1.0-cx") == "创新版"
+    assert release_channel("3.1.0-dev") == "内测版"
+    assert release_channel("3.1.0-feiqi") == "废弃版"
+    assert release_channel("3.0.7-test") == "废弃版"
+    assert display_version("3.0.11-test") == "3.0.11-feiqi"
 
     source = read("apps/windows/release_selector.py")
-    assert '"云端正式版"' in source
-    assert '"云端测试版"' in source
-    assert "_newest_release(releases, prerelease=False)" in source
-    assert "_newest_release(releases, prerelease=True)" in source
-    assert "default_release = releases[0]" in source
+    assert "RECENT_RELEASE_LIMIT = 10" in source
+    assert "counts = {channel: 0 for channel in CHANNEL_ORDER}" in source
+    assert 'full_body = str(raw.get("body"' in source
+    assert 'update_channel_var.set("正式版")' in source
+    assert "def on_channel_selected" in source
+
+    page = read("apps/windows/update_page.py")
+    assert 'text="版本类型"' in page
+    assert 'text="版本"' in page
+    assert "_update_channel_combo" in page
+    assert "_update_version_combo" in page
 
     runtime = read("apps/windows/desktop_runtime.py")
     assert "install_release_selector()" in runtime
