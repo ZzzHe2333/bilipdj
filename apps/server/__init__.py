@@ -131,6 +131,7 @@ from . import plugin_config_schema as _plugin_config_schema  # noqa: E402
 from . import plugin_config_web as _plugin_config_web  # noqa: E402
 from . import appearance_guard as _appearance_guard  # noqa: E402
 from . import issue123_guard as _issue123_guard  # noqa: E402
+from . import gift_compatibility as _gift_compatibility  # noqa: E402
 from . import security_hardening_guard as _security_hardening_guard  # noqa: E402
 from . import docker_runtime as _docker_runtime  # noqa: E402
 
@@ -183,6 +184,7 @@ _issue123_guard.install_issue123_guard(
     _settings_backup,
 )
 _backup_scope_guard.install_backup_scope_guard(_settings_backup, server)
+_gift_compatibility.install_gift_compatibility(server, _plugin_manager, _settings_backup)
 _security_hardening_guard.install_security_hardening(server)
 
 # Keep this outermost: original plugin-management POST requests must pass the

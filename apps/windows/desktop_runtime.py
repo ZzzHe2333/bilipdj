@@ -10,6 +10,7 @@ from .command_console_ui import patch_control_panel_command_console
 from .control_panel_features import patch_control_panel_features
 from .control_panel_guard import patch_control_panel_class
 from .control_panel_ui_finish import patch_control_panel_ui_finish
+from .gift_compatibility_ui import install_gift_compatibility_ui
 from .gui_log_sink import patch_control_panel_logging
 from .gui_stability import patch_control_panel_issue185
 from .huya_control_guard import patch_control_panel_huya
@@ -87,6 +88,9 @@ def _install_platform_runtime(panel_class: type[Any]) -> None:
 def _install_tk_page_runtime(panel_class: type[Any]) -> None:
     """Install the latest page features on top of the native ttk builders."""
 
+    # Patch the plugin-manager builder before issue180 captures it into the
+    # settings page wrapper so the gift compatibility button is present there.
+    install_gift_compatibility_ui()
     patch_control_panel_issue180(panel_class)
     # Performance monitor intentionally installs after issue180 so it can own
     # the performance page and prevent background CPU/system-memory polling
