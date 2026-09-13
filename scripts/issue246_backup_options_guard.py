@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import sys
 import tempfile
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 
 def _write(path: Path, text: str) -> None:
@@ -90,7 +95,7 @@ def main() -> None:
         assert set(restored) == {"style.json", "appearance.json"}
         assert FakeServer.STYLE_PATH.read_text(encoding="utf-8") == "{}\n"
 
-    ui_source = (Path(__file__).resolve().parents[1] / "apps/windows/backup_options_guard.py").read_text(encoding="utf-8")
+    ui_source = (ROOT / "apps/windows/backup_options_guard.py").read_text(encoding="utf-8")
     assert "备份配置" in ui_source
     assert "备份存档" in ui_source
     assert "备份样式" in ui_source
