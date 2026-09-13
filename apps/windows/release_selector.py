@@ -54,8 +54,8 @@ def release_channel(version: str) -> str:
     if suffix in {"cx", "c"}:
         return "创新版"
     if suffix in {"text", "t", "dev", "test"}:
-        # -test remains a compatibility alias for current/older test builds.
-        # 3.0.7-test .. 3.0.11-test are explicitly redirected to 废弃版 above.
+        # -test remains a compatibility alias for already-published test builds.
+        # New release naming should use the explicit channel suffix table.
         return "内测版"
     return "正式版" if not suffix else "内测版"
 
@@ -84,8 +84,10 @@ def _manifest_asset_url(payload: dict[str, Any]) -> str:
 
 
 def _read_release_list(*, timeout: float = 15.0) -> list[dict[str, Any]]:
-    separator = "&" if "?" in RELEASES_API else "?"
-    url = f"{RELEASES_API}{separator}per_page={MAX_RELEASE_SCAN}"
+    # RELEASES_API historically includes its own per_page parameter. Strip the
+    # query first so we never send two competing per_page values to GitHub.
+    base_url = RELEASES_API.split("?", 1)[0]
+    url = f"{base_url}?per_page={MAX_RELEASE_SCAN}"
     with update_client._request(url, timeout=timeout) as response:  # noqa: SLF001
         try:
             payload = json.loads(response.read().decode("utf-8-sig"))
@@ -135,8 +137,8 @@ def _release_info(raw: dict[str, Any], *, timeout: float = 15.0) -> update_clien
     else:
         info = update_client._release_from_github_payload(raw)  # noqa: SLF001
 
-    # Manifest notes are intentionally concise. The UI should show the complete
-    # GitHub Release body for whichever version the user selects.
+    # update-manifest.json deliberately contains a short machine-facing summary.
+    # Replace it with the complete GitHub Release body for the selected version.
     full_body = str(raw.get("body", "") or "").strip()
     page_url = str(raw.get("html_url", "") or info.page_url)
     release_name = str(raw.get("name", "") or info.name)
@@ -200,8 +202,6 @@ def _build_version_candidates(app_dir, cloud_releases):
         candidates.append(update_version_selector.VersionCandidate(label=label, source="cloud", version=release.version, release=release))
 
     # Local backups remain available without adding a sixth release channel.
-    # They are appended to the version list for every channel so recovery is not
-    # accidentally hidden by the new cloud filter.
     for backup in update_version_selector.discover_local_backups(app_dir):
         base = f"本地备份 · v{backup.version} · {backup.created_at}"
         label = base
