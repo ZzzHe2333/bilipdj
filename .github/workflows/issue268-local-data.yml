@@ -1,0 +1,49 @@
+name: Validate issue 268 local data and cleanup
+
+on:
+  pull_request:
+    branches:
+      - now
+    paths:
+      - 'apps/server/local_data_archive.py'
+      - 'apps/server/runtime_layout.py'
+      - 'apps/windows/legacy_backup_ui.py'
+      - 'apps/windows/queue_clear_dialog.py'
+      - 'apps/windows/desktop_runtime.py'
+      - '.github/ci/issue268_local_archive_guard.py'
+      - '.github/workflows/issue268-local-data.yml'
+  push:
+    branches:
+      - now
+    paths:
+      - 'apps/server/local_data_archive.py'
+      - 'apps/server/runtime_layout.py'
+      - 'apps/windows/legacy_backup_ui.py'
+      - 'apps/windows/queue_clear_dialog.py'
+      - 'apps/windows/desktop_runtime.py'
+      - '.github/ci/issue268_local_archive_guard.py'
+      - '.github/workflows/issue268-local-data.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  issue268-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile changed Python modules
+        run: >-
+          python -m compileall -q
+          apps/server/local_data_archive.py
+          apps/server/runtime_layout.py
+          apps/windows/legacy_backup_ui.py
+          apps/windows/queue_clear_dialog.py
+          apps/windows/desktop_runtime.py
+          .github/ci/issue268_local_archive_guard.py
+      - name: Validate AppData sync, backup cleanup and queue confirmation
+        run: python .github/ci/issue268_local_archive_guard.py
