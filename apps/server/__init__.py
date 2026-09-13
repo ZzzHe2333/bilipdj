@@ -115,6 +115,7 @@ from . import settings_backup as _settings_backup  # noqa: E402
 from . import settings_backup_bugfix_guard as _settings_backup_bugfix_guard  # noqa: E402
 from . import settings_mtime_guard as _settings_mtime_guard  # noqa: E402
 from . import settings_storage_guard as _settings_storage_guard  # noqa: E402
+from . import backup_scope_guard as _backup_scope_guard  # noqa: E402
 from . import web_control_guard as _web_control_guard  # noqa: E402
 from . import issue79_guard as _issue79_guard  # noqa: E402
 from . import huya_runtime_guard as _huya_runtime_guard  # noqa: E402
@@ -181,6 +182,7 @@ _issue123_guard.install_issue123_guard(
     _youtube_runtime_guard.youtube_protocol,
     _settings_backup,
 )
+_backup_scope_guard.install_backup_scope_guard(_settings_backup, server)
 _security_hardening_guard.install_security_hardening(server)
 
 # Keep this outermost: original plugin-management POST requests must pass the
