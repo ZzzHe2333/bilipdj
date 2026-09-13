@@ -1,67 +1,67 @@
-# 弹幕排队姬 v3.0.14-test
+# 弹幕排队姬 v3.0.15-test
 
-`v3.0.14-test` 是基于 `v3.0.12` 正式版继续验证的测试版本，包含 `v3.0.13-test` 之后的 Bug 修复、版本渠道逻辑统一以及 CI/测试脚本解耦调整。本版本用于验证当前 `now` 分支，不替代 `v3.0.12` 正式版。
+`v3.0.15-test` 是基于 `v3.0.12` 正式版继续验证的测试版本。本次重点增加旧版包清理、Windows AppData 本地存档恢复，以及排队清空二次确认；同时继续包含前序测试版的 Bug 修复与更新链路改进。本版本不替代 `v3.0.12` 正式版。
 
 ## 本次主要变化
 
-- 修复保存普通配置后，运行中的管理员、舰长、黑名单权限被错误重置为默认值的问题；
-- 修复 Web 增量更新把同一数字版本下的 `test/gc/cx/stable` 不同渠道误认为同一基础版本的问题；
-- 统一项目发行渠道版本比较逻辑，Windows 更新器、插件兼容判断和 Web Release 选择器不再各自按后缀字符串排序；
-- 修复多平台 Relay 启动中途失败后残留 `_started=True`、无法正常重试的问题；
-- 修复退出自动备份首次失败后提前标记完成，导致后续退出回调无法再次尝试的问题；
-- 修复本地管理 API 同源校验旁路、Web 翻译误伤用户数据、礼物兼容规则冲突、语言插件卸载残留状态等问题；
-- 根目录 `scripts/` 已移除，测试、guard、probe 与构建辅助代码迁移至 `.github/ci/`，生产运行路径与测试代码彻底解耦；
-- 保持 Windows Tk/ttk、Web Portable、插件系统、语言系统、礼物兼容层、备份与更新恢复架构不变。
+- Windows“更新软件”页新增 **清理旧版包**：从程序目录 `backup/` 读取可恢复的旧版快照，在独立窗口中展示版本号与实际占用大小，支持清理选中或全部旧版包；
+- 新增 Windows 本地恢复存档 `%APPDATA%\bilipdj`。配置、权限/开关、排队存档、黑名单、主题/显示样式、WebDAV 设置、礼物兼容设置、语言设置及插件数据会在启动时进行内部同步；
+- 已有安装中，程序/core 数据仍是正常运行时的权威来源，并在启动时同步到 AppData；只有 AppData 存在而本地对应数据缺失时，会从 AppData 恢复；
+- 全新/重装后的程序目录若检测到既有 AppData 存档，会优先恢复旧用户数据覆盖新包自带的默认配置，再继续启动；整个过程不增加迁移提示或额外小字；
+- “一键清空”排队信息改为独立警告弹窗。正文为“是否需要清空本存档的排队信息？如需清空，请连续点击确定2下（5s内）。”，只有 5 秒内连续确认两次才真正清空；
+- AppData 同步不会介入 `BILIPDJ_DATA_DIR` 外部数据模式，因此 Docker / 显式外部数据目录保持原有行为；
+- 新增 Issue #268 专项回归检查，覆盖旧数据优先恢复、本地优先同步、缺失单项恢复、目录镜像、旧版包安全删除和 5 秒双确认；
+- 开发验收中修复了专项 guard 导入路径与 `runtime_layout.py` 独立文件探针兼容问题，现有 Quality、Server、更新器和 Portable 构建继续通过。
 
 ## 建议重点测试
 
-- Windows `main.exe`、`paiduijitm.exe`、`updater.exe` 是否正常启动；
-- Web Portable 的 `BiliPDJ-Web.exe` 与 `BiliPDJ-Web-Updater.exe` 是否正常；
-- 修改普通设置后管理员、舰长、黑名单运行态是否保持正确；
-- `3.0.13-test → 3.0.14-test` 的全量/增量更新、备份和 rollback 是否正常；
-- 不同预发布渠道版本是否能正确区分，不再跨渠道误用增量基础包；
-- 多平台 Relay 在单个平台启动失败后能否正确回滚并再次启动；
-- WebDAV/本地退出备份失败时，后续退出路径是否仍有重试机会；
-- 默认语言仍为简体中文，English（en-US）随包提供但默认不启用，第三方语言保持严格单选；
-- 删除根目录 `scripts/` 后，Windows/Web/Server 主运行路径和 Portable 打包不受影响。
+- Windows `main.exe` 启动后，“更新软件”页右侧是否出现“清理旧版包”，旧版列表的版本号和大小是否正确；
+- 删除某个本地旧版包后，`backup/` 对应快照是否被删除，当前版本、程序数据和 AppData 存档是否不受影响；
+- 已有配置启动后， `%APPDATA%\bilipdj` 是否形成对应镜像；
+- 模拟重装时仅保留 `%APPDATA%\bilipdj`，新程序能否恢复旧配置、排队信息、样式和插件数据；
+- 同时存在本地数据与 AppData 数据的既有安装是否继续以本地/core 数据为准；
+- “一键清空”第一次确认不应删除队列，5 秒内第二次确认才执行；取消或超过 5 秒都不应误清空；
+- `3.0.14-test → 3.0.15-test` 的全量/增量更新、备份和 rollback 是否正常；
+- Windows Tk Portable 与 Web Portable 是否均能正常启动，Docker 外部数据模式是否保持不变。
 
 ## 直接下载
 
 测试用户只需要下载对应的完整便携版 ZIP：
 
-- **Windows 客户端**：`BiliPDJ-v3.0.14-test-Windows-Tk-Portable-x64.zip`
-- **Web 便携版**：`BiliPDJ-v3.0.14-test-Web-Portable-x64.zip`
+- **Windows 客户端**：`BiliPDJ-v3.0.15-test-Windows-Tk-Portable-x64.zip`
+- **Web 便携版**：`BiliPDJ-v3.0.15-test-Web-Portable-x64.zip`
 
 发布地址：
 
-- Windows：https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.14-test/BiliPDJ-v3.0.14-test-Windows-Tk-Portable-x64.zip
-- Web：https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.14-test/BiliPDJ-v3.0.14-test-Web-Portable-x64.zip
+- Windows：https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.15-test/BiliPDJ-v3.0.15-test-Windows-Tk-Portable-x64.zip
+- Web：https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.15-test/BiliPDJ-v3.0.15-test-Web-Portable-x64.zip
 
 `Windows-Tk-files.json`、`Windows-Tk-Incremental-x64.pack`、Web 对应 manifest / incremental pack 及其 `.sha256` 均由内置更新器使用，普通用户无需手动下载。
 
 ## 更新与数据安全
 
-- `v3.0.14-test` 为测试版 GitHub Pre-release，不替代 `v3.0.12` 正式版；
+- `v3.0.15-test` 为测试版 GitHub Pre-release，不替代 `v3.0.12` 正式版；
 - Windows/Web 更新工作区继续统一位于程序目录 `update/`；
 - 更新前继续创建完整 `backup/` 快照；
-- 增量更新会校验完整发行版本身份，避免不同渠道之间误用基础版本；
-- 更新失败优先恢复旧版本；
-- 配置、队列存档、日志、备份、插件、插件私有数据、主题与显示样式继续受保护。
+- `backup/` 旧版包清理只允许删除可识别的直接子目录，不触碰当前程序目录和 `%APPDATA%\bilipdj`；
+- AppData 本地恢复存档采用明确的数据白名单，不会把 `core/` 中的 Python 源码、文档或程序文件当作用户数据恢复；
+- 增量更新继续校验完整发行版本身份，更新失败优先恢复旧版本；
+- 正式版下载入口继续保持 `v3.0.12`。
 
 ## 发行文件
 
-- `BiliPDJ-v3.0.14-test-Windows-Tk-Portable-x64.zip`
-- `BiliPDJ-v3.0.14-test-Windows-Tk-Portable-x64.zip.sha256`
-- `BiliPDJ-v3.0.14-test-Windows-Tk-files.json`
-- `BiliPDJ-v3.0.14-test-Windows-Tk-files.json.sha256`
-- `BiliPDJ-v3.0.14-test-Windows-Tk-Incremental-x64.pack`
-- `BiliPDJ-v3.0.14-test-Windows-Tk-Incremental-x64.pack.sha256`
-- `BiliPDJ-v3.0.14-test-Web-Portable-x64.zip`
-- `BiliPDJ-v3.0.14-test-Web-Portable-x64.zip.sha256`
-- `BiliPDJ-v3.0.14-test-Web-files.json`
-- `BiliPDJ-v3.0.14-test-Web-files.json.sha256`
-- `BiliPDJ-v3.0.14-test-Web-Incremental-x64.pack`
-- `BiliPDJ-v3.0.14-test-Web-Incremental-x64.pack.sha256`
+- `BiliPDJ-v3.0.15-test-Windows-Tk-Portable-x64.zip`
+- `BiliPDJ-v3.0.15-test-Windows-Tk-Portable-x64.zip.sha256`
+- `BiliPDJ-v3.0.15-test-Windows-Tk-files.json`
+- `BiliPDJ-v3.0.15-test-Windows-Tk-files.json.sha256`
+- `BiliPDJ-v3.0.15-test-Windows-Tk-Incremental-x64.pack`
+- `BiliPDJ-v3.0.15-test-Windows-Tk-Incremental-x64.pack.sha256`
+- `BiliPDJ-v3.0.15-test-Web-Portable-x64.zip`
+- `BiliPDJ-v3.0.15-test-Web-Portable-x64.zip.sha256`
+- `BiliPDJ-v3.0.15-test-Web-files.json`
+- `BiliPDJ-v3.0.15-test-Web-files.json.sha256`
+- `BiliPDJ-v3.0.15-test-Web-Incremental-x64.pack`
+- `BiliPDJ-v3.0.15-test-Web-Incremental-x64.pack.sha256`
 - `update-manifest.json`
 
 ## 测试版说明

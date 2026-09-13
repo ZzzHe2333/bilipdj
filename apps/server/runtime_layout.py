@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import os
 import shutil
 from datetime import datetime
@@ -126,6 +127,42 @@ def _seed_default(source: Path, target: Path, *, logger: Any | None = None) -> b
     return True
 
 
+def _load_archive_sync():
+    """Load the archive helper while keeping file-module CI probes working."""
+
+    if __package__:
+        from .local_data_archive import sync_local_data_archive
+
+        return sync_local_data_archive
+
+    helper_path = Path(__file__).resolve().with_name("local_data_archive.py")
+    spec = importlib.util.spec_from_file_location("bilipdj_local_data_archive_probe", helper_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {helper_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.sync_local_data_archive
+
+
+def _sync_windows_roaming_archive(app_root: Path, *, logger: Any | None = None) -> None:
+    # BILIPDJ_DATA_DIR is the Docker/external-storage contract and must not be
+    # mixed with the Windows roaming archive. Off Windows this path is skipped
+    # before loading the helper, preserving lightweight standalone CI probes.
+    if data_dir_overridden() or os.name != "nt":
+        return
+    try:
+        sync_local_data_archive = _load_archive_sync()
+        sync_local_data_archive(app_root, logger=logger)
+    except (ImportError, OSError, ValueError) as exc:
+        # The roaming copy is a recovery mirror, never a reason to stop BiliPDJ
+        # from starting if a profile/permission problem prevents synchronization.
+        if logger is not None:
+            try:
+                logger.warning("Local AppData archive sync unavailable: %s", exc)
+            except Exception:
+                pass
+
+
 def ensure_runtime_layout(
     app_dir: Path,
     *,
@@ -136,6 +173,9 @@ def ensure_runtime_layout(
 
     Program files stay under ``app_dir``. Only user-owned state is redirected to
     ``BILIPDJ_DATA_DIR`` when that environment variable is explicitly set.
+    On Windows portable/source runs, user-owned state is additionally mirrored
+    to ``%APPDATA%\\bilipdj`` for reinstall recovery while ``core`` remains the
+    normal runtime authority.
     """
 
     app_root = Path(app_dir).resolve()
@@ -164,6 +204,7 @@ def ensure_runtime_layout(
         for name in DEFAULT_DATA_FILES:
             _seed_default(source_root / name, data_root / name, logger=logger)
 
+    _sync_windows_roaming_archive(app_root, logger=logger)
     return core_dir, key_dir
 
 
