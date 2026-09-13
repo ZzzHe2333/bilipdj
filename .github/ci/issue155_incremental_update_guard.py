@@ -12,7 +12,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from apps.windows import incremental_apply, incremental_update, updater  # noqa: E402
 from apps.windows.update_manifest import is_preserved_path  # noqa: E402
-from scripts import build_incremental_update  # noqa: E402
+import build_incremental_update  # noqa: E402
 
 
 class _FakeProcess:
