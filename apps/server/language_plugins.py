@@ -54,7 +54,12 @@ def _load_translation_mapping(path: Path) -> dict[str, str]:
 
 
 def _language_config_path(server_module: Any) -> Path:
-    return Path(getattr(server_module, "_YAML_DIR")) / LANGUAGE_CONFIG_NAME
+    base = getattr(server_module, "_YAML_DIR", None)
+    if base is None:
+        base = getattr(server_module, "APP_DIR", None)
+    if base is None:
+        base = getattr(server_module, "REPO_DIR", ".")
+    return Path(base) / LANGUAGE_CONFIG_NAME
 
 
 def _read_selected_language(server_module: Any) -> str:
@@ -74,7 +79,11 @@ def _bundled_language_path(server_module: Any, language: str) -> Path | None:
     resource = str(spec.get("resource", "") or "")
     if not resource:
         return None
-    return Path(getattr(server_module, "UI_DIR")) / Path(resource)
+    ui_dir = getattr(server_module, "UI_DIR", None)
+    if ui_dir is None:
+        repo_dir = Path(getattr(server_module, "REPO_DIR", "."))
+        ui_dir = repo_dir / "apps" / "web" / "static"
+    return Path(ui_dir) / Path(resource)
 
 
 def _validate_language_manifest(pm: Any, manifest: Any, current_version: str) -> dict[str, Any]:
@@ -597,7 +606,7 @@ def install_language_plugin_system(server_module: Any, pm: Any, backup_module: A
 
                 def settings_paths(self: Any) -> dict[str, Path]:
                     paths = dict(original_paths(self))
-                    paths[LANGUAGE_CONFIG_NAME] = Path(getattr(self.server, "_YAML_DIR")) / LANGUAGE_CONFIG_NAME
+                    paths[LANGUAGE_CONFIG_NAME] = _language_config_path(self.server)
                     return paths
 
                 backup_service.settings_paths = settings_paths
