@@ -7,7 +7,10 @@
   const SOURCE_ATTR = Symbol('bilipdjI18nSourceAttr');
   const LAST_ATTR = Symbol('bilipdjI18nLastAttr');
   const SKIP_SELECTOR = 'script,style,pre,code,textarea';
+  const DYNAMIC_UI_SELECTOR = 'button,label,legend,summary,option,th,[data-i18n],[data-i18n-ui]';
   const ATTRS = ['placeholder', 'title', 'aria-label'];
+  const INITIAL_TEXT_NODES = new WeakSet();
+  const INITIAL_ELEMENTS = new WeakSet();
   let state = { active: 'zh-CN', languages: [], translations: {} };
   let applying = false;
 
@@ -21,8 +24,35 @@
     return Boolean(parent && parent.closest && parent.closest(SKIP_SELECTOR));
   }
 
+  function markInitialUi(root = document.body) {
+    if (!root) return;
+    if (root instanceof Element) INITIAL_ELEMENTS.add(root);
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+    let node = walker.currentNode;
+    while (node) {
+      if (node.nodeType === Node.TEXT_NODE) INITIAL_TEXT_NODES.add(node);
+      else if (node instanceof Element) INITIAL_ELEMENTS.add(node);
+      node = walker.nextNode();
+    }
+  }
+
+  function isTextTranslatable(node) {
+    if (INITIAL_TEXT_NODES.has(node)) return true;
+    const parent = node && node.parentElement;
+    return Boolean(parent && parent.closest && parent.closest(DYNAMIC_UI_SELECTOR));
+  }
+
+  function isElementTranslatable(element) {
+    if (INITIAL_ELEMENTS.has(element)) return true;
+    if (!(element instanceof Element)) return false;
+    return Boolean(
+      element.matches(DYNAMIC_UI_SELECTOR)
+      || (element.closest && element.closest('[data-i18n-ui]'))
+    );
+  }
+
   function applyTextNode(node) {
-    if (!node || node.nodeType !== Node.TEXT_NODE || shouldSkip(node)) return;
+    if (!node || node.nodeType !== Node.TEXT_NODE || shouldSkip(node) || !isTextTranslatable(node)) return;
     const current = node.nodeValue || '';
     if (!current.trim()) return;
     if (node[SOURCE_TEXT] === undefined || (node[LAST_TEXT] !== undefined && current !== node[LAST_TEXT])) {
@@ -34,7 +64,7 @@
   }
 
   function applyAttributes(element) {
-    if (!(element instanceof Element) || shouldSkip(element)) return;
+    if (!(element instanceof Element) || shouldSkip(element) || !isElementTranslatable(element)) return;
     if (!element[SOURCE_ATTR]) element[SOURCE_ATTR] = Object.create(null);
     if (!element[LAST_ATTR]) element[LAST_ATTR] = Object.create(null);
     for (const attr of ATTRS) {
@@ -77,6 +107,7 @@
       select = document.createElement('select');
       select.id = 'bilipdj-language-select';
       select.className = 'button ghost';
+      select.dataset.i18nUi = 'true';
       select.title = '界面语言';
       select.setAttribute('aria-label', '界面语言');
       select.addEventListener('change', async () => {
@@ -147,6 +178,11 @@
   });
 
   function start() {
+    // Only text/attributes that belong to the initial UI are implicitly
+    // translatable. Later DOM data (queue names, blacklist entries, plugin/user
+    // content, etc.) stays verbatim unless its element is an explicit UI control
+    // or carries data-i18n / data-i18n-ui.
+    markInitialUi(document.body);
     observer.observe(document.documentElement, {
       subtree: true,
       childList: true,
