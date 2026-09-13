@@ -95,7 +95,7 @@ def configure_runtime_paths(module: Any = server) -> Any:
     module.LOG_DIR = (data_dir if external_data_dir else app_dir) / "log"
     module.PD_DIR = runtime_core_dir / "cd"
     module.QUEUE_STATE_PATH = module.PD_DIR / "queue_archive_state.json"
-    module.BLACKLIST_PATH = module.PD_DIR / "blacklist.csv"
+    module.BLACKLIST_PATH = runtime_core_dir / "blacklist.csv"
     module.QUANXIAN_PATH = runtime_core_dir / "quanxian.yaml"
     module.KAIGUAN_PATH = runtime_core_dir / "kaiguan.yaml"
     module.STYLE_PATH = misc_config_dir / "style.json"
@@ -129,6 +129,7 @@ from . import plugin_mutation_guard as _plugin_mutation_guard  # noqa: E402
 from . import plugin_api_security_guard as _plugin_api_security_guard  # noqa: E402
 from . import plugin_config_schema as _plugin_config_schema  # noqa: E402
 from . import plugin_config_web as _plugin_config_web  # noqa: E402
+from . import language_plugins as _language_plugins  # noqa: E402
 from . import appearance_guard as _appearance_guard  # noqa: E402
 from . import issue123_guard as _issue123_guard  # noqa: E402
 from . import gift_compatibility as _gift_compatibility  # noqa: E402
@@ -175,6 +176,7 @@ _issue79_guard.install_issue79_guard(server)
 _plugin_config_schema.install_plugin_config_schema(server, _plugin_manager, _plugin_api_security_guard)
 _plugin_mutation_guard.install_plugin_mutation_guard(_plugin_manager)
 _plugin_config_web.install_plugin_config_web(server, _plugin_manager)
+_language_plugins.install_language_plugin_system(server, _plugin_manager, _settings_backup)
 
 _appearance_guard.install_appearance_guard(server)
 _issue123_guard.install_issue123_guard(
