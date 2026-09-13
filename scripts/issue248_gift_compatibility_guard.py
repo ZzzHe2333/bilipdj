@@ -79,9 +79,11 @@ def main() -> None:
         assert disabled["value"] == 6
         assert disabled["source"] == "platform"
 
-        # ID matching has priority over a same-platform name match.
+        # ID matching still has priority when the incoming name points at a
+        # different name-only rule; duplicate lookup keys themselves are now
+        # rejected by the issue #260 guard.
         service.save_rules([
-            {"platform": "douyin", "gift_id": "gift-7", "gift_name": "玫瑰", "value": 7, "enabled": True},
+            {"platform": "douyin", "gift_id": "gift-7", "gift_name": "玫瑰礼盒", "value": 7, "enabled": True},
             {"platform": "douyin", "gift_id": "", "gift_name": "玫瑰", "value": 2, "enabled": True},
         ])
         priority = service.resolve(platform="douyin", gift_id="gift-7", gift_name="玫瑰", count=1)
