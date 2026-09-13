@@ -4,6 +4,7 @@ import functools
 from typing import Any
 
 from .about_page import patch_control_panel_about
+from .backup_options_guard import patch_backup_options_ui
 from .bilibili_qr_dialog import patch_control_panel_qr_login
 from .command_console_ui import patch_control_panel_command_console
 from .control_panel_features import patch_control_panel_features
@@ -70,6 +71,7 @@ def _install_core_runtime(panel_class: type[Any]) -> None:
     patch_control_panel_portable_autostart(panel_class)
     patch_control_panel_qr_login(panel_class)
     patch_control_panel_webdav_backup(panel_class)
+    patch_backup_options_ui()
     patch_control_panel_support_us(panel_class)
     patch_control_panel_ui_finish(panel_class)
     patch_control_panel_logging(panel_class)
