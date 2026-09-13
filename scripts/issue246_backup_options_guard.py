@@ -72,7 +72,7 @@ def main() -> None:
         assert "style.json" not in included
 
         service.save_config({"backup_config": False, "backup_archive": False, "backup_style": True})
-        _data, included = service.build_settings_zip()
+        style_data, included = service.build_settings_zip()
         assert set(included) == {"style.json", "appearance.json"}
 
         service.save_config({"backup_config": False, "backup_archive": False, "backup_style": False})
@@ -82,6 +82,13 @@ def main() -> None:
             assert "至少选择一项" in str(exc)
         else:
             raise AssertionError("backup should fail when every scope is disabled")
+
+        # Restore is a separate operation: disabling future backup scopes must
+        # not prevent a valid existing ZIP from being restored.
+        FakeServer.STYLE_PATH.write_text('{"changed": true}\n', encoding="utf-8")
+        restored = service.restore_settings_zip(style_data)
+        assert set(restored) == {"style.json", "appearance.json"}
+        assert FakeServer.STYLE_PATH.read_text(encoding="utf-8") == "{}\n"
 
     ui_source = (Path(__file__).resolve().parents[1] / "apps/windows/backup_options_guard.py").read_text(encoding="utf-8")
     assert "备份配置" in ui_source
