@@ -1,0 +1,42 @@
+name: Mark legacy UI test releases deprecated
+
+on:
+  push:
+    branches:
+      - 'ops/issue-242-deprecate-releases'
+
+permissions:
+  contents: write
+
+jobs:
+  deprecate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rename old test Releases to feiqi and add warning
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          for patch in 7 8 9 10 11; do
+            old="v3.0.${patch}-test"
+            new="v3.0.${patch}-feiqi"
+            echo "Processing $old -> $new"
+            release_json="$(gh api "repos/$repo/releases/tags/$old")"
+            release_id="$(jq -r '.id' <<<"$release_json")"
+            old_body="$(jq -r '.body // ""' <<<"$release_json")"
+            warning=$'【废弃版本：不可使用】\n该版本属于 3.0.7～3.0.11 UI 切换阶段，现已废弃。请不要安装、升级或降级到该版本。'
+            if [[ "$old_body" == *"【废弃版本：不可使用】"* ]]; then
+              new_body="$old_body"
+            else
+              new_body="$warning"$'\n\n'"$old_body"
+            fi
+            jq -n \
+              --arg tag "$new" \
+              --arg name "弹幕排队姬 $new（废弃版）" \
+              --arg body "$new_body" \
+              '{tag_name:$tag,name:$name,body:$body,prerelease:true}' > /tmp/release-patch.json
+            gh api -X PATCH "repos/$repo/releases/$release_id" --input /tmp/release-patch.json >/dev/null
+            echo "Updated release $release_id"
+          done
