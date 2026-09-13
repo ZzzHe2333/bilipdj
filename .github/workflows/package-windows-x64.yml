@@ -18,8 +18,8 @@ on:
       - 'apps/server/**'
       - 'apps/windows/**'
       - 'apps/web/**'
-      - 'scripts/build_incremental_update.py'
-      - 'scripts/build_web_incremental_update.py'
+      - '.github/ci/build_incremental_update.py'
+      - '.github/ci/build_web_incremental_update.py'
       - 'update-manifest.json'
       - 'core/RELEASE_NOTES.md'
       - '.github/workflows/package-windows-x64.yml'
@@ -30,8 +30,8 @@ on:
       - 'apps/server/**'
       - 'apps/windows/**'
       - 'apps/web/**'
-      - 'scripts/build_incremental_update.py'
-      - 'scripts/build_web_incremental_update.py'
+      - '.github/ci/build_incremental_update.py'
+      - '.github/ci/build_web_incremental_update.py'
       - 'update-manifest.json'
       - 'core/RELEASE_NOTES.md'
       - '.github/workflows/package-windows-x64.yml'
@@ -110,7 +110,7 @@ jobs:
       - name: Build Tk Windows portable
         shell: pwsh
         run: |
-          python scripts\scan_secrets.py
+          python .github\ci\scan_secrets.py
           .\apps\windows\package.ps1 -InstallDependencies
 
       - name: Build Web portable
@@ -260,7 +260,7 @@ jobs:
           $previousWebZip = "${{ steps.previous_release.outputs.previous_web_zip }}"
 
           $tkBuildArgs = @(
-            "scripts\build_incremental_update.py",
+            ".github\ci\build_incremental_update.py",
             "--package-dir", "package-tk",
             "--version", $version,
             "--package-sha256", $tkHash,
@@ -275,7 +275,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Windows incremental update metadata build failed" }
 
           $webBuildArgs = @(
-            "scripts\build_web_incremental_update.py",
+            ".github\ci\build_web_incremental_update.py",
             "--package-dir", "package-web",
             "--version", $version,
             "--package-sha256", $webHash,
