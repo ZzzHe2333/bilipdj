@@ -286,6 +286,7 @@ def _install_issue79_plugin_bridge(server_module: Any, issue79_module: Any, regi
             "control_redtv.js",
             "control_purple_mouse.js",
             "control_plugins.js",
+            "i18n.js",
         ]
         for name in script_names:
             if name != "control_issue79.js" and not (Path(module.UI_DIR) / name).is_file():
