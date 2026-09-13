@@ -7,6 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .local_data_archive import sync_local_data_archive
+
 CORE_CONFIG_FILES = ("config.yaml", "quanxian.yaml", "kaiguan.yaml")
 LEGACY_UPDATE_METADATA_FILES = ("update-result.json",)
 DEFAULT_DATA_FILES = ("style.json", "appearance.json")
@@ -126,6 +128,24 @@ def _seed_default(source: Path, target: Path, *, logger: Any | None = None) -> b
     return True
 
 
+def _sync_windows_roaming_archive(app_root: Path, *, logger: Any | None = None) -> None:
+    # BILIPDJ_DATA_DIR is the Docker/external-storage contract and must not be
+    # mixed with the Windows roaming archive.  The archive helper itself is a
+    # no-op off Windows.
+    if data_dir_overridden():
+        return
+    try:
+        sync_local_data_archive(app_root, logger=logger)
+    except (OSError, ValueError) as exc:
+        # The roaming copy is a recovery mirror, never a reason to stop BiliPDJ
+        # from starting if a profile/permission problem prevents synchronization.
+        if logger is not None:
+            try:
+                logger.warning("Local AppData archive sync unavailable: %s", exc)
+            except Exception:
+                pass
+
+
 def ensure_runtime_layout(
     app_dir: Path,
     *,
@@ -136,6 +156,9 @@ def ensure_runtime_layout(
 
     Program files stay under ``app_dir``. Only user-owned state is redirected to
     ``BILIPDJ_DATA_DIR`` when that environment variable is explicitly set.
+    On Windows portable/source runs, user-owned state is additionally mirrored
+    to ``%APPDATA%\\bilipdj`` for reinstall recovery while ``core`` remains the
+    normal runtime authority.
     """
 
     app_root = Path(app_dir).resolve()
@@ -164,6 +187,7 @@ def ensure_runtime_layout(
         for name in DEFAULT_DATA_FILES:
             _seed_default(source_root / name, data_root / name, logger=logger)
 
+    _sync_windows_roaming_archive(app_root, logger=logger)
     return core_dir, key_dir
 
 
