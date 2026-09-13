@@ -150,11 +150,18 @@ def check_recent_ten_release_catalog() -> None:
         selector._read_release_list = original_read
         selector._release_info = original_info
 
+    # Issue #242 changes the catalog from ten releases total to ten releases per
+    # channel (at most 50 overall). This fixture has only 12 eligible entries, so
+    # none should be discarded: 6 stable, 3 internal and 3 deprecated.
     assert selector.RECENT_RELEASE_LIMIT == 10
-    assert len(releases) == 10
-    assert [release.tag_name for release in releases] == [item["tag_name"] for item in raw if not item["draft"]][:10]
-    assert any("-test" in release.version for release in releases)
-    assert any("-test" not in release.version for release in releases)
+    assert len(releases) == 12
+    counts = {channel: 0 for channel in selector.CHANNEL_ORDER}
+    for release in releases:
+        counts[selector.release_channel(release.version)] += 1
+    assert counts["正式版"] == 6
+    assert counts["内测版"] == 3
+    assert counts["废弃版"] == 3
+    assert all(value <= selector.RECENT_RELEASE_LIMIT for value in counts.values())
 
     current = "3.0.7-test"
     target = releases[0]
