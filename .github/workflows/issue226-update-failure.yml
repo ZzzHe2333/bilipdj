@@ -8,7 +8,7 @@ on:
       - 'apps/update_workspace.py'
       - 'core/update_workspace.py'
       - 'core/issue222_update_cleanup.py'
-      - 'scripts/issue226_update_failure_guard.py'
+      - '.github/ci/issue226_update_failure_guard.py'
       - '.github/workflows/issue226-update-failure.yml'
   push:
     branches:
@@ -19,7 +19,7 @@ on:
       - 'apps/update_workspace.py'
       - 'core/update_workspace.py'
       - 'core/issue222_update_cleanup.py'
-      - 'scripts/issue226_update_failure_guard.py'
+      - '.github/ci/issue226_update_failure_guard.py'
       - '.github/workflows/issue226-update-failure.yml'
 
 permissions:
@@ -36,4 +36,4 @@ jobs:
       - name: Compile updater safety modules
         run: python -m compileall -q apps/windows apps/web apps/update_workspace.py core
       - name: Validate failure recovery paths
-        run: python scripts/issue226_update_failure_guard.py
+        run: python .github/ci/issue226_update_failure_guard.py
