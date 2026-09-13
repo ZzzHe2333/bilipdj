@@ -66,7 +66,8 @@ def install_backup_scope_guard(backup_module: Any, server_module: Any) -> bool:
 
         def settings_paths_with_archives(self: Any) -> dict[str, Path]:
             paths = dict(original_paths(self))
-            pd_dir = Path(getattr(self.server, "PD_DIR"))
+            yaml_dir = Path(getattr(self.server, "_YAML_DIR", "."))
+            pd_dir = Path(getattr(self.server, "PD_DIR", yaml_dir / "cd"))
             paths["queue_archive_state.json"] = Path(
                 getattr(self.server, "QUEUE_STATE_PATH", pd_dir / "queue_archive_state.json")
             )
