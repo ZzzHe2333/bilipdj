@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SELECTOR = ROOT / "apps" / "windows" / "update_version_selector.py"
 PAGE = ROOT / "apps" / "windows" / "update_page.py"
 UI = ROOT / "apps" / "windows" / "update_ui.py"
+RELEASE_SELECTOR = ROOT / "apps" / "windows" / "release_selector.py"
 
 
 def require(path: Path, fragments: tuple[str, ...]) -> None:
@@ -25,7 +26,6 @@ def main() -> None:
         (
             "def discover_local_backups",
             'BACKUP_DIR_NAME = "backup"',
-            'label=f"云端最新 · v{cloud_release.version}"',
             "def prepare_local_backup_restore",
             'skip_top={"plugins"}',
             'Path("plugins")',
@@ -37,12 +37,25 @@ def main() -> None:
         PAGE,
         (
             "update_version_selector",
-            'text="选择版本"',
+            'text="版本类型"',
+            'text="版本"',
+            "_update_channel_combo",
+            "_update_version_combo",
             "ttk.Combobox(",
             "def _bind_stable_scroll_region",
             "after_idle(refresh_scroll_region)",
             "status_slot = ttk.Frame(update_frame, height=42)",
             "status_slot.grid_propagate(False)",
+        ),
+    )
+    require(
+        RELEASE_SELECTOR,
+        (
+            'CHANNEL_ORDER = ("正式版", "公测版", "创新版", "内测版", "废弃版")',
+            "RECENT_RELEASE_LIMIT = 10",
+            "def on_channel_selected",
+            "def release_channel",
+            "def display_version",
         ),
     )
     require(

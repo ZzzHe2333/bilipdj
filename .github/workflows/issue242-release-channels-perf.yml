@@ -1,0 +1,39 @@
+name: Validate release channels and performance controls
+
+on:
+  pull_request:
+    paths:
+      - 'apps/windows/release_selector.py'
+      - 'apps/windows/update_page.py'
+      - 'apps/windows/performance_monitor.py'
+      - 'apps/windows/desktop_runtime.py'
+      - 'scripts/issue242_release_channels_perf_guard.py'
+      - '.github/workflows/issue242-release-channels-perf.yml'
+  push:
+    branches:
+      - now
+    paths:
+      - 'apps/windows/release_selector.py'
+      - 'apps/windows/update_page.py'
+      - 'apps/windows/performance_monitor.py'
+      - 'apps/windows/desktop_runtime.py'
+      - 'scripts/issue242_release_channels_perf_guard.py'
+      - '.github/workflows/issue242-release-channels-perf.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Compile changed modules
+        run: python -m py_compile apps/windows/release_selector.py apps/windows/update_page.py apps/windows/performance_monitor.py apps/windows/desktop_runtime.py
+      - name: Validate release channels and performance monitor
+        run: python scripts/issue242_release_channels_perf_guard.py
