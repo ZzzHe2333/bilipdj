@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -10,7 +12,11 @@ if str(ROOT) not in sys.path:
 
 
 def main() -> None:
-    from apps.server.gift_compatibility import GiftCompatibilityError, GiftCompatibilityService
+    from apps.server.gift_compatibility import (
+        GiftCompatibilityError,
+        GiftCompatibilityService,
+        install_gift_compatibility,
+    )
 
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -89,6 +95,69 @@ def main() -> None:
             assert "价值" in str(exc)
         else:
             raise AssertionError("negative gift values must be rejected")
+
+        # Exercise the patched QueueManager contract without starting a server.
+        broadcasts: list[dict[str, object]] = []
+        logs: list[tuple[object, ...]] = []
+
+        class FakeQueueManager:
+            def __init__(self) -> None:
+                self._lock = threading.RLock()
+                self._gift_queue_enabled = True
+                self._gift_queue_names = {"比心"}
+                self._gift_queue_min_batteries = 0
+                self._gift_queue_allow_multiple = False
+                self._gift_queue_slots_per_gift = 1
+                self._gift_queue_credits: dict[int, int] = {}
+                self._gift_queue_used_uids: set[int] = set()
+                self._gift_catalog: dict[object, dict[str, object]] = {}
+                self._last_gift_event: dict[str, object] = {}
+                self._ws_hub = SimpleNamespace(
+                    broadcast_json=lambda _sender, payload: broadcasts.append(dict(payload))
+                )
+                self._logger = SimpleNamespace(info=lambda *args: logs.append(args))
+
+            def get_gift_state(self) -> dict[str, object]:
+                return {
+                    "catalog": [],
+                    "observed_catalog": list(self._gift_catalog.values()),
+                    "last_event": dict(self._last_gift_event),
+                }
+
+        fake_module = SimpleNamespace(
+            _YAML_DIR=root / "runtime",
+            QueueManager=FakeQueueManager,
+        )
+        assert install_gift_compatibility(fake_module)
+        manager = FakeQueueManager()
+        first = manager.process_gift_event({
+            "platform": "bilibili",
+            "event": "gift",
+            "uid": 123,
+            "uname": "tester",
+            "gift": {"id": 7, "name": "比心", "count": 2},
+        })
+        assert first["gift"]["value"] == 20
+        assert first["gift"]["batteries"] == 20
+        assert first["queue_credit_granted"] is True
+        assert first["received_at"]
+        assert first["guard_level"] == 0
+        assert manager._gift_queue_credits == {123: 1}
+        assert manager._gift_queue_used_uids == set()
+        assert broadcasts[-1]["type"] == "LIVE_GIFT_EVENT"
+        assert logs
+
+        # allow_multiple=False keeps the legacy behavior: a second gift cannot
+        # accumulate another unused credit before the first one is consumed.
+        second = manager.process_gift_event({
+            "platform": "bilibili",
+            "event": "gift",
+            "uid": 123,
+            "uname": "tester",
+            "gift": {"id": 7, "name": "比心", "count": 1},
+        })
+        assert "queue_credit_granted" not in second
+        assert manager._gift_queue_credits == {123: 1}
 
     backend_source = (ROOT / "apps/server/gift_compatibility.py").read_text(encoding="utf-8")
     assert "process_gift_event" in backend_source
