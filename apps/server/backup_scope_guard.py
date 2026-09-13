@@ -103,6 +103,8 @@ def install_backup_scope_guard(backup_module: Any, server_module: Any) -> bool:
             return self.load_config(include_password=False)
 
         def _selected_names(self: Any) -> tuple[str, ...]:
+            if bool(getattr(self, "_backup_scope_force_all", False)):
+                return tuple(getattr(backup_module, "SETTINGS_FILES", ()))
             selected = _ensure_selection(self.load_config(include_password=True), backup_module)
             names: list[str] = []
             for name in tuple(getattr(backup_module, "SETTINGS_FILES", ())):
@@ -147,9 +149,18 @@ def install_backup_scope_guard(backup_module: Any, server_module: Any) -> bool:
         def restore_settings_zip(self: Any, data: bytes, *, httpd: Any | None = None) -> list[str]:
             from . import settings_mtime_guard
 
+            # Restore must not depend on today's backup-scope switches. The older
+            # restore chain creates a safety ZIP via self.build_settings_zip(), so
+            # temporarily force that internal safety snapshot to include all files.
+            previous_force_all = bool(getattr(self, "_backup_scope_force_all", False))
+            self._backup_scope_force_all = True
+            try:
+                restored = list(original_restore(self, data, httpd=httpd))
+            finally:
+                self._backup_scope_force_all = previous_force_all
+
             # Keep the existing validator/restore chain authoritative for malformed
             # or incompatible ZIPs, then apply mtimes to newly supported archive files.
-            restored = list(original_restore(self, data, httpd=httpd))
             archive_mtimes = settings_mtime_guard._zip_entry_mtimes(data, tuple(archive_names))
             paths = self.settings_paths()
             for name in restored:
