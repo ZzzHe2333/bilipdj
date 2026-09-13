@@ -3513,7 +3513,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                 updated.get("myjs", {}),
                 anchor_uid=_get_anchor_uid_for_platform(updated),
             )
-            self.server.queue_manager.load_quanxian(updated.get("quanxian", {}))
+            self.server.queue_manager.load_quanxian(load_quanxian())
 
         self.server.logger.info("登录配置已更新，触发弹幕重连 uid=%s", uid)
         return {
@@ -3921,7 +3921,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                     updated.get("myjs", {}),
                     anchor_uid=_get_anchor_uid_for_platform(updated),
                 )
-                self.server.queue_manager.load_quanxian(updated.get("quanxian", {}))
+                self.server.queue_manager.load_quanxian(load_quanxian())
             self.server.logger.info(
                 "配置已更新，触发直播弹幕重连 platform=%s roomid=%s uid=%s",
                 incoming_platform,

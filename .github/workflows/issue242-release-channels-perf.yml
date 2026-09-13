@@ -7,7 +7,7 @@ on:
       - 'apps/windows/update_page.py'
       - 'apps/windows/performance_monitor.py'
       - 'apps/windows/desktop_runtime.py'
-      - 'scripts/issue242_release_channels_perf_guard.py'
+      - '.github/ci/issue242_release_channels_perf_guard.py'
       - '.github/workflows/issue242-release-channels-perf.yml'
   push:
     branches:
@@ -17,7 +17,7 @@ on:
       - 'apps/windows/update_page.py'
       - 'apps/windows/performance_monitor.py'
       - 'apps/windows/desktop_runtime.py'
-      - 'scripts/issue242_release_channels_perf_guard.py'
+      - '.github/ci/issue242_release_channels_perf_guard.py'
       - '.github/workflows/issue242-release-channels-perf.yml'
 
 permissions:
@@ -36,4 +36,4 @@ jobs:
       - name: Compile changed modules
         run: python -m py_compile apps/windows/release_selector.py apps/windows/update_page.py apps/windows/performance_monitor.py apps/windows/desktop_runtime.py
       - name: Validate release channels and performance monitor
-        run: python scripts/issue242_release_channels_perf_guard.py
+        run: python .github/ci/issue242_release_channels_perf_guard.py

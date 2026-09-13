@@ -6,7 +6,7 @@ on:
     paths:
       - 'apps/**'
       - 'core/**'
-      - 'scripts/**'
+      - '.github/ci/**'
       - '.agents/**'
       - 'packages/shared/**'
       - 'requirements.txt'
@@ -18,7 +18,7 @@ on:
     paths:
       - 'apps/**'
       - 'core/**'
-      - 'scripts/**'
+      - '.github/ci/**'
       - '.agents/**'
       - 'packages/shared/**'
       - 'requirements.txt'
@@ -40,53 +40,55 @@ jobs:
       - name: Install project dependencies
         run: python -m pip install -r requirements.txt
       - name: Compile Python sources
-        run: python -m compileall -q apps core scripts
+        run: python -m compileall -q apps core .github/ci
       - name: Validate production GUI dependency boundary
-        run: python scripts/production_gui_dependency_guard.py
+        run: python .github/ci/production_gui_dependency_guard.py
       - name: Validate explicit-only release policy
-        run: python scripts/issue138_release_policy_guard.py
+        run: python .github/ci/issue138_release_policy_guard.py
       - name: Validate release download guidance
-        run: python scripts/release_download_guidance_guard.py
+        run: python .github/ci/release_download_guidance_guard.py
       - name: Validate updater backup repository
-        run: python scripts/issue150_updater_backup_guard.py
+        run: python .github/ci/issue150_updater_backup_guard.py
       - name: Validate incremental updater
-        run: python scripts/issue155_incremental_update_guard.py
+        run: python .github/ci/issue155_incremental_update_guard.py
       - name: Validate command/update/runtime layout migration
-        run: python scripts/issue167_runtime_layout_guard.py
+        run: python .github/ci/issue167_runtime_layout_guard.py
       - name: Validate Docker foundation
-        run: python scripts/issue202_docker_guard.py
+        run: python .github/ci/issue202_docker_guard.py
       - name: Validate Docker build-context privacy
-        run: python scripts/issue204_docker_context_guard.py
+        run: python .github/ci/issue204_docker_context_guard.py
       - name: Validate Emil skills and UI polish
-        run: python scripts/issue171_ui_polish_guard.py
+        run: python .github/ci/issue171_ui_polish_guard.py
       - name: Validate update version selector and stable layout
-        run: python scripts/issue175_update_version_guard.py
+        run: python .github/ci/issue175_update_version_guard.py
       - name: Validate Web Portable updater
-        run: python scripts/issue179_web_updater_guard.py
+        run: python .github/ci/issue179_web_updater_guard.py
       - name: Smoke-test Web updater HTTP host
-        run: python scripts/issue179_web_updater_smoke.py
+        run: python .github/ci/issue179_web_updater_smoke.py
       - name: Validate Web/desktop issue 185 regressions
-        run: python scripts/issue185_regression_guard.py
+        run: python .github/ci/issue185_regression_guard.py
       - name: Validate fixed Windows control-panel size
-        run: python scripts/issue194_fixed_window_guard.py
+        run: python .github/ci/issue194_fixed_window_guard.py
       - name: Validate compact Windows log toolbar
-        run: python scripts/issue196_log_toolbar_guard.py
+        run: python .github/ci/issue196_log_toolbar_guard.py
       - name: Validate stable Windows navigation geometry
-        run: python scripts/issue209_nav_stability_guard.py
+        run: python .github/ci/issue209_nav_stability_guard.py
       - name: Validate Tk/ttk desktop rollback
-        run: python scripts/issue217_customtkinter_guard.py
+        run: python .github/ci/issue217_customtkinter_guard.py
       - name: Validate issue 213 updater/theme/version regressions
-        run: python scripts/issue213_regression_guard.py
+        run: python .github/ci/issue213_regression_guard.py
       - name: Validate backup content options
-        run: python scripts/issue246_backup_options_guard.py
+        run: python .github/ci/issue246_backup_options_guard.py
       - name: Validate cross-platform gift compatibility
-        run: python scripts/issue248_gift_compatibility_guard.py
+        run: python .github/ci/issue248_gift_compatibility_guard.py
       - name: Validate language plugins and runtime translation
-        run: python scripts/issue250_language_plugin_guard.py
+        run: python .github/ci/issue250_language_plugin_guard.py
       - name: Validate bundled English and single-active language policy
-        run: python scripts/issue252_bundled_english_guard.py
+        run: python .github/ci/issue252_bundled_english_guard.py
       - name: Validate issue 260 five bug fixes
-        run: python scripts/issue260_five_bug_guard.py
+        run: python .github/ci/issue260_five_bug_guard.py
+      - name: Validate issue 262 bug fixes and scripts decoupling
+        run: python .github/ci/issue262_six_bug_and_scripts_guard.py
       - name: Validate Huya protocol framing
         run: python apps/server/huya_protocol_guard.py
       - name: Validate red TV chat parser
@@ -115,11 +117,11 @@ jobs:
           print('backend:', backend.__file__)
           PY
       - name: Validate API documentation coverage
-        run: python scripts/generate_api_docs.py --output /tmp/bilipdj-api
+        run: python .github/ci/generate_api_docs.py --output /tmp/bilipdj-api
       - name: Validate Web source build
         run: python apps/web/build.py
       - name: Validate stable Web scrollbar gutter
-        run: python scripts/issue148_scrollbar_jitter_guard.py
+        run: python .github/ci/issue148_scrollbar_jitter_guard.py
       - name: Validate key generated Web files
         run: |
           test -f apps/web/dist/index.html

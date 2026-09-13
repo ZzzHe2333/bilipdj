@@ -23,6 +23,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from apps.versioning import same_release_version
+
 WEB_PACKAGE_KEY = "web-portable-x64"
 MAX_ARCHIVE_MEMBERS = 20_000
 MAX_ARCHIVE_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
@@ -490,7 +492,7 @@ def _load_file_manifest(path: Path, request: dict[str, Any], pack_size: int) -> 
         raise WebUpdaterError("逐文件清单缺少 incremental 信息")
     base = str(incremental.get("base_version", "") or "").strip()
     current = str(request.get("current_version", "") or "").strip()
-    if not base or _version_key(base) != _version_key(current):
+    if not base or not same_release_version(base, current):
         raise WebUpdaterError(f"增量包基于 v{base or '?'}，当前为 v{current or '?'}；请使用全量更新")
 
     files: dict[str, dict[str, Any]] = {}
