@@ -147,8 +147,10 @@ def install_backup_scope_guard(backup_module: Any, server_module: Any) -> bool:
         def restore_settings_zip(self: Any, data: bytes, *, httpd: Any | None = None) -> list[str]:
             from . import settings_mtime_guard
 
-            archive_mtimes = settings_mtime_guard._zip_entry_mtimes(data, tuple(archive_names))
+            # Keep the existing validator/restore chain authoritative for malformed
+            # or incompatible ZIPs, then apply mtimes to newly supported archive files.
             restored = list(original_restore(self, data, httpd=httpd))
+            archive_mtimes = settings_mtime_guard._zip_entry_mtimes(data, tuple(archive_names))
             paths = self.settings_paths()
             for name in restored:
                 mtime = archive_mtimes.get(name)
