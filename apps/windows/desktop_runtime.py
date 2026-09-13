@@ -14,6 +14,7 @@ from .gui_stability import patch_control_panel_issue185
 from .huya_control_guard import patch_control_panel_huya
 from .log_toolbar import patch_control_panel_issue196
 from .navigation_layout import patch_control_panel_issue209
+from .performance_monitor import install_performance_monitor
 from .platform_features import install_platform_features
 from .portable_autostart import patch_control_panel_portable_autostart
 from .purple_mouse_control_guard import patch_control_panel_purple_mouse
@@ -63,10 +64,6 @@ def _install_core_runtime(panel_class: type[Any]) -> None:
     install_update_channel_guard()
     install_release_selector()
 
-    # Keep the original ControlPanelApp Tk/ttk shell.  Do not install the
-    # CustomTkinter _build_ui replacement here: the customer-facing executable
-    # now intentionally uses the same Tk foundation that was stable before the
-    # CTk migration.
     patch_control_panel_class(panel_class)
     patch_control_panel_features(panel_class)
     patch_control_panel_about(panel_class)
@@ -88,11 +85,11 @@ def _install_platform_runtime(panel_class: type[Any]) -> None:
 def _install_tk_page_runtime(panel_class: type[Any]) -> None:
     """Install the latest page features on top of the native ttk builders."""
 
-    # windows_ui is itself a Tk/ttk implementation.  Before the component/CTk
-    # migration it owned the enhanced settings, permission and performance
-    # pages, including the plugin manager.  Re-enable it explicitly so the UI
-    # rollback does not discard recent functionality.
     patch_control_panel_issue180(panel_class)
+    # Performance monitor intentionally installs after issue180 so it can own
+    # the performance page and prevent background CPU/system-memory polling
+    # unless the user explicitly turns it on.
+    install_performance_monitor(panel_class)
     patch_control_panel_issue196(panel_class)
     patch_control_panel_command_console(panel_class)
 
