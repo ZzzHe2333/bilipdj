@@ -81,6 +81,8 @@ jobs:
         run: python scripts/issue246_backup_options_guard.py
       - name: Validate cross-platform gift compatibility
         run: python scripts/issue248_gift_compatibility_guard.py
+      - name: Validate language plugins and runtime translation
+        run: python scripts/issue250_language_plugin_guard.py
       - name: Validate Huya protocol framing
         run: python apps/server/huya_protocol_guard.py
       - name: Validate red TV chat parser
@@ -123,4 +125,5 @@ jobs:
           test -f apps/web/dist/issue167_control_extensions.js
           test -f apps/web/dist/web_updater_control.js
           test -f apps/web/dist/web_updater_control.css
+          test -f apps/web/dist/i18n.js
           grep -q 'issue167_control_extensions.js' apps/web/dist/control.html
