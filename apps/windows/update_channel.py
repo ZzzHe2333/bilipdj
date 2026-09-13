@@ -8,13 +8,43 @@ from typing import Any
 
 RELEASES_API = "https://api.github.com/repos/ZzzHe2333/bilipdj/releases?per_page=30"
 
+# Same numeric version: deprecated < internal < experimental < public beta < stable.
+# These are product release channels, so their precedence must not depend on the
+# lexical spelling of suffixes such as "test" and "gc".
+_PROJECT_PRERELEASE_RANKS = {
+    "feiqi": 0,
+    "loss": 0,
+    "text": 10,
+    "t": 10,
+    "dev": 10,
+    "test": 10,  # compatibility alias for already-published internal builds
+    "cx": 20,
+    "c": 20,
+    "gc": 30,
+    "g": 30,
+}
+_PROJECT_PRERELEASE_CANONICAL = {
+    "feiqi": "deprecated",
+    "loss": "deprecated",
+    "text": "internal",
+    "t": "internal",
+    "dev": "internal",
+    "test": "internal",
+    "cx": "experimental",
+    "c": "experimental",
+    "gc": "public-beta",
+    "g": "public-beta",
+}
+
 
 def version_key(value: str) -> tuple[tuple[int, ...], int, tuple[tuple[int, int, str], ...]]:
-    """Return a comparable SemVer-like key that preserves prerelease identity.
+    """Return a comparable version key with explicit BiliPDJ channel precedence.
 
-    Stable releases sort after prereleases with the same numeric core. Numeric
-    prerelease identifiers sort before textual identifiers, matching SemVer.
-    Build metadata is intentionally ignored for precedence.
+    Stable releases sort after prereleases with the same numeric core. Known
+    BiliPDJ channel suffixes use project-defined precedence instead of lexical
+    SemVer text ordering, so e.g. ``3.0.12-test < 3.0.12-gc < 3.0.12``.
+    Unknown prerelease identifiers retain normal SemVer-like ordering. Build
+    metadata is intentionally ignored for precedence.
     """
 
     text = str(value or "").strip()
@@ -31,6 +61,10 @@ def version_key(value: str) -> tuple[tuple[int, ...], int, tuple[tuple[int, int,
     core = core + (0,) * max(0, 3 - len(core))
     if not prerelease:
         return core, 1, ()
+
+    known = prerelease.casefold()
+    if known in _PROJECT_PRERELEASE_RANKS:
+        return core, 0, ((2, _PROJECT_PRERELEASE_RANKS[known], _PROJECT_PRERELEASE_CANONICAL[known]),)
 
     tokens: list[tuple[int, int, str]] = []
     for raw in prerelease.split("."):
