@@ -15,12 +15,14 @@ from .gui_log_sink import patch_control_panel_logging
 from .gui_stability import patch_control_panel_issue185
 from .huya_control_guard import patch_control_panel_huya
 from .language_ui import install_language_ui
+from .legacy_backup_ui import install_backup_cleanup_ui
 from .log_toolbar import patch_control_panel_issue196
 from .navigation_layout import patch_control_panel_issue209
 from .performance_monitor import install_performance_monitor
 from .platform_features import install_platform_features
 from .portable_autostart import patch_control_panel_portable_autostart
 from .purple_mouse_control_guard import patch_control_panel_purple_mouse
+from .queue_clear_dialog import install_queue_clear_dialog
 from .redtv_control_guard import patch_control_panel_redtv
 from .release_selector import install_release_selector
 from .style_save_transport import install_style_save_transport
@@ -66,8 +68,11 @@ def _install_core_runtime(panel_class: type[Any]) -> None:
     install_style_save_transport()
     install_update_channel_guard()
     install_release_selector()
+    # Install before issue180 captures/finalizes the update-page builder.
+    install_backup_cleanup_ui()
 
     patch_control_panel_class(panel_class)
+    install_queue_clear_dialog(panel_class)
     patch_control_panel_features(panel_class)
     patch_control_panel_about(panel_class)
     patch_control_panel_portable_autostart(panel_class)
