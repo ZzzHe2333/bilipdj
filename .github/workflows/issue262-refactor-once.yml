@@ -19,6 +19,23 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Prepare refactor helper
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('.github/issue262_refactor.py')
+          text = p.read_text(encoding='utf-8')
+          old = '        if not path.is_file() or ".git" in path.parts or ".agents" in path.parts:\n            continue\n'
+          new = '        if not path.is_file() or ".git" in path.parts or ".agents" in path.parts or (".github" in path.parts and "workflows" in path.parts):\n            continue\n'
+          if old not in text:
+              raise SystemExit('walk guard anchor missing')
+          text = text.replace(old, new, 1)
+          start = text.index('    quality_path = ".github/workflows/quality.yml"')
+          end = text.index('    # Shared, production release-channel/version semantics.')
+          text = text[:start] + text[end:]
+          text = text.replace('    (ROOT / ".github/workflows/issue262-refactor-once.yml").unlink(missing_ok=True)\n', '')
+          p.write_text(text, encoding='utf-8')
+          PY
       - name: Apply refactor
         run: python .github/issue262_refactor.py
       - name: Commit refactor
