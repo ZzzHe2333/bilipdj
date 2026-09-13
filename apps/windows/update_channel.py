@@ -8,78 +8,7 @@ from typing import Any
 
 RELEASES_API = "https://api.github.com/repos/ZzzHe2333/bilipdj/releases?per_page=30"
 
-# Same numeric version: deprecated < internal < experimental < public beta < stable.
-# These are product release channels, so their precedence must not depend on the
-# lexical spelling of suffixes such as "test" and "gc".
-_PROJECT_PRERELEASE_RANKS = {
-    "feiqi": 0,
-    "loss": 0,
-    "text": 10,
-    "t": 10,
-    "dev": 10,
-    "test": 10,  # compatibility alias for already-published internal builds
-    "cx": 20,
-    "c": 20,
-    "gc": 30,
-    "g": 30,
-}
-_PROJECT_PRERELEASE_CANONICAL = {
-    "feiqi": "deprecated",
-    "loss": "deprecated",
-    "text": "internal",
-    "t": "internal",
-    "dev": "internal",
-    "test": "internal",
-    "cx": "experimental",
-    "c": "experimental",
-    "gc": "public-beta",
-    "g": "public-beta",
-}
-
-
-def version_key(value: str) -> tuple[tuple[int, ...], int, tuple[tuple[int, int, str], ...]]:
-    """Return a comparable version key with explicit BiliPDJ channel precedence.
-
-    Stable releases sort after prereleases with the same numeric core. Known
-    BiliPDJ channel suffixes use project-defined precedence instead of lexical
-    SemVer text ordering, so e.g. ``3.0.12-test < 3.0.12-gc < 3.0.12``.
-    Unknown prerelease identifiers retain normal SemVer-like ordering. Build
-    metadata is intentionally ignored for precedence.
-    """
-
-    text = str(value or "").strip()
-    if text.lower().startswith("v"):
-        text = text[1:]
-    text = text.split("+", 1)[0]
-    if "-" in text:
-        core_text, prerelease = text.split("-", 1)
-    else:
-        core_text, prerelease = text, ""
-    if not re.fullmatch(r"\d+(?:\.\d+)*", core_text):
-        raise ValueError(f"无法识别版本号：{value}")
-    core = tuple(int(piece) for piece in core_text.split("."))
-    core = core + (0,) * max(0, 3 - len(core))
-    if not prerelease:
-        return core, 1, ()
-
-    known = prerelease.casefold()
-    if known in _PROJECT_PRERELEASE_RANKS:
-        return core, 0, ((2, _PROJECT_PRERELEASE_RANKS[known], _PROJECT_PRERELEASE_CANONICAL[known]),)
-
-    tokens: list[tuple[int, int, str]] = []
-    for raw in prerelease.split("."):
-        token = raw.strip()
-        if not token or not re.fullmatch(r"[0-9A-Za-z-]+", token):
-            raise ValueError(f"无法识别版本号：{value}")
-        if token.isdigit():
-            tokens.append((0, int(token), ""))
-        else:
-            tokens.append((1, 0, token.casefold()))
-    return core, 0, tuple(tokens)
-
-
-def is_prerelease_version(value: str) -> bool:
-    return version_key(value)[1] == 0
+from apps.versioning import is_prerelease_version, version_key
 
 
 def _installed_version() -> str:

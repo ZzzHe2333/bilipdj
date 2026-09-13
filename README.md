@@ -82,7 +82,7 @@ bilipdj/
 ├─ packages/shared/           # 前端/第三方客户端共享契约
 ├─ core/                      # 旧兼容层、兼容运行数据 + 项目文档中心
 │  └─ appearance.json         # 源码模式默认通用主题配置
-├─ scripts/                   # 必要构建、API 文档与安全检查脚本
+├─ .github/ci/                   # 必要构建、API 文档与安全检查脚本
 └─ .github/workflows/
 ```
 
@@ -240,7 +240,7 @@ flowchart LR
 想接第三方客户端，从 [packages/shared/api-contract.md](./packages/shared/api-contract.md) 开始看。完整开发参考可以本地生成：
 
 ```bash
-python scripts/generate_api_docs.py
+python .github/ci/generate_api_docs.py
 ```
 
 会生成到本地 `api/` 目录（该目录默认忽略，不提交仓库）。

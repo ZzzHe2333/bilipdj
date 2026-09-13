@@ -5,6 +5,8 @@ import threading
 import time
 from typing import Any
 
+from apps.versioning import version_key as _shared_version_key
+
 from apps.server import issue185_runtime_guard, update_estimate_api, web_control_guard, web_update_api
 
 _PATCH_LOCK = threading.RLock()
@@ -19,25 +21,8 @@ def _release_version(payload: dict[str, Any]) -> str:
     return tag[1:] if tag.lower().startswith("v") else tag
 
 
-def _version_key(value: str) -> tuple[tuple[int, ...], int, tuple[tuple[int, int, str], ...]]:
-    text = str(value or "").strip().lstrip("vV").split("+", 1)[0]
-    if "-" in text:
-        core_text, prerelease = text.split("-", 1)
-    else:
-        core_text, prerelease = text, ""
-    if not re.fullmatch(r"\d+(?:\.\d+)*", core_text):
-        raise ValueError(value)
-    core = tuple(int(part) for part in core_text.split("."))
-    core = core + (0,) * max(0, 3 - len(core))
-    if not prerelease:
-        return core, 1, ()
-    tokens: list[tuple[int, int, str]] = []
-    for raw in prerelease.split("."):
-        token = raw.strip()
-        if not token or not re.fullmatch(r"[0-9A-Za-z-]+", token):
-            raise ValueError(value)
-        tokens.append((0, int(token), "") if token.isdigit() else (1, 0, token.casefold()))
-    return core, 0, tuple(tokens)
+def _version_key(value: str):
+    return _shared_version_key(value)
 
 
 def _latest(releases: list[dict[str, Any]], *, prerelease: bool) -> dict[str, Any] | None:

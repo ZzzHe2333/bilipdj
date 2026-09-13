@@ -50,7 +50,7 @@ apps/windows/bilipdj_onedir_mac.spec
 apps/windows/paiduijitm_mac.spec
 ```
 
-GitHub Actions 的 macOS 工作流直接调用该脚本，不再经过根目录或 `scripts/` 中的架构包装脚本。
+GitHub Actions 的 macOS 工作流直接调用该脚本，不再经过根目录或 `.github/ci/` 中的架构包装脚本。
 
 ## 兼容层
 

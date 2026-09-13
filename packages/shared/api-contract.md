@@ -81,7 +81,7 @@ Content-Type: application/json
 更完整的 HTTP / WebSocket 开发参考由：
 
 ```bash
-python scripts/generate_api_docs.py
+python .github/ci/generate_api_docs.py
 ```
 
 生成到本地 `api/` 目录。

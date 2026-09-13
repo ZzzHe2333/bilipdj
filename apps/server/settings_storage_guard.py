@@ -382,8 +382,10 @@ def install_settings_storage_guard(backup_module: Any, server_module: Any | None
                     with getattr(backup_module, "_PATCH_LOCK", _PATCH_LOCK):
                         if bool(getattr(backup_module, "_EXIT_BACKUP_DONE", False)):
                             return
-                        backup_module._EXIT_BACKUP_DONE = True
                 service.backup_now()
+                if reason == "exit":
+                    with getattr(backup_module, "_PATCH_LOCK", _PATCH_LOCK):
+                        backup_module._EXIT_BACKUP_DONE = True
             except Exception as exc:  # noqa: BLE001
                 try:
                     print(f"[bilipdj-backup] {reason} backup skipped: {exc}")

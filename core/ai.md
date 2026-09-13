@@ -18,7 +18,7 @@ apps/windows/     Tk 桌面前端、Overlay、Updater 与桌面打包配置
 apps/web/         Web 前端唯一源码与 Web Portable 启动器
 packages/shared/  HTTP / WebSocket 共享契约
 core/             旧导入兼容层 + 兼容运行数据位置 + 项目文档
-scripts/          API 文档生成、安全扫描等仍在使用的维护脚本
+.github/ci/          API 文档生成、安全扫描等仍在使用的维护脚本
 ```
 
 ### 强制边界
@@ -131,7 +131,7 @@ apps/windows/bilipdj_onedir_mac.spec
 apps/windows/paiduijitm_mac.spec
 ```
 
-不要重新创建 `package-macos-local.sh`、`scripts/package-arm64.sh`、`scripts/package-amd64.sh` 等纯包装入口。
+不要重新创建 `package-macos-local.sh`、`.github/ci/package-arm64.sh`、`.github/ci/package-amd64.sh` 等纯包装入口。
 
 ## Web
 
@@ -174,7 +174,7 @@ packages/shared/api-contract.md
 本地生成完整参考：
 
 ```bash
-python scripts/generate_api_docs.py
+python .github/ci/generate_api_docs.py
 ```
 
 默认本地 Server：
@@ -222,8 +222,8 @@ GitHub 远端不跟踪 `tests/`。`.gitignore` 保留 `tests/` 作为本地开�
 当前只保留并维护有明确用途的脚本：
 
 ```text
-scripts/generate_api_docs.py
-scripts/scan_secrets.py
+.github/ci/generate_api_docs.py
+.github/ci/scan_secrets.py
 ```
 
 删除脚本前必须先检查 `.github/workflows/`、README 和代码引用。

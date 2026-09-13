@@ -25,6 +25,8 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import urlparse
 
+from apps.versioning import version_key as _shared_version_key
+
 from . import danmu_plugins as _plugin_core
 from .danmu_event import DanmuEvent
 from .danmu_plugins import PLUGIN_API_VERSION, PLUGIN_TYPE, DanmuPlugin, DanmuPluginRegistry
@@ -117,13 +119,11 @@ def _read_version(server_module: Any) -> str:
     return "0.0.0"
 
 
-def _version_key(value: str) -> tuple[int, int, int, int, str]:
-    match = _VERSION_RE.fullmatch(str(value or "").strip())
-    if not match:
-        raise PluginError(f"invalid version: {value}")
-    major, minor, patch = (int(match.group(i) or 0) for i in (1, 2, 3))
-    suffix = str(match.group(4) or "")
-    return major, minor, patch, 1 if not suffix else 0, suffix
+def _version_key(value: str):
+    try:
+        return _shared_version_key(value)
+    except ValueError as exc:
+        raise PluginError(f"invalid version: {value}") from exc
 
 
 def _canonical_manifest(manifest: dict[str, Any]) -> bytes:

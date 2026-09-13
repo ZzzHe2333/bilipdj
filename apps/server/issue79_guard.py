@@ -82,16 +82,34 @@ class MultiPlatformRelayManager:
         with self._lock:
             if self._started:
                 return
-            self._started = True
-            for platform in self.active_platforms:
-                proxy = _RelayServerProxy(self.server, platform)
-                relay = self.server_module._create_danmu_relay(proxy)
-                self._proxies[platform] = proxy
-                self._relays[platform] = relay
-                relay.start()
-                self.server.logger.info("Danmu relay started platform=%s (multi-platform)", platform)
-            if not self.active_platforms:
-                self.server.logger.info("All danmu relays are disabled by active_platforms")
+            started: list[Any] = []
+            try:
+                for platform in self.active_platforms:
+                    proxy = _RelayServerProxy(self.server, platform)
+                    relay = self.server_module._create_danmu_relay(proxy)
+                    self._proxies[platform] = proxy
+                    self._relays[platform] = relay
+                    started.append(relay)
+                    relay.start()
+                    self.server.logger.info("Danmu relay started platform=%s (multi-platform)", platform)
+                if not self.active_platforms:
+                    self.server.logger.info("All danmu relays are disabled by active_platforms")
+                self._started = True
+            except Exception:
+                for relay in reversed(started):
+                    try:
+                        relay.stop()
+                    except Exception:  # noqa: BLE001
+                        pass
+                for relay in reversed(started):
+                    try:
+                        relay.join(timeout=2.0)
+                    except Exception:  # noqa: BLE001
+                        pass
+                self._relays.clear()
+                self._proxies.clear()
+                self._started = False
+                raise
 
     def stop(self) -> None:
         with self._lock:
