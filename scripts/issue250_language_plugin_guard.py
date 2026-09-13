@@ -25,16 +25,16 @@ def main() -> None:
     digest = hashlib.sha256(translations_bytes).hexdigest()
     manifest = {
         "schema": 1,
-        "id": "example.en-us.language",
-        "name": "English UI language pack",
+        "id": "example.ja-jp.language",
+        "name": "Japanese UI language pack",
         "version": "1.0.0",
         "plugin_api": 1,
         "type": "language",
         "platform": "language",
         "runtime": "resource",
         "entry": "translations.json",
-        "language": "en-US",
-        "language_name": "English",
+        "language": "ja-JP",
+        "language_name": "日本語",
         "translations": "translations.json",
         "min_bilipdj_version": "0.0.0",
         "permissions": [],
@@ -45,7 +45,7 @@ def main() -> None:
     normalized = pm.validate_manifest(manifest, "99.0.0")
     assert normalized["type"] == "language"
     assert normalized["runtime"] == "resource"
-    assert normalized["language"] == "en-US"
+    assert normalized["language"] == "ja-JP"
 
     invalid = dict(manifest)
     invalid["permissions"] = ["network"]
@@ -57,7 +57,7 @@ def main() -> None:
         raise AssertionError("language resource plugins must not request executable permissions")
 
     invalid_code = dict(manifest)
-    invalid_code["language"] = "en-us"
+    invalid_code["language"] = "ja-jp"
     try:
         pm.validate_manifest(invalid_code, "99.0.0")
     except pm.PluginError:
@@ -71,28 +71,48 @@ def main() -> None:
         plugin_root.mkdir()
         (plugin_root / "translations.json").write_bytes(translations_bytes)
         record = SimpleNamespace(
-            plugin_id="example.en-us.language",
+            plugin_id="example.ja-jp.language",
             root=plugin_root,
             manifest=manifest,
-            enabled=True,
+            enabled=False,
             verified=True,
             error="",
-            name="English UI language pack",
+            name="Japanese UI language pack",
         )
-        manager = SimpleNamespace(_lock=threading.RLock(), _records={record.plugin_id: record})
-        server = SimpleNamespace(_YAML_DIR=root)
+
+        class FakeManager:
+            def __init__(self) -> None:
+                self._lock = threading.RLock()
+                self._records = {record.plugin_id: record}
+                self._state_data = {record.plugin_id: False}
+
+            def _state(self):
+                return dict(self._state_data)
+
+            def _save_state(self, state):
+                self._state_data = dict(state)
+
+            def discover(self):
+                record.enabled = bool(self._state_data.get(record.plugin_id, False))
+                return []
+
+        manager = FakeManager()
+        server = SimpleNamespace(_YAML_DIR=root, UI_DIR=ROOT / "apps/web/static")
         service = language_plugins.LanguageService(server, manager)
         languages = service.list_languages()
-        assert [item["code"] for item in languages] == ["zh-CN", "en-US"]
+        codes = [item["code"] for item in languages]
+        assert "zh-CN" in codes
+        assert "ja-JP" in codes
         assert service.active_language() == "zh-CN"
-        assert service.set_active("en-US") == "en-US"
-        assert service.active_language() == "en-US"
+        assert service.set_active("ja-JP") == "ja-JP"
+        assert service.active_language() == "ja-JP"
         mapping = service.translations()
         assert mapping["运行日志"] == "Runtime Logs"
         assert mapping["设置"] == "Settings"
         payload = service.payload()
-        assert payload["active"] == "en-US"
+        assert payload["active"] == "ja-JP"
         assert payload["translations"]["刷新"] == "Refresh"
+        assert sum(1 for item in payload["languages"] if item.get("enabled")) == 1
 
     backend_source = (ROOT / "apps/server/language_plugins.py").read_text(encoding="utf-8")
     assert 'LANGUAGE_PLUGIN_TYPE = "language"' in backend_source

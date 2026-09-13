@@ -95,7 +95,7 @@ def configure_runtime_paths(module: Any = server) -> Any:
     module.LOG_DIR = (data_dir if external_data_dir else app_dir) / "log"
     module.PD_DIR = runtime_core_dir / "cd"
     module.QUEUE_STATE_PATH = module.PD_DIR / "queue_archive_state.json"
-    module.BLACKLIST_PATH = module.PD_DIR / "blacklist.csv"
+    module.BLACKLIST_PATH = runtime_core_dir / "blacklist.csv"
     module.QUANXIAN_PATH = runtime_core_dir / "quanxian.yaml"
     module.KAIGUAN_PATH = runtime_core_dir / "kaiguan.yaml"
     module.STYLE_PATH = misc_config_dir / "style.json"
@@ -177,6 +177,9 @@ _plugin_config_schema.install_plugin_config_schema(server, _plugin_manager, _plu
 _plugin_mutation_guard.install_plugin_mutation_guard(_plugin_manager)
 _plugin_config_web.install_plugin_config_web(server, _plugin_manager)
 _language_plugins.install_language_plugin_system(server, _plugin_manager, _settings_backup)
+# The language layer replaces set_enabled to enforce single-active semantics;
+# re-run the idempotent mutation guard so that final method remains serialized.
+_plugin_mutation_guard.install_plugin_mutation_guard(_plugin_manager)
 
 _appearance_guard.install_appearance_guard(server)
 _issue123_guard.install_issue123_guard(

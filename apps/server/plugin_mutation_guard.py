@@ -29,10 +29,13 @@ def _locked_method(original: Callable[..., Any], method_name: str) -> Callable[.
 
 
 def install_plugin_mutation_guard(plugin_manager_module: Any) -> bool:
-    """Ensure every read-modify-write PluginManager operation uses one RLock."""
+    """Ensure every current read-modify-write PluginManager operation uses one RLock.
+
+    The installer is intentionally re-runnable: later feature layers may replace a
+    mutation method (for example language single-selection). Re-running this guard
+    wraps only methods that are not already protected.
+    """
     with _PATCH_LOCK:
-        if bool(getattr(plugin_manager_module, "_plugin_mutation_guard_installed", False)):
-            return True
         manager_class = plugin_manager_module.PluginManager
         for method_name in _MUTATING_METHODS:
             original = getattr(manager_class, method_name)

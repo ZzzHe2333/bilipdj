@@ -14,6 +14,13 @@ LANGUAGE_PLUGIN_TYPE = "language"
 LANGUAGE_RUNTIME = "resource"
 DEFAULT_LANGUAGE = "zh-CN"
 LANGUAGE_CONFIG_NAME = "language.json"
+BUNDLED_LANGUAGES: dict[str, dict[str, str]] = {
+    "en-US": {
+        "name": "English",
+        "plugin_id": "builtin.en-us.language",
+        "resource": "languages/en-US.json",
+    },
+}
 MAX_TRANSLATIONS = 8000
 MAX_TRANSLATION_KEY = 500
 MAX_TRANSLATION_VALUE = 4000
@@ -44,6 +51,39 @@ def _load_translation_mapping(path: Path) -> dict[str, str]:
             raise LanguagePluginError("语言包包含空 key 或过长文本")
         result[key] = value
     return result
+
+
+def _language_config_path(server_module: Any) -> Path:
+    base = getattr(server_module, "_YAML_DIR", None)
+    if base is None:
+        base = getattr(server_module, "APP_DIR", None)
+    if base is None:
+        base = getattr(server_module, "REPO_DIR", ".")
+    return Path(base) / LANGUAGE_CONFIG_NAME
+
+
+def _read_selected_language(server_module: Any) -> str:
+    path = _language_config_path(server_module)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return DEFAULT_LANGUAGE
+    value = str(raw.get("language", DEFAULT_LANGUAGE) or DEFAULT_LANGUAGE) if isinstance(raw, dict) else DEFAULT_LANGUAGE
+    return value if value == DEFAULT_LANGUAGE or _LANGUAGE_RE.fullmatch(value) else DEFAULT_LANGUAGE
+
+
+def _bundled_language_path(server_module: Any, language: str) -> Path | None:
+    spec = BUNDLED_LANGUAGES.get(str(language or ""))
+    if not isinstance(spec, dict):
+        return None
+    resource = str(spec.get("resource", "") or "")
+    if not resource:
+        return None
+    ui_dir = getattr(server_module, "UI_DIR", None)
+    if ui_dir is None:
+        repo_dir = Path(getattr(server_module, "REPO_DIR", "."))
+        ui_dir = repo_dir / "apps" / "web" / "static"
+    return Path(ui_dir) / Path(resource)
 
 
 def _validate_language_manifest(pm: Any, manifest: Any, current_version: str) -> dict[str, Any]:
@@ -91,8 +131,9 @@ def _validate_language_manifest(pm: Any, manifest: Any, current_version: str) ->
         raise pm.PluginError(f"plugin requires BiliPDJ <= {max_version}; current {current_version}")
 
     language = str(manifest.get("language", "") or "")
-    if not _LANGUAGE_RE.fullmatch(language) or language == DEFAULT_LANGUAGE:
-        raise pm.PluginError("language must be a canonical BCP-47 code other than zh-CN")
+    reserved_languages = {DEFAULT_LANGUAGE, *BUNDLED_LANGUAGES.keys()}
+    if not _LANGUAGE_RE.fullmatch(language) or language in reserved_languages:
+        raise pm.PluginError("language must be a canonical BCP-47 code not reserved by a bundled language")
     if not str(manifest.get("language_name", "") or "").strip():
         raise pm.PluginError("language_name is required")
 
@@ -137,15 +178,10 @@ class LanguageService:
 
     @property
     def config_path(self) -> Path:
-        return Path(getattr(self.server, "_YAML_DIR")) / LANGUAGE_CONFIG_NAME
+        return _language_config_path(self.server)
 
     def _read_selected(self) -> str:
-        try:
-            raw = json.loads(self.config_path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-            return DEFAULT_LANGUAGE
-        value = str(raw.get("language", DEFAULT_LANGUAGE) or DEFAULT_LANGUAGE) if isinstance(raw, dict) else DEFAULT_LANGUAGE
-        return value if value == DEFAULT_LANGUAGE or _LANGUAGE_RE.fullmatch(value) else DEFAULT_LANGUAGE
+        return _read_selected_language(self.server)
 
     def _write_selected(self, language: str) -> None:
         path = self.config_path
@@ -154,21 +190,30 @@ class LanguageService:
         temp.write_text(json.dumps({"schema": 1, "language": language}, ensure_ascii=False, indent=2), encoding="utf-8")
         os.replace(temp, path)
 
-    def _language_records(self) -> list[Any]:
-        records = []
+    def _language_records(self, *, enabled_only: bool = False) -> list[Any]:
+        records: list[Any] = []
         with getattr(self.manager, "_lock"):
             values = list(getattr(self.manager, "_records", {}).values())
         for record in values:
             manifest = getattr(record, "manifest", {})
-            if (
-                isinstance(manifest, dict)
-                and str(manifest.get("type", "")) == LANGUAGE_PLUGIN_TYPE
-                and bool(getattr(record, "enabled", False))
-                and bool(getattr(record, "verified", False))
-                and not str(getattr(record, "error", "") or "")
-            ):
-                records.append(record)
+            if not isinstance(manifest, dict) or str(manifest.get("type", "")) != LANGUAGE_PLUGIN_TYPE:
+                continue
+            if not bool(getattr(record, "verified", False)) or str(getattr(record, "error", "") or ""):
+                continue
+            if enabled_only and not bool(getattr(record, "enabled", False)):
+                continue
+            records.append(record)
         return records
+
+    def _record_for_language(self, language: str, *, enabled_only: bool = False) -> Any | None:
+        for record in self._language_records(enabled_only=enabled_only):
+            if str(record.manifest.get("language", "")) == language:
+                return record
+        return None
+
+    def _bundled_available(self, language: str) -> bool:
+        path = _bundled_language_path(self.server, language)
+        return bool(path is not None and path.is_file())
 
     def list_languages(self) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = [{
@@ -177,41 +222,60 @@ class LanguageService:
             "plugin_id": "builtin.zh-cn.language",
             "source": "builtin",
         }]
-        for record in sorted(self._language_records(), key=lambda item: str(item.manifest.get("language", ""))):
+        for code, spec in BUNDLED_LANGUAGES.items():
+            if not self._bundled_available(code):
+                continue
             rows.append({
-                "code": str(record.manifest.get("language", "")),
+                "code": code,
+                "name": str(spec.get("name", code) or code),
+                "plugin_id": str(spec.get("plugin_id", f"builtin.{code.lower()}.language")),
+                "source": "builtin",
+            })
+        seen = {str(item["code"]) for item in rows}
+        for record in sorted(self._language_records(), key=lambda item: str(item.manifest.get("language", ""))):
+            code = str(record.manifest.get("language", ""))
+            if not code or code in seen:
+                continue
+            seen.add(code)
+            rows.append({
+                "code": code,
                 "name": str(record.manifest.get("language_name", record.name) or record.name),
                 "plugin_id": record.plugin_id,
                 "source": "external",
             })
         return rows
 
-    def _record_for_language(self, language: str) -> Any | None:
-        for record in self._language_records():
-            if str(record.manifest.get("language", "")) == language:
-                return record
-        return None
-
     def active_language(self) -> str:
         selected = self._read_selected()
         if selected == DEFAULT_LANGUAGE:
-            return selected
-        return selected if self._record_for_language(selected) is not None else DEFAULT_LANGUAGE
+            return DEFAULT_LANGUAGE
+        if selected in BUNDLED_LANGUAGES:
+            return selected if self._bundled_available(selected) else DEFAULT_LANGUAGE
+        return selected if self._record_for_language(selected, enabled_only=True) is not None else DEFAULT_LANGUAGE
 
     def translations(self, language: str | None = None) -> dict[str, str]:
         selected = str(language or self.active_language())
         if selected == DEFAULT_LANGUAGE:
             return {}
-        record = self._record_for_language(selected)
-        if record is None:
+        plugin_id = ""
+        path: Path | None = None
+        if selected in BUNDLED_LANGUAGES:
+            spec = BUNDLED_LANGUAGES[selected]
+            plugin_id = str(spec.get("plugin_id", selected))
+            path = _bundled_language_path(self.server, selected)
+        else:
+            record = self._record_for_language(selected, enabled_only=True)
+            if record is not None:
+                plugin_id = record.plugin_id
+                relative = str(record.manifest.get("translations", "") or "")
+                path = record.root.joinpath(*PurePosixPath(relative).parts)
+        if path is None:
             return {}
-        relative = str(record.manifest.get("translations", "") or "")
-        path = record.root.joinpath(*PurePosixPath(relative).parts)
         try:
             stamp = int(path.stat().st_mtime_ns)
         except OSError as exc:
-            raise LanguagePluginError(f"语言包翻译文件不存在：{relative}") from exc
-        cache_key = (record.plugin_id, stamp)
+            raise LanguagePluginError(f"语言包翻译文件不存在：{selected}") from exc
+        cache_key = (plugin_id or selected, stamp)
         with self._lock:
             cached = self._translation_cache.get(cache_key)
             if cached is not None:
@@ -221,23 +285,120 @@ class LanguageService:
             self._translation_cache = {cache_key: dict(mapping)}
         return mapping
 
+    def _sync_external_language_state(self, language: str) -> None:
+        with getattr(self.manager, "_lock"):
+            state = self.manager._state()
+            changed = False
+            for record in list(getattr(self.manager, "_records", {}).values()):
+                manifest = getattr(record, "manifest", {})
+                if not isinstance(manifest, dict) or str(manifest.get("type", "")) != LANGUAGE_PLUGIN_TYPE:
+                    continue
+                desired = (
+                    bool(getattr(record, "verified", False))
+                    and not str(getattr(record, "error", "") or "")
+                    and str(manifest.get("language", "")) == language
+                )
+                if bool(state.get(record.plugin_id, False)) != desired:
+                    state[record.plugin_id] = desired
+                    changed = True
+            if changed:
+                self.manager._save_state(state)
+            self.manager.discover()
+
     def set_active(self, language: str) -> str:
         value = str(language or "").strip()
-        allowed = {item["code"] for item in self.list_languages()}
+        allowed = {str(item["code"]) for item in self.list_languages()}
         if value not in allowed:
-            raise LanguagePluginError("该语言未安装、未启用或语言包校验失败")
+            raise LanguagePluginError("该语言未安装、未打包或语言包校验失败")
+        previous = self.active_language()
         self._write_selected(value)
-        return value
+        try:
+            self._sync_external_language_state(value)
+            active = self.active_language()
+            if active != value:
+                raise LanguagePluginError("语言切换后未形成唯一活动语言")
+            return active
+        except Exception:
+            self._write_selected(previous)
+            try:
+                self._sync_external_language_state(previous)
+            except Exception:
+                pass
+            raise
+
+    def reconcile(self) -> str:
+        selected = self._read_selected()
+        active = self.active_language()
+        if selected != active:
+            self._write_selected(active)
+        self._sync_external_language_state(active)
+        return self.active_language()
 
     def payload(self) -> dict[str, Any]:
         active = self.active_language()
+        languages = []
+        for item in self.list_languages():
+            row = dict(item)
+            row["enabled"] = str(row.get("code", "")) == active
+            languages.append(row)
         return {
             "status": "ok",
             "default": DEFAULT_LANGUAGE,
             "active": active,
-            "languages": self.list_languages(),
+            "single_active": True,
+            "languages": languages,
             "translations": self.translations(active),
         }
+
+    def bundled_plugin_public_info(self) -> list[dict[str, Any]]:
+        active = self.active_language()
+        rows = [{
+            "id": "builtin.zh-cn.language",
+            "platform": "language",
+            "name": "简体中文",
+            "version": "builtin",
+            "plugin_api": 1,
+            "type": LANGUAGE_PLUGIN_TYPE,
+            "source": "builtin",
+            "enabled": active == DEFAULT_LANGUAGE,
+            "available": True,
+            "permissions": [],
+            "capabilities": ["ui_translation"],
+            "package_sha256": "",
+            "signature_status": "builtin",
+            "verified": True,
+            "error": "",
+            "runtime": LANGUAGE_RUNTIME,
+            "permission_enforcement": "resource-only",
+            "category": "language",
+            "language": DEFAULT_LANGUAGE,
+            "language_name": "简体中文",
+        }]
+        for code, spec in BUNDLED_LANGUAGES.items():
+            available = self._bundled_available(code)
+            rows.append({
+                "id": str(spec.get("plugin_id", f"builtin.{code.lower()}.language")),
+                "platform": "language",
+                "name": str(spec.get("name", code) or code),
+                "version": "builtin",
+                "plugin_api": 1,
+                "type": LANGUAGE_PLUGIN_TYPE,
+                "source": "builtin",
+                "enabled": bool(available and active == code),
+                "available": available,
+                "permissions": [],
+                "capabilities": ["ui_translation"],
+                "package_sha256": "",
+                "signature_status": "builtin",
+                "verified": available,
+                "error": "" if available else "bundled language resource is missing",
+                "runtime": LANGUAGE_RUNTIME,
+                "permission_enforcement": "resource-only",
+                "category": "language",
+                "language": code,
+                "language_name": str(spec.get("name", code) or code),
+            })
+        return rows
 
 
 def install_language_plugin_system(server_module: Any, pm: Any, backup_module: Any | None = None) -> bool:
@@ -250,6 +411,8 @@ def install_language_plugin_system(server_module: Any, pm: Any, backup_module: A
 
         original_validate = pm.validate_manifest
         original_public_info = pm.InstalledPluginRecord.public_info
+        original_set_enabled = pm.PluginManager.set_enabled
+        original_list_public = pm.PluginManager.list_public
 
         def validate_manifest(manifest: Any, current_version: str) -> dict[str, Any]:
             if isinstance(manifest, dict) and str(manifest.get("type", "") or "") == LANGUAGE_PLUGIN_TYPE:
@@ -272,8 +435,10 @@ def install_language_plugin_system(server_module: Any, pm: Any, backup_module: A
             with self._lock:
                 self._unregister_external()
                 state = self._state()
+                selected_language = _read_selected_language(self.server_module)
                 records: dict[str, Any] = {}
-                enabled_languages: dict[str, str] = {}
+                state_changed = False
+                seen_language_codes: dict[str, str] = {}
                 for root in sorted(self.plugins_root.iterdir()):
                     if not root.is_dir() or root.name.startswith(".") or root.name == "data":
                         continue
@@ -282,51 +447,70 @@ def install_language_plugin_system(server_module: Any, pm: Any, backup_module: A
                     if not manifest_path.is_file() or not meta_path.is_file():
                         continue
                     plugin_id = root.name
+                    raw_manifest: dict[str, Any] = {}
                     try:
-                        manifest = pm.validate_manifest(json.loads(manifest_path.read_text(encoding="utf-8")), self.current_version)
+                        loaded_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                        raw_manifest = loaded_manifest if isinstance(loaded_manifest, dict) else {}
+                        manifest = pm.validate_manifest(loaded_manifest, self.current_version)
                         if manifest["id"] != plugin_id:
                             raise pm.PluginError("installed directory does not match plugin id")
                         meta = json.loads(meta_path.read_text(encoding="utf-8"))
                         package_hash, signature_status = self._verify_installed(root, manifest, meta)
+                        plugin_type = str(manifest.get("type", "") or "")
+                        enabled = bool(state.get(plugin_id, False))
+                        if plugin_type == LANGUAGE_PLUGIN_TYPE:
+                            code = str(manifest.get("language", ""))
+                            previous_provider = seen_language_codes.get(code)
+                            if previous_provider is not None:
+                                raise pm.PluginError(f"language {code} already provided by {previous_provider}")
+                            seen_language_codes[code] = plugin_id
+                            enabled = selected_language == code
+                            if bool(state.get(plugin_id, False)) != enabled:
+                                state[plugin_id] = enabled
+                                state_changed = True
+                            if enabled:
+                                _load_translation_mapping(
+                                    root.joinpath(*PurePosixPath(str(manifest["translations"])).parts)
+                                )
                         record = pm.InstalledPluginRecord(
                             plugin_id=plugin_id,
                             root=root,
                             manifest=manifest,
-                            enabled=bool(state.get(plugin_id, False)),
+                            enabled=enabled,
                             package_sha256=package_hash,
                             signature_status=signature_status,
                             verified=True,
                         )
-                        plugin_type = str(manifest.get("type", "") or "")
-                        if record.enabled and plugin_type == LANGUAGE_PLUGIN_TYPE:
-                            code = str(manifest.get("language", ""))
-                            if code in enabled_languages:
-                                raise pm.PluginError(
-                                    f"language {code} already provided by {enabled_languages[code]}"
-                                )
-                            _load_translation_mapping(root.joinpath(*PurePosixPath(str(manifest["translations"])).parts))
-                            enabled_languages[code] = plugin_id
-                        elif record.enabled:
+                        if record.enabled and plugin_type != LANGUAGE_PLUGIN_TYPE:
                             existing = self.registry.get(record.platform)
                             if existing is not None:
                                 raise pm.PluginError(f"platform already registered by {existing.plugin_id}")
                             self.registry.register(self._load_external_plugin(record))
                     except Exception as exc:
-                        try:
-                            raw_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-                        except Exception:
+                        if str(raw_manifest.get("type", "") or "") == LANGUAGE_PLUGIN_TYPE and bool(state.get(plugin_id, False)):
+                            state[plugin_id] = False
+                            state_changed = True
+                        if not raw_manifest:
+                            try:
+                                fallback = json.loads(manifest_path.read_text(encoding="utf-8"))
+                                raw_manifest = fallback if isinstance(fallback, dict) else {}
+                            except Exception:
+                                raw_manifest = {}
+                        if not raw_manifest:
                             raw_manifest = {"id": plugin_id, "platform": "", "name": plugin_id, "version": ""}
                         record = pm.InstalledPluginRecord(
                             plugin_id=plugin_id,
                             root=root,
-                            manifest=raw_manifest if isinstance(raw_manifest, dict) else {"id": plugin_id},
-                            enabled=bool(state.get(plugin_id, False)),
+                            manifest=raw_manifest,
+                            enabled=False if str(raw_manifest.get("type", "")) == LANGUAGE_PLUGIN_TYPE else bool(state.get(plugin_id, False)),
                             package_sha256="",
                             signature_status="error",
                             verified=False,
                             error=str(exc),
                         )
                     records[plugin_id] = record
+                if state_changed:
+                    self._save_state(state)
                 self._records = records
                 pm._plugin_core._sync_legacy_platform_metadata(self.server_module, self.issue79_module, self.registry)
                 pm._plugin_core._install_registry_factory(self.server_module, self.registry)
@@ -343,6 +527,41 @@ def install_language_plugin_system(server_module: Any, pm: Any, backup_module: A
         service = LanguageService(server_module, manager)
         server_module.language_service = service
         server_module.LANGUAGE_SERVICE = service
+
+        def list_public(self: Any) -> list[dict[str, Any]]:
+            rows = list(original_list_public(self))
+            existing_ids = {str(item.get("id", "")) for item in rows if isinstance(item, dict)}
+            for item in service.bundled_plugin_public_info():
+                if str(item.get("id", "")) not in existing_ids:
+                    rows.append(item)
+            return rows
+
+        def set_enabled(self: Any, plugin_id: str, enabled: bool) -> dict[str, Any]:
+            key = str(plugin_id or "").strip().lower()
+            with self._lock:
+                record = self._records.get(key)
+                manifest = getattr(record, "manifest", {}) if record is not None else {}
+                if isinstance(manifest, dict) and str(manifest.get("type", "")) == LANGUAGE_PLUGIN_TYPE:
+                    code = str(manifest.get("language", "") or "")
+                    if enabled:
+                        service.set_active(code)
+                    elif service.active_language() == code:
+                        service.set_active(DEFAULT_LANGUAGE)
+                    else:
+                        state = self._state()
+                        if bool(state.get(key, False)):
+                            state[key] = False
+                            self._save_state(state)
+                            self.discover()
+                    refreshed = self._records.get(key)
+                    if refreshed is None:
+                        raise pm.PluginError("plugin disappeared during reload")
+                    return refreshed.public_info()
+            return original_set_enabled(self, plugin_id, enabled)
+
+        pm.PluginManager.list_public = list_public
+        pm.PluginManager.set_enabled = set_enabled
+        service.reconcile()
 
         handler_class = server_module.ApiHandler
         original_get = handler_class.do_GET
@@ -387,7 +606,7 @@ def install_language_plugin_system(server_module: Any, pm: Any, backup_module: A
 
                 def settings_paths(self: Any) -> dict[str, Path]:
                     paths = dict(original_paths(self))
-                    paths[LANGUAGE_CONFIG_NAME] = Path(getattr(self.server, "_YAML_DIR")) / LANGUAGE_CONFIG_NAME
+                    paths[LANGUAGE_CONFIG_NAME] = _language_config_path(self.server)
                     return paths
 
                 backup_service.settings_paths = settings_paths
@@ -398,6 +617,7 @@ def install_language_plugin_system(server_module: Any, pm: Any, backup_module: A
 
 
 __all__ = [
+    "BUNDLED_LANGUAGES",
     "DEFAULT_LANGUAGE",
     "LANGUAGE_PLUGIN_TYPE",
     "LanguagePluginError",
