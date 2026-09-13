@@ -1,66 +1,69 @@
-# 弹幕排队姬 v3.0.13-test
+# 弹幕排队姬 v3.0.14-test
 
-`v3.0.13-test` 是基于 `v3.0.12` 正式版继续验证的测试版本。本次主要用于验证当前 `now` 分支近期功能、更新链路与发布流程，不替代 `v3.0.12` 正式版。
+`v3.0.14-test` 是基于 `v3.0.12` 正式版继续验证的测试版本，包含 `v3.0.13-test` 之后的 Bug 修复、版本渠道逻辑统一以及 CI/测试脚本解耦调整。本版本用于验证当前 `now` 分支，不替代 `v3.0.12` 正式版。
 
-## 本次测试内容
+## 本次主要变化
 
-- 保持 Windows 原生 Tk/ttk 桌面端与现有 Web Portable 架构不变；
-- 继续验证备份范围控制：配置 / 存档 / 样式可独立选择，默认全部开启；
-- 继续验证跨平台礼物兼容层，可按平台、礼物 ID / 名称和价值处理礼物排队；
-- 继续验证 `language` 语言类插件，内置简体中文与 English（en-US），英语随包提供但默认不启用，语言保持严格单选；
-- 继续验证插件运行时、平台无关 `DanmuEvent`、Plugin Config Schema、Plugin HTTP Host API；
-- Windows / Web 更新器继续使用程序目录 `update/<会话>/` 进行下载、解压、增量 patch 与 rollback；
-- 更新前继续创建 `backup/` 快照，失败时继续执行恢复与旧版本重启尝试。
+- 修复保存普通配置后，运行中的管理员、舰长、黑名单权限被错误重置为默认值的问题；
+- 修复 Web 增量更新把同一数字版本下的 `test/gc/cx/stable` 不同渠道误认为同一基础版本的问题；
+- 统一项目发行渠道版本比较逻辑，Windows 更新器、插件兼容判断和 Web Release 选择器不再各自按后缀字符串排序；
+- 修复多平台 Relay 启动中途失败后残留 `_started=True`、无法正常重试的问题；
+- 修复退出自动备份首次失败后提前标记完成，导致后续退出回调无法再次尝试的问题；
+- 修复本地管理 API 同源校验旁路、Web 翻译误伤用户数据、礼物兼容规则冲突、语言插件卸载残留状态等问题；
+- 根目录 `scripts/` 已移除，测试、guard、probe 与构建辅助代码迁移至 `.github/ci/`，生产运行路径与测试代码彻底解耦；
+- 保持 Windows Tk/ttk、Web Portable、插件系统、语言系统、礼物兼容层、备份与更新恢复架构不变。
 
 ## 建议重点测试
 
-- Windows `main.exe` 是否稳定启动，后端能否正常自动启动和退出；
-- 设置、权限、性能、插件管理、日志与“后端指令”等页面是否正常；
-- 礼物兼容性窗口新增/修改不同平台礼物价值后，排队价值计算是否正确；
-- 默认启动是否仍为简体中文，切换 English 或第三方语言后是否始终只有一个活动语言；
-- 备份配置 / 存档 / 样式选择是否正确，三项全关时是否阻止备份；
-- 从已有测试版或正式版更新到 `v3.0.13-test` 时，全量与增量更新是否正常；
-- 更新失败后的 rollback 与数据保护是否正常。
+- Windows `main.exe`、`paiduijitm.exe`、`updater.exe` 是否正常启动；
+- Web Portable 的 `BiliPDJ-Web.exe` 与 `BiliPDJ-Web-Updater.exe` 是否正常；
+- 修改普通设置后管理员、舰长、黑名单运行态是否保持正确；
+- `3.0.13-test → 3.0.14-test` 的全量/增量更新、备份和 rollback 是否正常；
+- 不同预发布渠道版本是否能正确区分，不再跨渠道误用增量基础包；
+- 多平台 Relay 在单个平台启动失败后能否正确回滚并再次启动；
+- WebDAV/本地退出备份失败时，后续退出路径是否仍有重试机会；
+- 默认语言仍为简体中文，English（en-US）随包提供但默认不启用，第三方语言保持严格单选；
+- 删除根目录 `scripts/` 后，Windows/Web/Server 主运行路径和 Portable 打包不受影响。
 
 ## 直接下载
 
 测试用户只需要下载对应的完整便携版 ZIP：
 
-- **Windows 客户端**：`BiliPDJ-v3.0.13-test-Windows-Tk-Portable-x64.zip`
-- **Web 便携版**：`BiliPDJ-v3.0.13-test-Web-Portable-x64.zip`
+- **Windows 客户端**：`BiliPDJ-v3.0.14-test-Windows-Tk-Portable-x64.zip`
+- **Web 便携版**：`BiliPDJ-v3.0.14-test-Web-Portable-x64.zip`
 
 发布地址：
 
-- Windows：https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.13-test/BiliPDJ-v3.0.13-test-Windows-Tk-Portable-x64.zip
-- Web：https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.13-test/BiliPDJ-v3.0.13-test-Web-Portable-x64.zip
+- Windows：https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.14-test/BiliPDJ-v3.0.14-test-Windows-Tk-Portable-x64.zip
+- Web：https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.14-test/BiliPDJ-v3.0.14-test-Web-Portable-x64.zip
 
 `Windows-Tk-files.json`、`Windows-Tk-Incremental-x64.pack`、Web 对应 manifest / incremental pack 及其 `.sha256` 均由内置更新器使用，普通用户无需手动下载。
 
 ## 更新与数据安全
 
-- `v3.0.13-test` 为测试版 GitHub Pre-release，不替代 `v3.0.12` 正式版；
+- `v3.0.14-test` 为测试版 GitHub Pre-release，不替代 `v3.0.12` 正式版；
 - Windows/Web 更新工作区继续统一位于程序目录 `update/`；
 - 更新前继续创建完整 `backup/` 快照；
-- 增量更新只有在必要检查与快照完成后才进入文件修改阶段；
+- 增量更新会校验完整发行版本身份，避免不同渠道之间误用基础版本；
 - 更新失败优先恢复旧版本；
 - 配置、队列存档、日志、备份、插件、插件私有数据、主题与显示样式继续受保护。
 
 ## 发行文件
 
-- `BiliPDJ-v3.0.13-test-Windows-Tk-Portable-x64.zip`
-- `BiliPDJ-v3.0.13-test-Windows-Tk-Portable-x64.zip.sha256`
-- `BiliPDJ-v3.0.13-test-Windows-Tk-files.json`
-- `BiliPDJ-v3.0.13-test-Windows-Tk-files.json.sha256`
-- `BiliPDJ-v3.0.13-test-Windows-Tk-Incremental-x64.pack`
-- `BiliPDJ-v3.0.13-test-Windows-Tk-Incremental-x64.pack.sha256`
-- `BiliPDJ-v3.0.13-test-Web-Portable-x64.zip`
-- `BiliPDJ-v3.0.13-test-Web-Portable-x64.zip.sha256`
-- `BiliPDJ-v3.0.13-test-Web-files.json`
-- `BiliPDJ-v3.0.13-test-Web-files.json.sha256`
-- `BiliPDJ-v3.0.13-test-Web-Incremental-x64.pack`
-- `BiliPDJ-v3.0.13-test-Web-Incremental-x64.pack.sha256`
+- `BiliPDJ-v3.0.14-test-Windows-Tk-Portable-x64.zip`
+- `BiliPDJ-v3.0.14-test-Windows-Tk-Portable-x64.zip.sha256`
+- `BiliPDJ-v3.0.14-test-Windows-Tk-files.json`
+- `BiliPDJ-v3.0.14-test-Windows-Tk-files.json.sha256`
+- `BiliPDJ-v3.0.14-test-Windows-Tk-Incremental-x64.pack`
+- `BiliPDJ-v3.0.14-test-Windows-Tk-Incremental-x64.pack.sha256`
+- `BiliPDJ-v3.0.14-test-Web-Portable-x64.zip`
+- `BiliPDJ-v3.0.14-test-Web-Portable-x64.zip.sha256`
+- `BiliPDJ-v3.0.14-test-Web-files.json`
+- `BiliPDJ-v3.0.14-test-Web-files.json.sha256`
+- `BiliPDJ-v3.0.14-test-Web-Incremental-x64.pack`
+- `BiliPDJ-v3.0.14-test-Web-Incremental-x64.pack.sha256`
 - `update-manifest.json`
 
 ## 测试版说明
 
-本版本使用 `-test` 后缀，发布时应标记为 GitHub **Pre-release**。正式稳定版仍为 `v3.0.12`。
+本版本使用 `-test` 后缀，发布时标记为 GitHub **Pre-release**。正式稳定版仍为 `v3.0.12`，README 稳定版下载入口继续保持 `v3.0.12`。
