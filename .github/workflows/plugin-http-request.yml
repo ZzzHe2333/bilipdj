@@ -6,7 +6,7 @@ on:
     paths:
       - 'apps/server/javascript_plugin_runtime.py'
       - 'apps/server/plugin_http_request.py'
-      - 'scripts/issue140_http_request_guard.py'
+      - '.github/ci/issue140_http_request_guard.py'
       - 'docs/PLUGIN_HTTP_REQUEST.md'
       - '.github/workflows/plugin-http-request.yml'
       - 'requirements.txt'
@@ -15,7 +15,7 @@ on:
     paths:
       - 'apps/server/javascript_plugin_runtime.py'
       - 'apps/server/plugin_http_request.py'
-      - 'scripts/issue140_http_request_guard.py'
+      - '.github/ci/issue140_http_request_guard.py'
       - 'docs/PLUGIN_HTTP_REQUEST.md'
       - '.github/workflows/plugin-http-request.yml'
       - 'requirements.txt'
@@ -34,8 +34,8 @@ jobs:
       - name: Install project dependencies
         run: python -m pip install -r requirements.txt
       - name: Compile Issue 140 sources
-        run: python -m py_compile apps/server/plugin_http_request.py apps/server/javascript_plugin_runtime.py scripts/issue140_http_request_guard.py
+        run: python -m py_compile apps/server/plugin_http_request.py apps/server/javascript_plugin_runtime.py .github/ci/issue140_http_request_guard.py
       - name: Run Issue 140 HTTP Host regression guard
-        run: python scripts/issue140_http_request_guard.py
+        run: python .github/ci/issue140_http_request_guard.py
       - name: Run existing QuickJS runtime probe
-        run: python scripts/issue130_js_runtime_probe.py
+        run: python .github/ci/issue130_js_runtime_probe.py
