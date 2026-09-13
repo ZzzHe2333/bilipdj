@@ -92,7 +92,8 @@ def main() -> None:
 
     backend_source = (ROOT / "apps/server/gift_compatibility.py").read_text(encoding="utf-8")
     assert "process_gift_event" in backend_source
-    assert "/api/gifts/compatibility" in backend_source
+    assert "/api/gifts/state" in backend_source
+    assert "compatibility_rules" in backend_source
     assert "plugin cannot emit a gift event for another platform" in backend_source
     assert "value_source" in backend_source
 
@@ -103,6 +104,7 @@ def main() -> None:
     assert "礼物名称" in ui_source
     assert "单个价值" in ui_source
     assert "保存全部" in ui_source
+    assert '"/api/gifts/state"' in ui_source
 
     print("issue #248 gift compatibility guard: OK")
 
