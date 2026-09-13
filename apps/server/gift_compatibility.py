@@ -401,28 +401,12 @@ def install_gift_compatibility(
 
         handler_class = getattr(server_module, "ApiHandler", None)
         if isinstance(handler_class, type):
-            original_get = handler_class.do_GET
             original_post = handler_class.do_POST
 
-            def do_GET(self: Any) -> None:  # noqa: N802
-                if urlparse(self.path).path != "/api/gifts/compatibility":
-                    return original_get(self)
-                if not self._require_loopback():
-                    return
-                try:
-                    rules = service.list_rules()
-                    platforms = sorted({"bilibili", *(str(row["platform"]) for row in rules)})
-                    self._write_json({
-                        "status": "ok",
-                        "rules": rules,
-                        "platforms": platforms,
-                        "builtin_catalog": service.builtin_catalog(),
-                    })
-                except GiftCompatibilityError as exc:
-                    self._write_json({"status": "error", "message": str(exc)}, status=400)
-
             def do_POST(self: Any) -> None:  # noqa: N802
-                if urlparse(self.path).path != "/api/gifts/compatibility":
+                # GET /api/gifts/state already returns the runtime gift state.
+                # POST on the same resource replaces only compatibility rules.
+                if urlparse(self.path).path != "/api/gifts/state":
                     return original_post(self)
                 if not self._require_loopback():
                     return
@@ -435,7 +419,6 @@ def install_gift_compatibility(
                 except Exception as exc:  # noqa: BLE001
                     self._write_json({"status": "error", "message": f"礼物兼容性保存失败：{exc}"}, status=500)
 
-            handler_class.do_GET = do_GET
             handler_class.do_POST = do_POST
 
         if backup_module is not None:
@@ -445,10 +428,12 @@ def install_gift_compatibility(
             backup_service = getattr(backup_module, "SettingsBackupService", None)
             if isinstance(backup_service, type) and not bool(getattr(backup_service, "_bilipdj_gift_compat_paths", False)):
                 original_paths = backup_service.settings_paths
+
                 def settings_paths(self: Any) -> dict[str, Path]:
                     paths = dict(original_paths(self))
                     paths[_CONFIG_NAME] = Path(getattr(self.server, "_YAML_DIR")) / _CONFIG_NAME
                     return paths
+
                 backup_service.settings_paths = settings_paths
                 backup_service._bilipdj_gift_compat_paths = True
 
