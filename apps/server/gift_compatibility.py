@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import datetime as dt
 import json
 import math
 import re
@@ -279,48 +280,64 @@ def install_gift_compatibility(
                     "unit_value": resolved["unit_value"],
                     "value": resolved_value,
                     "value_source": resolved["source"],
+                    # Legacy field kept so existing Web/Windows gift controls and
+                    # min_batteries thresholds continue to work unchanged.
                     "batteries": resolved_value,
                     "coin_type": str(gift.get("coin_type", "") or ""),
                     "price": _to_int(gift.get("price", 0), 0),
                 },
-                "room_id": payload.get("room_id", payload.get("roomid", 0)),
-                "ts": payload.get("ts"),
+                "guard_level": _to_int(payload.get("guard_level", 0), 0),
+                "received_at": str(
+                    payload.get("received_at")
+                    or dt.datetime.now(dt.timezone.utc).isoformat()
+                ),
             }
+            if "room_id" in payload or "roomid" in payload:
+                event["room_id"] = payload.get("room_id", payload.get("roomid", 0))
             if isinstance(payload.get("raw"), dict):
                 event["raw"] = copy.deepcopy(payload["raw"])
 
             grant_credit = bool(payload.get("grant_queue_credit", event_name == "gift"))
             with self._lock:
-                catalog_key = f"{platform}:{gift_id or gift_name.casefold()}"
-                self._gift_catalog[catalog_key] = {
-                    "platform": platform,
-                    "id": gift_id_raw,
-                    "name": gift_name,
-                    "value": resolved_value,
-                    "unit_value": resolved["unit_value"],
-                    "value_source": resolved["source"],
-                    "batteries": resolved_value,
-                    "price": _to_int(gift.get("price", 0), 0),
-                    "coin_type": str(gift.get("coin_type", "") or ""),
-                }
+                if gift_id or gift_name:
+                    catalog_key = f"{platform}:{gift_id or gift_name.casefold()}"
+                    self._gift_catalog[catalog_key] = {
+                        "platform": platform,
+                        "id": gift_id_raw,
+                        "name": gift_name,
+                        "value": resolved_value,
+                        "unit_value": resolved["unit_value"],
+                        "value_source": resolved["source"],
+                        "batteries": resolved_value,
+                        "price": _to_int(gift.get("price", 0), 0),
+                        "coin_type": str(gift.get("coin_type", "") or ""),
+                    }
                 self._last_gift_event = copy.deepcopy(event)
-                matches_name = bool(gift_name and gift_name in self._gift_queue_names)
+                matches_name = gift_name in self._gift_queue_names
                 matches_value = bool(
                     resolved_value is not None
                     and self._gift_queue_min_batteries > 0
                     and float(resolved_value) >= float(self._gift_queue_min_batteries)
                 )
                 qualifies = matches_name or matches_value
-                can_repeat = self._gift_queue_allow_multiple or uid not in self._gift_queue_used_uids
-                if self._gift_queue_enabled and grant_credit and uid > 0 and qualifies and can_repeat:
-                    self._gift_queue_credits[uid] = self._gift_queue_credits.get(uid, 0) + self._gift_queue_slots_per_gift
-                    if not self._gift_queue_allow_multiple:
-                        self._gift_queue_used_uids.add(uid)
-                    self._persist_myjs_state_unlocked()
-            self._emit_event(event)
-            self._log(
-                f"礼物事件：{platform} {uname}({uid}) {gift_name or gift_id} x{count} "
-                f"价值={resolved_value if resolved_value is not None else '未知'} 来源={resolved['source']}"
+                can_repeat = self._gift_queue_allow_multiple or (
+                    uid not in self._gift_queue_used_uids and uid not in self._gift_queue_credits
+                )
+                if self._gift_queue_enabled and grant_credit and qualifies and uid > 0 and can_repeat:
+                    self._gift_queue_credits[uid] = (
+                        self._gift_queue_credits.get(uid, 0) + self._gift_queue_slots_per_gift
+                    )
+                    event["queue_credit_granted"] = True
+            self._ws_hub.broadcast_json(None, event)
+            self._logger.info(
+                "[礼物][%s] %s(%s) %s x%s 价值=%s 来源=%s",
+                platform,
+                uname,
+                uid,
+                gift_name or gift_id,
+                count,
+                resolved_value if resolved_value is not None else "未知",
+                resolved["source"],
             )
             return event
 
@@ -331,26 +348,23 @@ def install_gift_compatibility(
             if cmd not in {"SEND_GIFT", "COMBO_SEND", "GUARD_BUY"}:
                 return
             data = payload.get("data", {})
-            data = data if isinstance(data, dict) else {}
-            uid = _to_int(data.get("uid", data.get("user_id", 0)), 0)
+            if not isinstance(data, dict):
+                return
+            uid = _to_int(data.get("uid", 0), 0)
             uname = str(data.get("uname", data.get("username", "")) or "")
-            if cmd == "GUARD_BUY":
-                gift_name = str(data.get("gift_name", data.get("role_name", "大航海")) or "大航海")
-                gift_id = data.get("gift_id", data.get("guard_level", ""))
-                count = max(1, _to_int(data.get("num", 1), 1))
-                event_name = "guard_buy"
-            else:
-                gift_name = str(data.get("giftName", data.get("gift_name", "")) or "")
-                gift_id = data.get("giftId", data.get("gift_id", ""))
-                count = max(1, _to_int(data.get("num", data.get("combo_num", 1)), 1))
-                event_name = "gift" if cmd == "SEND_GIFT" else "combo"
+            is_guard = cmd == "GUARD_BUY"
+            gift_name = str(
+                data.get("giftName", data.get("gift_name", "大航海" if is_guard else "")) or ""
+            )
+            gift_id = _to_int(data.get("giftId", data.get("gift_id", 0)), 0)
+            count = max(1, _to_int(data.get("num", 1), 1))
             self.process_gift_event({
                 "platform": "bilibili",
-                "event": event_name,
+                "event": "guard_buy" if is_guard else "gift",
                 "grant_queue_credit": cmd == "SEND_GIFT",
                 "uid": uid,
                 "uname": uname,
-                "room_id": data.get("roomid", data.get("room_id", 0)),
+                "guard_level": _to_int(data.get("guard_level", 0), 0),
                 "gift": {
                     "id": gift_id,
                     "name": gift_name,
@@ -397,6 +411,7 @@ def install_gift_compatibility(
                     if manager is None or not hasattr(manager, "process_gift_event"):
                         raise RuntimeError("queue manager is unavailable")
                     manager.process_gift_event(event)
+
                 context_class.process_gift_event = process_plugin_gift_event
 
         handler_class = getattr(server_module, "ApiHandler", None)
@@ -417,7 +432,10 @@ def install_gift_compatibility(
                 except GiftCompatibilityError as exc:
                     self._write_json({"status": "error", "message": str(exc)}, status=400)
                 except Exception as exc:  # noqa: BLE001
-                    self._write_json({"status": "error", "message": f"礼物兼容性保存失败：{exc}"}, status=500)
+                    self._write_json(
+                        {"status": "error", "message": f"礼物兼容性保存失败：{exc}"},
+                        status=500,
+                    )
 
             handler_class.do_POST = do_POST
 
@@ -426,7 +444,9 @@ def install_gift_compatibility(
             if _CONFIG_NAME not in files:
                 backup_module.SETTINGS_FILES = files + (_CONFIG_NAME,)
             backup_service = getattr(backup_module, "SettingsBackupService", None)
-            if isinstance(backup_service, type) and not bool(getattr(backup_service, "_bilipdj_gift_compat_paths", False)):
+            if isinstance(backup_service, type) and not bool(
+                getattr(backup_service, "_bilipdj_gift_compat_paths", False)
+            ):
                 original_paths = backup_service.settings_paths
 
                 def settings_paths(self: Any) -> dict[str, Path]:
