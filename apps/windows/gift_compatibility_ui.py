@@ -255,17 +255,23 @@ def _open_gift_compatibility(panel: Any, module: Any, windows_ui: Any) -> None:
     def load() -> None:
         status_var.set("正在读取礼物兼容性配置……")
         try:
-            payload = windows_ui._plugin_request(panel, "/api/gifts/compatibility", timeout=8.0)
-            rows = payload.get("rules", [])
+            payload = windows_ui._plugin_request(panel, "/api/gifts/state", timeout=8.0)
+            rows = payload.get("compatibility_rules", [])
             if not isinstance(rows, list):
-                raise RuntimeError("后端返回的 rules 格式无效")
+                raise RuntimeError("后端返回的 compatibility_rules 格式无效")
             rules.clear()
             rules.extend(dict(row) for row in rows if isinstance(row, dict))
-            platforms = payload.get("platforms", [])
             values = list(_DEFAULT_PLATFORMS)
-            if isinstance(platforms, list):
-                for item in platforms:
-                    name = str(item or "").strip().lower()
+            for row in rules:
+                name = str(row.get("platform", "") or "").strip().lower()
+                if name and name not in values:
+                    values.append(name)
+            observed = payload.get("observed_catalog", [])
+            if isinstance(observed, list):
+                for item in observed:
+                    if not isinstance(item, dict):
+                        continue
+                    name = str(item.get("platform", "") or "").strip().lower()
                     if name and name not in values:
                         values.append(name)
             platform_box.configure(values=tuple(values))
@@ -280,7 +286,7 @@ def _open_gift_compatibility(panel: Any, module: Any, windows_ui: Any) -> None:
         try:
             payload = windows_ui._plugin_request(
                 panel,
-                "/api/gifts/compatibility",
+                "/api/gifts/state",
                 method="POST",
                 payload={"rules": rules},
                 timeout=8.0,
