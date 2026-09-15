@@ -27,6 +27,14 @@ def check_shutdown_guard_source() -> None:
     assert "install_shutdown_guard(panel_class)" in runtime
     assert runtime.index("patch_control_panel_issue187(panel_class)") < runtime.index("install_shutdown_guard(panel_class)")
 
+    main_source = read("apps/windows/main.py")
+    assert '"--gui-close-self-test"' in main_source
+    assert "root.after(1200, app.on_close)" in main_source
+
+    package_source = read("apps/windows/package.ps1")
+    assert 'Arguments "--gui-close-self-test"' in package_source
+    assert "Frozen Windows GUI close self-test" in package_source
+
 
 def check_non_windows_termination() -> None:
     if sys.platform == "win32":
