@@ -13,45 +13,46 @@ def read(path: str) -> str:
 
 
 def check_release_channels() -> None:
-    from apps.windows.release_selector import CHANNEL_ORDER, display_version, is_deprecated_version, release_channel
+    from apps.windows.release_selector import (
+        ALL_RELEASE_LIMIT,
+        CHANNEL_ORDER,
+        RELEASE_ONLY_LIMIT,
+        display_version,
+        is_deprecated_version,
+        release_channel,
+    )
 
-    assert CHANNEL_ORDER == ("正式版", "公测版", "创新版", "内测版", "废弃版")
-    assert release_channel("3.0.6") == "正式版"
-    assert release_channel("3.1.0-gc") == "公测版"
-    assert release_channel("3.1.0-g") == "公测版"
-    assert release_channel("3.1.0-cx") == "创新版"
-    assert release_channel("3.1.0-c") == "创新版"
-    assert release_channel("3.1.0-text") == "内测版"
-    assert release_channel("3.1.0-t") == "内测版"
-    assert release_channel("3.1.0-dev") == "内测版"
-    assert release_channel("3.1.0-feiqi") == "废弃版"
-    assert release_channel("3.1.0-loss") == "废弃版"
-    # Compatibility: current test suffix remains internal unless it belongs to
-    # the explicitly deprecated 3.0.7..3.0.11 UI migration window.
-    assert release_channel("3.0.12-test") == "内测版"
+    assert CHANNEL_ORDER == ("发行包", "全部")
+    assert RELEASE_ONLY_LIMIT == 3
+    assert ALL_RELEASE_LIMIT == 10
+    assert release_channel("3.0.15") == "全部"
+    assert release_channel("3.0.15-test") == "全部"
+    assert display_version("3.0.15-test") == "3.0.15-test"
     for patch in range(7, 12):
-        version = f"3.0.{patch}-test"
-        assert is_deprecated_version(version)
-        assert display_version(version) == f"3.0.{patch}-feiqi"
+        assert is_deprecated_version(f"3.0.{patch}-test")
 
     source = read("apps/windows/release_selector.py")
-    assert "RECENT_RELEASE_LIMIT = 10" in source
+    assert 'CHANNEL_ORDER = ("发行包", "全部")' in source
+    assert "RELEASE_ONLY_LIMIT = 3" in source
+    assert "ALL_RELEASE_LIMIT = 10" in source
+    assert 'raw.get("prerelease")' in source
+    assert '_RELEASE_TAGS_BY_FILTER["发行包"]' in source
+    assert 'update_channel_var.set("发行包")' in source
     assert "MAX_RELEASE_SCAN = 100" in source
-    assert "counts = {channel: 0 for channel in CHANNEL_ORDER}" in source
-    assert "full_body = str(raw.get(\"body\"" in source
-    assert "【废弃版本：不可使用】" in source
-    assert "full_button.configure(text=\"废弃版本\", state=\"disabled\")" in source
 
 
-def check_update_page() -> None:
-    source = read("apps/windows/update_page.py")
-    assert 'RELEASE_CHANNELS = ("正式版", "公测版", "创新版", "内测版", "废弃版")' in source
-    assert 'text="版本类型"' in source
-    assert 'text="版本"' in source
-    assert "_update_channel_combo" in source
-    assert "_update_version_combo" in source
-    assert 'tk.StringVar(value="正式版")' in source
-    assert "on_channel_selected" in source
+def check_update_page_policy() -> None:
+    source = read("apps/windows/release_selector.py")
+    page = read("apps/windows/update_page.py")
+    assert "update_page.RELEASE_CHANNELS = CHANNEL_ORDER" in source
+    assert "def _install_update_page_policy" in source
+    assert 'RELEASE_CHANNELS = ("发行包", "全部")' in page
+    assert 'text="版本范围"' in page
+    assert 'tk.StringVar(value="发行包")' in page
+    assert "最近 3 个正式 Release" in page
+    assert "最近 10 个 Release" in page
+    assert "_update_channel_combo" in page
+    assert "_update_version_combo" in page
 
 
 def check_performance_monitor() -> None:
@@ -74,9 +75,9 @@ def check_performance_monitor() -> None:
 
 def main() -> None:
     check_release_channels()
-    check_update_page()
+    check_update_page_policy()
     check_performance_monitor()
-    print("issue242 release channels/performance guard: OK")
+    print("issue242 release state/performance guard: OK")
 
 
 if __name__ == "__main__":

@@ -17,12 +17,14 @@ def check_navigation_geometry_settles_before_return() -> None:
     class FakeRow:
         def __init__(self, requested_width: int) -> None:
             self.requested_width = requested_width
+
         def winfo_reqwidth(self) -> int:
             return self.requested_width
 
     class FakeShell:
         def __init__(self) -> None:
             self.columns: dict[int, dict[str, int]] = {}
+
         def columnconfigure(self, index: int, **kwargs) -> None:
             self.columns[index] = dict(kwargs)
 
@@ -34,15 +36,20 @@ def check_navigation_geometry_settles_before_return() -> None:
             self.actual_width = 90
             self.configured_width = 90
             self.propagate = True
+
         def pack_propagate(self, value: bool) -> None:
             self.propagate = bool(value)
+
         def configure(self, **kwargs) -> None:
             if "width" in kwargs:
                 self.configured_width = int(kwargs["width"])
+
         def winfo_width(self) -> int:
             return self.actual_width
+
         def update_idletasks(self) -> None:
             self.settle()
+
         def settle(self) -> None:
             if self.propagate:
                 self.actual_width = max(row.winfo_reqwidth() for row in rows)
@@ -55,6 +62,7 @@ def check_navigation_geometry_settles_before_return() -> None:
     class FakeRoot:
         def __init__(self) -> None:
             self.update_calls = 0
+
         def update_idletasks(self) -> None:
             self.update_calls += 1
             nav.settle()
@@ -104,7 +112,14 @@ def check_full_update_preserves_appearance() -> None:
                 archive.writestr("appearance.json", '{"mode":"dark"}\n')
                 archive.writestr("core/appearance.json", '{"mode":"dark"}\n')
 
-            updater.perform_update(pid=0, app_dir=app_dir, zip_path=zip_path, main_exe_name="main.exe", target_version="3.0.8-test")
+            # Historical suffixed versions must remain restorable/updatable.
+            updater.perform_update(
+                pid=0,
+                app_dir=app_dir,
+                zip_path=zip_path,
+                main_exe_name="main.exe",
+                target_version="3.0.8-test",
+            )
 
             assert (app_dir / "main.exe").read_bytes() == b"new-main"
             assert (app_dir / "appearance.json").read_text(encoding="utf-8") == old_root_appearance
@@ -117,7 +132,12 @@ def check_full_update_preserves_appearance() -> None:
 def _fake_release(version: str):
     from apps.windows import update_client
 
-    asset = update_client.ReleaseAsset(name=f"BiliPDJ-v{version}-Windows-Tk-Portable-x64.zip", download_url=f"https://example.invalid/{version}.zip", size=1024, sha256="a" * 64)
+    asset = update_client.ReleaseAsset(
+        name=f"BiliPDJ-v{version}-Windows-Tk-Portable-x64.zip",
+        download_url=f"https://example.invalid/{version}.zip",
+        size=1024,
+        sha256="a" * 64,
+    )
     return update_client.ReleaseInfo(
         version=version,
         tag_name=f"v{version}",
@@ -125,20 +145,38 @@ def _fake_release(version: str):
         body="",
         page_url="",
         zip_asset=asset,
-        checksum_asset=update_client.ReleaseAsset(name=f"{asset.name}.sha256", download_url="", size=0, sha256="a" * 64),
+        checksum_asset=update_client.ReleaseAsset(
+            name=f"{asset.name}.sha256",
+            download_url="",
+            size=0,
+            sha256="a" * 64,
+        ),
         sha256="a" * 64,
         manifest_url="",
     )
 
 
-def check_recent_ten_release_catalog() -> None:
+def check_recent_release_catalog() -> None:
     from apps.windows import release_selector as selector
 
     raw = [
-        {"tag_name": f"v3.0.{index}{'-test' if index % 2 else ''}", "draft": False, "prerelease": bool(index % 2), "published_at": f"2026-09-{30 - index:02d}T00:00:00Z"}
+        {
+            "tag_name": f"v3.0.{index}",
+            "draft": False,
+            "prerelease": bool(index % 2),
+            "published_at": f"2026-09-{30 - index:02d}T00:00:00Z",
+        }
         for index in range(12)
     ]
-    raw.insert(2, {"tag_name": "v99.0.0-draft", "draft": True, "prerelease": True, "published_at": "2026-12-31T00:00:00Z"})
+    raw.insert(
+        2,
+        {
+            "tag_name": "v99.0.0",
+            "draft": True,
+            "prerelease": True,
+            "published_at": "2026-12-31T00:00:00Z",
+        },
+    )
 
     original_read = selector._read_release_list
     original_info = selector._release_info
@@ -150,18 +188,16 @@ def check_recent_ten_release_catalog() -> None:
         selector._read_release_list = original_read
         selector._release_info = original_info
 
-    # Issue #242 changes the catalog from ten releases total to ten releases per
-    # channel (at most 50 overall). This fixture has only 12 eligible entries, so
-    # none should be discarded: 6 stable, 3 internal and 3 deprecated.
-    assert selector.RECENT_RELEASE_LIMIT == 10
-    assert len(releases) == 12
-    counts = {channel: 0 for channel in selector.CHANNEL_ORDER}
-    for release in releases:
-        counts[selector.release_channel(release.version)] += 1
-    assert counts["正式版"] == 6
-    assert counts["内测版"] == 3
-    assert counts["废弃版"] == 3
-    assert all(value <= selector.RECENT_RELEASE_LIMIT for value in counts.values())
+    assert selector.CHANNEL_ORDER == ("发行包", "全部")
+    assert selector.RELEASE_ONLY_LIMIT == 3
+    assert selector.ALL_RELEASE_LIMIT == 10
+    assert len(selector._RELEASE_TAGS_BY_FILTER["发行包"]) == 3
+    assert len(selector._RELEASE_TAGS_BY_FILTER["全部"]) == 10
+    assert selector._RELEASE_TAGS_BY_FILTER["发行包"] == ["v3.0.0", "v3.0.2", "v3.0.4"]
+    assert selector._RELEASE_TAGS_BY_FILTER["全部"] == [f"v3.0.{index}" for index in range(10)]
+    # The returned union only needs the recent ten here because the newest three
+    # formal releases are already inside those ten.
+    assert len(releases) == 10
 
     current = "3.0.7-test"
     target = releases[0]
@@ -178,7 +214,7 @@ def check_recent_ten_release_catalog() -> None:
 def main() -> None:
     check_navigation_geometry_settles_before_return()
     check_full_update_preserves_appearance()
-    check_recent_ten_release_catalog()
+    check_recent_release_catalog()
     print("issue #213 regression guard: OK")
 
 

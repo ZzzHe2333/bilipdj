@@ -47,7 +47,12 @@ def check_web_control() -> None:
     for mode in ("full", "incremental", "restore"):
         assert mode in js
     assert "window.open('about:blank'" in js
-    assert "俄罗斯方块" in js
+    assert 'id="web-update-filter"' in js
+    assert '<option value="发行包">发行包</option>' in js
+    assert '<option value="全部">全部</option>' in js
+    assert "slice(0, 3)" in js
+    assert "slice(0, 10)" in js
+    assert "state?.default_tag" in js
 
     command = read("apps/server/command_console.py")
     assert "/web_updater_control.js" in command and "/web_updater_control.css" in command
@@ -76,6 +81,8 @@ def check_packaging() -> None:
 def check_no_implicit_release() -> None:
     workflow = read(".github/workflows/package-windows-x64.yml")
     assert "if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')" in workflow
+    assert "default: prerelease" in workflow
+    assert "release_status:" in workflow
 
 
 def main() -> None:

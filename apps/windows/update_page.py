@@ -10,7 +10,7 @@ from typing import Any
 from . import update_network, update_ui, update_version_selector
 from .version import APP_VERSION
 
-RELEASE_CHANNELS = ("正式版", "公测版", "创新版", "内测版", "废弃版")
+RELEASE_CHANNELS = ("发行包", "全部")
 
 
 def _set_notes(app: Any, text: str) -> None:
@@ -163,7 +163,7 @@ def build_update_tab(app: Any, frame: ttk.Frame, app_name: str, current_version:
     app._selected_version_label = ""
     app.update_status_var = tk.StringVar(value="尚未检查更新")
     app.update_progress_var = tk.DoubleVar(value=0.0)
-    app.update_channel_var = tk.StringVar(value="正式版")
+    app.update_channel_var = tk.StringVar(value="发行包")
     app.update_version_var = tk.StringVar(value="检查后加载版本")
     app.update_bypass_proxy_var = tk.BooleanVar(value=False)
     app.update_third_party_proxy_var = tk.BooleanVar(value=False)
@@ -201,7 +201,7 @@ def build_update_tab(app: Any, frame: ttk.Frame, app_name: str, current_version:
     version_row = ttk.Frame(update_frame)
     version_row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 3))
     version_row.columnconfigure(3, weight=1)
-    ttk.Label(version_row, text="版本类型").grid(row=0, column=0, sticky="w", padx=(0, 8))
+    ttk.Label(version_row, text="版本范围").grid(row=0, column=0, sticky="w", padx=(0, 8))
     app._update_channel_combo = ttk.Combobox(version_row, textvariable=app.update_channel_var, values=RELEASE_CHANNELS, state="readonly", width=10)
     app._update_channel_combo.grid(row=0, column=1, sticky="w", padx=(0, 18))
     app._update_channel_combo.bind("<<ComboboxSelected>>", lambda _event: getattr(update_version_selector, "on_channel_selected", lambda _app: None)(app))
@@ -222,7 +222,7 @@ def build_update_tab(app: Any, frame: ttk.Frame, app_name: str, current_version:
     app._update_install_button = app._update_full_button
     app._update_incremental_button = ttk.Button(button_row, text="增量更新", command=lambda: update_version_selector.install_selected_incremental(app), state="disabled")
     app._update_incremental_button.pack(side="left")
-    ttk.Label(update_frame, text="云端版本按类型筛选；每类最多加载最近 10 个。废弃版仅供查看说明，禁止安装。", wraplength=760).grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
+    ttk.Label(update_frame, text="“发行包”显示最近 3 个正式 Release；“全部”显示最近 10 个 Release（含预发行包）。默认更新目标为最新发行包。", wraplength=760).grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
     ttk.Label(update_frame, text="更新内容").grid(row=5, column=0, sticky="w", pady=(12, 4))
     notes_frame = ttk.Frame(update_frame)
     notes_frame.grid(row=6, column=0, columnspan=2, sticky="nsew")
@@ -233,7 +233,7 @@ def build_update_tab(app: Any, frame: ttk.Frame, app_name: str, current_version:
     notes_scroll = ttk.Scrollbar(notes_frame, orient="vertical", command=app._update_notes.yview)
     notes_scroll.grid(row=0, column=1, sticky="ns")
     app._update_notes.configure(yscrollcommand=notes_scroll.set)
-    _set_notes(app, "点击“检查更新”加载五个版本类型的云端 Release（每类最近 10 个）以及完整更新说明。")
+    _set_notes(app, "点击“检查更新”加载最近 3 个发行包；切换到“全部”可查看最近 10 个 Release（含预发行包）以及完整更新说明。")
 
     network = ttk.LabelFrame(inner, text="更新网络", padding=12)
     network.grid(row=3, column=0, sticky="ew", pady=(12, 0))

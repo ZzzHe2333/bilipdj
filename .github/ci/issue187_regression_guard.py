@@ -16,6 +16,7 @@ def read(path: str) -> str:
 def check_version_semantics() -> None:
     from apps.windows.update_channel import select_channel_release, version_key
 
+    # Legacy suffixed versions remain parseable for history/backup compatibility.
     assert version_key("3.0.4-test") < version_key("3.0.4")
     assert version_key("3.0.4-test") != version_key("3.0.4-test2")
     assert version_key("3.0.5-beta.1") > version_key("3.0.4")
@@ -23,19 +24,20 @@ def check_version_semantics() -> None:
 
     selected = select_channel_release(
         [
-            {"tag_name": "v3.0.2", "draft": False, "prerelease": False},
-            {"tag_name": "v3.0.4-test", "draft": False, "prerelease": True},
-            {"tag_name": "v9.9.9", "draft": True, "prerelease": False},
+            {"tag_name": "v3.0.2", "draft": False, "prerelease": False, "published_at": "2026-09-12T00:00:00Z"},
+            {"tag_name": "v3.0.4", "draft": False, "prerelease": True, "published_at": "2026-09-14T00:00:00Z"},
+            {"tag_name": "v9.9.9", "draft": True, "prerelease": False, "published_at": "2026-09-15T00:00:00Z"},
         ]
     )
-    assert selected["tag_name"] == "v3.0.4-test"
-    stable_same_core = select_channel_release(
+    assert selected["tag_name"] == "v3.0.2"
+    latest_stable = select_channel_release(
         [
-            {"tag_name": "v3.0.4-test", "draft": False, "prerelease": True},
-            {"tag_name": "v3.0.4", "draft": False, "prerelease": False},
+            {"tag_name": "v3.0.4", "draft": False, "prerelease": True, "published_at": "2026-09-14T00:00:00Z"},
+            {"tag_name": "v3.0.3", "draft": False, "prerelease": False, "published_at": "2026-09-13T00:00:00Z"},
+            {"tag_name": "v3.0.2", "draft": False, "prerelease": False, "published_at": "2026-09-12T00:00:00Z"},
         ]
     )
-    assert stable_same_core["tag_name"] == "v3.0.4"
+    assert latest_stable["tag_name"] == "v3.0.3"
 
 
 def check_desktop_guards() -> None:

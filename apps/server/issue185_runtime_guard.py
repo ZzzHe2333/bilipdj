@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import json
-import urllib.parse
 import urllib.request
 from typing import Any
 
 REPOSITORY = "ZzzHe2333/bilipdj"
 LATEST_RELEASE_API = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
-RELEASES_API = f"https://api.github.com/repos/{REPOSITORY}/releases?per_page=20"
-USER_AGENT = "bilipdj-issue185-release-channel"
+RELEASES_API = f"https://api.github.com/repos/{REPOSITORY}/releases?per_page=100"
+USER_AGENT = "bilipdj-release-status"
 
 
 def _request_json(url: str, *, timeout: float = 10.0) -> Any:
@@ -24,26 +23,17 @@ def _request_json(url: str, *, timeout: float = 10.0) -> Any:
         return json.loads(response.read().decode("utf-8-sig"))
 
 
-def _is_prerelease_version(version: str) -> bool:
-    text = str(version or "").strip().lower().lstrip("v")
-    return "-" in text
+def _select_release(_current_version: str = "") -> dict[str, Any]:
+    """Return GitHub's newest formal Release.
 
-
-def _select_release(current_version: str) -> dict[str, Any]:
-    if not _is_prerelease_version(current_version):
-        payload = _request_json(LATEST_RELEASE_API)
-        if not isinstance(payload, dict):
-            raise RuntimeError("GitHub latest Release 响应无效")
-        return payload
-
-    payload = _request_json(RELEASES_API)
-    if not isinstance(payload, list):
-        raise RuntimeError("GitHub Release 列表响应无效")
-    for item in payload:
-        if not isinstance(item, dict) or bool(item.get("draft")):
-            continue
-        return item
-    raise RuntimeError("没有可用的 GitHub Release")
+    The installed version suffix is intentionally ignored. Release/Pre-release
+    state now lives only in GitHub metadata, and automatic update discovery
+    always follows the newest formal Release.
+    """
+    payload = _request_json(LATEST_RELEASE_API)
+    if not isinstance(payload, dict) or bool(payload.get("draft")) or bool(payload.get("prerelease")):
+        raise RuntimeError("GitHub latest Release 响应无效")
+    return payload
 
 
 def _asset(release: dict[str, Any], *, exact: str = "", suffix: str = "") -> dict[str, Any] | None:
@@ -62,24 +52,15 @@ def _asset(release: dict[str, Any], *, exact: str = "", suffix: str = "") -> dic
 
 
 def install_issue185_runtime_guards(server_module: Any) -> bool:
-    """Keep Web update discovery on the installed release channel.
-
-    GitHub's ``/releases/latest`` deliberately excludes prereleases.  A
-    ``*-test`` Web Portable build therefore used to report an older stable
-    release and incorrectly concluded that Web incremental assets were absent.
-    Stable builds still follow ``latest``; prerelease builds follow the most
-    recently published non-draft release, including prereleases.
-    """
+    """Make the Web updater default to the newest formal GitHub Release."""
 
     from apps.server import update_estimate_api, web_control_guard, web_update_api
 
-    current_version = lambda: web_update_api._version(server_module)  # noqa: E731, SLF001
     original_load_manifest = web_update_api._load_manifest  # noqa: SLF001
 
-    def load_manifest_for_channel() -> dict[str, Any]:
-        version = current_version()
+    def load_manifest_for_release() -> dict[str, Any]:
         try:
-            release = _select_release(version)
+            release = _select_release()
             manifest_asset = _asset(release, exact="update-manifest.json")
             if not isinstance(manifest_asset, dict):
                 raise RuntimeError("所选 Release 缺少 update-manifest.json")
@@ -106,20 +87,18 @@ def install_issue185_runtime_guards(server_module: Any) -> bool:
             payload["packages"] = dict(packages)
             payload["packages"][web_update_api.WEB_PACKAGE_KEY] = package
             payload["_source_url"] = manifest_url
-            payload["_release_prerelease"] = bool(release.get("prerelease"))
+            payload["_release_prerelease"] = False
             return payload
         except Exception:
-            if _is_prerelease_version(version):
-                raise
             return original_load_manifest()
 
     def fetch_release_for_estimate() -> dict[str, Any]:
-        return _select_release(current_version())
+        return _select_release()
 
-    def update_payload_for_channel(module: Any) -> dict[str, Any]:
+    def update_payload_for_release(module: Any) -> dict[str, Any]:
         current = web_control_guard._read_version(module)  # noqa: SLF001
         try:
-            payload = _select_release(current)
+            payload = _select_release()
         except Exception as exc:  # noqa: BLE001
             return {"status": "error", "message": f"检查更新失败：{exc}", "current_version": current}
         return {
@@ -131,12 +110,12 @@ def install_issue185_runtime_guards(server_module: Any) -> bool:
             "published_at": str(payload.get("published_at", "") or ""),
             "html_url": str(payload.get("html_url", "") or ""),
             "body": str(payload.get("body", "") or "")[:12000],
-            "prerelease": bool(payload.get("prerelease")),
+            "prerelease": False,
         }
 
-    web_update_api._load_manifest = load_manifest_for_channel  # type: ignore[attr-defined]  # noqa: SLF001
+    web_update_api._load_manifest = load_manifest_for_release  # type: ignore[attr-defined]  # noqa: SLF001
     update_estimate_api._fetch_latest_release = fetch_release_for_estimate  # type: ignore[attr-defined]  # noqa: SLF001
-    web_control_guard._update_payload = update_payload_for_channel  # type: ignore[attr-defined]  # noqa: SLF001
+    web_control_guard._update_payload = update_payload_for_release  # type: ignore[attr-defined]  # noqa: SLF001
     return True
 
 

@@ -102,16 +102,17 @@ def check_entry_wiring() -> None:
 
 def check_incremental_baseline_selection() -> None:
     workflow = read(".github/workflows/package-windows-x64.yml")
-    # GitHub /releases/latest intentionally excludes prereleases. Using it made
-    # every *-test build declare the stable channel as its exact incremental
-    # base, so v3.0.10-test could not incrementally update to the next test build.
+    # Incremental baselines are selected from the most recent compatible
+    # portable Release asset set, regardless of Release/Pre-release status.
+    # Release status no longer comes from a version suffix.
     assert "releases/latest" not in workflow
     assert "releases?per_page=50" in workflow
     assert '$targetTag = "v$version"' in workflow
-    assert '$prereleaseTarget = $version.Contains("-")' in workflow
     assert "[string]$candidate.tag_name -ne $targetTag" in workflow
-    assert "($prereleaseTarget -or -not [bool]$candidate.prerelease)" in workflow
+    assert "-not [bool]$candidate.draft" in workflow
     assert "$hasTk" in workflow and "$hasWeb" in workflow
+    assert '$prereleaseTarget = $version.Contains("-")' not in workflow
+    assert "candidate.prerelease" not in workflow
 
 
 def main() -> None:
