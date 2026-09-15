@@ -4,10 +4,11 @@ on:
   push:
     branches:
       - 'release-publish/v*'
+      - 'release-publish-stable/v*'
 
-# This workflow is intentionally narrow: creating an explicit release-publish/v*
-# branch is the opt-in action. Deleting/cleaning an old release-publish branch
-# must never re-dispatch a historical release.
+# Creating one of these branches is an explicit publish action.
+# - release-publish/vX.Y.Z: default/unspecified intent -> Pre-release
+# - release-publish-stable/vX.Y.Z: explicitly requested formal Release
 permissions:
   contents: read
   actions: write
@@ -22,12 +23,18 @@ jobs:
         run: |
           set -euo pipefail
           BRANCH="$GITHUB_REF_NAME"
-          if [[ ! "$BRANCH" =~ ^release-publish/v[0-9]+(\.[0-9]+){2,}(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+          RELEASE_STATUS="prerelease"
+          if [[ "$BRANCH" =~ ^release-publish/v[0-9]+(\.[0-9]+){2}$ ]]; then
+            TAG_NAME="${BRANCH#release-publish/}"
+          elif [[ "$BRANCH" =~ ^release-publish-stable/v[0-9]+(\.[0-9]+){2}$ ]]; then
+            TAG_NAME="${BRANCH#release-publish-stable/}"
+            RELEASE_STATUS="release"
+          else
             echo "Invalid explicit release branch: $BRANCH"
             exit 1
           fi
-          TAG_NAME="${BRANCH#release-publish/}"
           echo "TAG_NAME=$TAG_NAME" >> "$GITHUB_ENV"
+          echo "RELEASE_STATUS=$RELEASE_STATUS" >> "$GITHUB_ENV"
 
       - name: Dispatch validated package release workflow
         shell: bash
@@ -38,5 +45,6 @@ jobs:
           gh workflow run package-windows-x64.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref now \
-            -f tag_name="$TAG_NAME"
-          echo "Dispatched explicit release for $TAG_NAME from now."
+            -f tag_name="$TAG_NAME" \
+            -f release_status="$RELEASE_STATUS"
+          echo "Dispatched $RELEASE_STATUS for $TAG_NAME from now."
