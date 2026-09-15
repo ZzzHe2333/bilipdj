@@ -41,10 +41,10 @@ def check_web_updater() -> None:
     web = read("apps/web/static/web_updater_control.js")
     assert "RELEASE_ONLY_LIMIT = 3" in server
     assert "ALL_RELEASE_LIMIT = 10" in server
-    assert 'stable_releases' in server
-    assert '_latest_stable_entry' in server
-    assert 'LATEST_RELEASE_API' in runtime
-    assert '_is_prerelease_version' not in runtime
+    assert "stable_releases" in server
+    assert "_latest_stable_entry" in server
+    assert "LATEST_RELEASE_API" in runtime
+    assert "_is_prerelease_version" not in runtime
     assert 'id="web-update-filter"' in web
     assert "slice(0, 3)" in web and "slice(0, 10)" in web
     assert "预发行包" in web and "发行包" in web
@@ -66,7 +66,8 @@ def check_publish_policy() -> None:
     assert '-f release_status="$RELEASE_STATUS"' in bridge
     assert "release-promote/v*" in promote
     assert "-F prerelease=false" in promote
-    assert "rebuild" not in promote.lower()
+    assert "ncipollo/release-action" not in promote
+    assert "actions/upload-artifact" not in promote
 
 
 def main() -> None:
