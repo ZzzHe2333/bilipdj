@@ -32,6 +32,10 @@
     return String($('web-update-filter')?.value || '发行包');
   }
 
+  function currentDownloadSource() {
+    return String($('web-update-download-source')?.value || 'official');
+  }
+
   function ensureUi() {
     const view = $('view-update');
     const card = view?.querySelector('.card');
@@ -47,6 +51,7 @@
       <div class="web-update-picker-row">
         <label>范围<select id="web-update-filter"><option value="发行包">发行包</option><option value="全部">全部</option></select></label>
         <label>选择版本<select id="web-update-version"><option>正在读取…</option></select></label>
+        <label>下载线路<select id="web-update-download-source"><option value="official">GitHub 官方</option><option value="gh-proxy">第三方加速（GH-Proxy）</option></select></label>
         <div class="web-update-actions">
           <button id="web-update-full" class="button" type="button" disabled>全量更新</button>
           <button id="web-update-incremental" class="button ghost" type="button" disabled>增量更新</button>
@@ -54,6 +59,7 @@
         </div>
       </div>
       <div id="web-update-detail" class="web-update-detail">正在读取 Web Portable 更新能力…</div>
+      <div class="web-update-detail"><span>第三方加速仅改写 GitHub Release 文件下载地址；每次真正使用前都会再次确认，不保存长期信任。下载后的 SHA-256 校验不会关闭。</span></div>
       <div id="web-update-action-status" class="status" aria-live="polite"></div>`;
     const notes = $('update-notes')?.closest('.notes') || $('update-notes');
     if (notes?.parentElement === card) card.insertBefore(section, notes);
@@ -61,6 +67,7 @@
 
     $('web-update-filter').addEventListener('change', () => { buildCandidates(); renderSelected(); renderCatalogStatus(); });
     $('web-update-version').addEventListener('change', renderSelected);
+    $('web-update-download-source').addEventListener('change', renderSelected);
     $('web-update-refresh').addEventListener('click', refreshState);
     $('web-update-full').addEventListener('click', () => startSelected('full'));
     $('web-update-incremental').addEventListener('click', () => startSelected('incremental'));
@@ -122,7 +129,8 @@
       const incrementalText = candidate.cloud.incremental_available
         ? `增量资源上限 ${fmtBytes(candidate.cloud.incremental_max_bytes)}；实际仅按本机 SHA-256 差异 Range 下载。`
         : '当前 Release 没有 Web 增量资源。';
-      detail.innerHTML = `<strong>${releaseKind} v${candidate.version}</strong><span>全量包 ${fmtBytes(candidate.cloud.full_download_bytes)}。${incrementalText}</span>`;
+      const sourceText = currentDownloadSource() === 'gh-proxy' ? '第三方加速（使用前逐次确认）' : 'GitHub 官方';
+      detail.innerHTML = `<strong>${releaseKind} v${candidate.version}</strong><span>全量包 ${fmtBytes(candidate.cloud.full_download_bytes)}。${incrementalText} 下载线路：${sourceText}。</span>`;
       const fullEstimate = $('update-full-estimate');
       const incrementalEstimate = $('update-incremental-estimate');
       if (fullEstimate) fullEstimate.textContent = fmtBytes(candidate.cloud.full_download_bytes);
@@ -143,6 +151,8 @@
   function renderState() {
     const filter = $('web-update-filter');
     if (filter && !['发行包', '全部'].includes(filter.value)) filter.value = '发行包';
+    const source = $('web-update-download-source');
+    if (source && !['official', 'gh-proxy'].includes(source.value)) source.value = 'official';
     buildCandidates();
     const chip = $('web-update-capability');
     if (chip) {
@@ -179,6 +189,20 @@
     const label = mode === 'restore' ? `恢复到本地备份 v${candidate.version}` : `${mode === 'incremental' ? '增量' : '全量'}更新到 v${candidate.version}`;
     if (!confirm(`${label}？\n\n更新开始后会打开独立更新页面，主 Web 服务随后会停止并替换程序文件。`)) return;
 
+    let downloadSource = 'official';
+    let thirdPartyConfirmed = false;
+    if (candidate.source === 'cloud' && currentDownloadSource() === 'gh-proxy') {
+      thirdPartyConfirmed = confirm(
+        '确认使用第三方加速？\n\n' +
+        '本次 GitHub Release 文件将通过第三方服务 gh-proxy.com 传输。\n' +
+        'GitHub API/版本信息仍从官方读取，下载完成后仍会执行现有 SHA-256 校验。\n' +
+        '本次确认不会保存，下次使用第三方加速仍会再次询问。\n\n' +
+        '选择“取消”不会取消更新，而是仅本次改用 GitHub 官方下载。'
+      );
+      if (thirdPartyConfirmed) downloadSource = 'gh-proxy';
+      else setStatus('已取消第三方加速，本次将使用 GitHub 官方下载。');
+    }
+
     let popup = null;
     try { popup = window.open('about:blank', 'bilipdj-web-update'); } catch (_) { popup = null; }
     if (popup) {
@@ -187,7 +211,7 @@
     document.querySelectorAll('#web-update-controls button,#web-update-controls select').forEach(node => { node.disabled = true; });
     setStatus(`正在启动独立更新器：${label}…`);
     try {
-      const payload = { mode };
+      const payload = { mode, download_source: downloadSource, third_party_confirmed: thirdPartyConfirmed };
       if (mode === 'restore') payload.backup_id = candidate.backup.id;
       else payload.target_tag = candidate.cloud?.tag_name || '';
       const result = await post('/api/control/web-update/start', payload);
