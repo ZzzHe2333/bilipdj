@@ -1,0 +1,62 @@
+name: Promote existing Pre-release to Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: '要转为正式发行包的现有标签（例如 v3.0.16）'
+        required: true
+        type: string
+  push:
+    branches:
+      - 'release-promote/v*'
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve and validate tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG_NAME="${{ inputs.tag_name }}"
+          else
+            BRANCH="$GITHUB_REF_NAME"
+            if [[ ! "$BRANCH" =~ ^release-promote/v[0-9]+(\.[0-9]+){2}$ ]]; then
+              echo "Invalid promotion branch: $BRANCH"
+              exit 1
+            fi
+            TAG_NAME="${BRANCH#release-promote/}"
+          fi
+          if [[ ! "$TAG_NAME" =~ ^v[0-9]+(\.[0-9]+){2}$ ]]; then
+            echo "Invalid release tag: $TAG_NAME"
+            exit 1
+          fi
+          echo "TAG_NAME=$TAG_NAME" >> "$GITHUB_ENV"
+
+      - name: Promote existing release in place
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RELEASE_JSON="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG_NAME")"
+          RELEASE_ID="$(printf '%s' "$RELEASE_JSON" | jq -r '.id')"
+          IS_PRERELEASE="$(printf '%s' "$RELEASE_JSON" | jq -r '.prerelease')"
+          IS_DRAFT="$(printf '%s' "$RELEASE_JSON" | jq -r '.draft')"
+          if [ "$IS_DRAFT" = "true" ]; then
+            echo "$TAG_NAME is a draft, not a published Pre-release."
+            exit 1
+          fi
+          if [ "$IS_PRERELEASE" = "false" ]; then
+            echo "$TAG_NAME is already a formal Release; nothing to change."
+            exit 0
+          fi
+          gh api --method PATCH \
+            "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
+            -F prerelease=false >/dev/null
+          echo "Promoted $TAG_NAME from Pre-release to Release without rebuilding assets."
