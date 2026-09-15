@@ -7,6 +7,14 @@ on:
         description: '手动输入要发布的标签（示例：v3.0.0）'
         required: true
         type: string
+      release_status:
+        description: '发布状态：未特别说明时使用预发行包；明确正式版时选择发行包'
+        required: true
+        default: prerelease
+        type: choice
+        options:
+          - prerelease
+          - release
   push:
     branches:
       - now
@@ -45,6 +53,7 @@ jobs:
     outputs:
       version: ${{ steps.resolve_tag.outputs.version }}
       tag_name: ${{ steps.resolve_tag.outputs.tag_name }}
+      prerelease: ${{ steps.resolve_tag.outputs.prerelease }}
       tk_zip: ${{ steps.resolve_tag.outputs.tk_zip }}
       tk_files: ${{ steps.resolve_tag.outputs.tk_files }}
       tk_incremental: ${{ steps.resolve_tag.outputs.tk_incremental }}
@@ -62,27 +71,35 @@ jobs:
         shell: bash
         run: |
           VERSION="$(tr -d '[:space:]' < VERSION)"
-          if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+){2,}(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
-            echo "VERSION 文件格式不合法：$VERSION（应为 3.0.0 或 3.0.0-test 形式）"
+          if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+){2}$ ]]; then
+            echo "VERSION 文件格式不合法：$VERSION（以后只允许标准 x.y.z，例如 3.0.16）"
             exit 1
           fi
 
           EXPLICIT_RELEASE=false
+          PRERELEASE=true
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             TAG_NAME="pr-${{ github.event.pull_request.number }}"
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TAG_NAME="${{ inputs.tag_name }}"
             EXPLICIT_RELEASE=true
+            if [ "${{ inputs.release_status }}" = "release" ]; then
+              PRERELEASE=false
+            fi
           elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             TAG_NAME="${{ github.ref_name }}"
             EXPLICIT_RELEASE=true
+            # Tag pushes do not carry an explicit user intent, so they default
+            # to Pre-release. Use workflow_dispatch release_status=release for
+            # an explicitly requested formal release.
+            PRERELEASE=true
           else
             TAG_NAME="build-now-${GITHUB_SHA:0:8}"
           fi
 
           if [ "$EXPLICIT_RELEASE" = "true" ]; then
-            if [[ ! "$TAG_NAME" =~ ^v[0-9A-Za-z._-]+$ ]]; then
-              echo "发布标签格式不合法：$TAG_NAME（需以 v 开头，例如 v3.0.0）"
+            if [[ ! "$TAG_NAME" =~ ^v[0-9]+(\.[0-9]+){2}$ ]]; then
+              echo "发布标签格式不合法：$TAG_NAME（以后只允许 vX.Y.Z，例如 v3.0.16）"
               exit 1
             fi
             if [ "$TAG_NAME" != "v$VERSION" ]; then
@@ -94,6 +111,7 @@ jobs:
           ARTIFACT_NAME="BiliPDJ-portable-bundles-$TAG_NAME"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
           echo "tk_zip=BiliPDJ-v$VERSION-Windows-Tk-Portable-x64.zip" >> "$GITHUB_OUTPUT"
           echo "tk_files=BiliPDJ-v$VERSION-Windows-Tk-files.json" >> "$GITHUB_OUTPUT"
           echo "tk_incremental=BiliPDJ-v$VERSION-Windows-Tk-Incremental-x64.pack" >> "$GITHUB_OUTPUT"
@@ -155,7 +173,6 @@ jobs:
           try {
             $version = "${{ steps.resolve_tag.outputs.version }}"
             $targetTag = "v$version"
-            $prereleaseTarget = $version.Contains("-")
             $releases = @(gh api "repos/ZzzHe2333/bilipdj/releases?per_page=50" | ConvertFrom-Json)
             $release = $releases | Where-Object {
               $candidate = $_
@@ -163,7 +180,6 @@ jobs:
               $hasWeb = @($candidate.assets | Where-Object { [string]$_.name -match '^BiliPDJ-v.+-Web-Portable-x64\.zip$' }).Count -gt 0
               -not [bool]$candidate.draft -and
                 [string]$candidate.tag_name -ne $targetTag -and
-                ($prereleaseTarget -or -not [bool]$candidate.prerelease) -and
                 $hasTk -and $hasWeb
             } | Select-Object -First 1
             if ($null -eq $release) {
@@ -403,4 +419,4 @@ jobs:
           replacesArtifacts: true
           bodyFile: core/RELEASE_NOTES.md
           generateReleaseNotes: false
-          prerelease: ${{ contains(needs.build-portable-bundles.outputs.version, '-') }}
+          prerelease: ${{ needs.build-portable-bundles.outputs.prerelease == 'true' }}
