@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import re
 import threading
 import time
 from typing import Any
 
 from apps.versioning import version_key as _shared_version_key
-
 from apps.server import issue185_runtime_guard, update_estimate_api, web_control_guard, web_update_api
 
 _PATCH_LOCK = threading.RLock()
@@ -14,6 +12,8 @@ _LAUNCH_LOCK = threading.RLock()
 _CATALOG_LOCK = threading.RLock()
 _CATALOG_CACHE: dict[str, Any] = {"time": 0.0, "entries": None}
 _CATALOG_TTL_SECONDS = 45.0
+RELEASE_ONLY_LIMIT = 3
+ALL_RELEASE_LIMIT = 10
 
 
 def _release_version(payload: dict[str, Any]) -> str:
@@ -25,24 +25,17 @@ def _version_key(value: str):
     return _shared_version_key(value)
 
 
-def _latest(releases: list[dict[str, Any]], *, prerelease: bool) -> dict[str, Any] | None:
-    candidates: list[tuple[Any, dict[str, Any]]] = []
-    for release in releases:
-        if bool(release.get("draft")) or bool(release.get("prerelease")) != prerelease:
-            continue
-        try:
-            key = _version_key(_release_version(release))
-        except ValueError:
-            continue
-        candidates.append((key, release))
-    return max(candidates, key=lambda item: item[0])[1] if candidates else None
+def _release_sort_key(release: dict[str, Any]) -> str:
+    return str(release.get("published_at") or release.get("created_at") or "")
 
 
 def _release_list() -> list[dict[str, Any]]:
     payload = issue185_runtime_guard._request_json(issue185_runtime_guard.RELEASES_API)  # noqa: SLF001
     if not isinstance(payload, list):
         raise RuntimeError("GitHub Release 列表响应无效")
-    return [item for item in payload if isinstance(item, dict) and not bool(item.get("draft"))]
+    releases = [item for item in payload if isinstance(item, dict) and not bool(item.get("draft"))]
+    releases.sort(key=_release_sort_key, reverse=True)
+    return releases
 
 
 def _validated_manifest(release: dict[str, Any]) -> dict[str, Any]:
@@ -85,23 +78,37 @@ def _catalog(*, refresh: bool = False) -> list[dict[str, Any]]:
             return cached
 
         releases = _release_list()
-        chosen = [_latest(releases, prerelease=False), _latest(releases, prerelease=True)]
-        result: list[dict[str, Any]] = []
+        all_recent = releases[:ALL_RELEASE_LIMIT]
+        stable_recent = [release for release in releases if not bool(release.get("prerelease"))][:RELEASE_ONLY_LIMIT]
+        all_tags = {str(release.get("tag_name", "") or "").strip() for release in all_recent}
+        stable_tags = {str(release.get("tag_name", "") or "").strip() for release in stable_recent}
+
+        chosen: list[dict[str, Any]] = []
         seen: set[str] = set()
-        errors: list[str] = []
-        for release in chosen:
-            if release is None:
-                continue
+        for release in [*all_recent, *stable_recent]:
             tag = str(release.get("tag_name", "") or "").strip()
             if not tag or tag in seen:
                 continue
+            seen.add(tag)
+            chosen.append(release)
+
+        result: list[dict[str, Any]] = []
+        errors: list[str] = []
+        for release in chosen:
+            tag = str(release.get("tag_name", "") or "").strip()
             try:
                 manifest = _validated_manifest(release)
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{tag}: {exc}")
                 continue
-            seen.add(tag)
-            result.append({"release": release, "manifest": manifest})
+            result.append(
+                {
+                    "release": release,
+                    "manifest": manifest,
+                    "in_all": tag in all_tags,
+                    "in_stable": tag in stable_tags,
+                }
+            )
         if not result:
             raise RuntimeError("无法读取可用 Release" + (f"：{'；'.join(errors)}" if errors else ""))
         _CATALOG_CACHE["time"] = now
@@ -128,6 +135,14 @@ def _summary(entry: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _latest_stable_entry(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    stable = [entry for entry in entries if entry.get("in_stable") and not bool(entry["release"].get("prerelease"))]
+    stable.sort(key=lambda entry: _release_sort_key(entry["release"]), reverse=True)
+    if not stable:
+        raise RuntimeError("没有可用的正式发行包")
+    return stable[0]
+
+
 def install_issue189_release_selector(server_module: Any) -> bool:
     with _PATCH_LOCK:
         if bool(getattr(web_update_api, "_issue189_release_selector_installed", False)):
@@ -146,16 +161,18 @@ def install_issue189_release_selector(server_module: Any) -> bool:
                 "backups": web_update_api._discover_backups(app_dir),  # noqa: SLF001
                 "cloud": None,
                 "releases": [],
+                "stable_releases": [],
                 "default_tag": "",
                 "default_version": "",
                 "cloud_error": "",
             }
             try:
                 entries = _catalog()
-                summaries = [_summary(entry) for entry in entries]
-                # _catalog is deliberately stable first, prerelease second.
-                default = summaries[0]
-                result["releases"] = summaries
+                all_summaries = [_summary(entry) for entry in entries if entry.get("in_all")]
+                stable_summaries = [_summary(entry) for entry in entries if entry.get("in_stable")]
+                default = _summary(_latest_stable_entry(entries))
+                result["releases"] = all_summaries[:ALL_RELEASE_LIMIT]
+                result["stable_releases"] = stable_summaries[:RELEASE_ONLY_LIMIT]
                 result["cloud"] = default
                 result["default_tag"] = default["tag_name"]
                 result["default_version"] = default["version"]
@@ -179,7 +196,6 @@ def install_issue189_release_selector(server_module: Any) -> bool:
                         selected = entry
                         break
                 if selected is None:
-                    # Refresh once so a just-published Release can be selected immediately.
                     entries = _catalog(refresh=True)
                     for entry in entries:
                         if str(entry["release"].get("tag_name", "") or "").strip() == target_tag:
@@ -188,7 +204,7 @@ def install_issue189_release_selector(server_module: Any) -> bool:
                 if selected is None:
                     raise ValueError("所选云端版本已不存在，请刷新版本列表后重试")
             else:
-                selected = entries[0]
+                selected = _latest_stable_entry(entries)
 
             manifest = selected["manifest"]
             with _LAUNCH_LOCK:
@@ -202,8 +218,7 @@ def install_issue189_release_selector(server_module: Any) -> bool:
         def stable_update_payload(module: Any) -> dict[str, Any]:
             current = web_control_guard._read_version(module)  # noqa: SLF001
             try:
-                entry = _catalog()[0]
-                release = entry["release"]
+                release = _latest_stable_entry(_catalog())["release"]
             except Exception as exc:  # noqa: BLE001
                 return {"status": "error", "message": f"检查更新失败：{exc}", "current_version": current}
             return {
@@ -215,11 +230,11 @@ def install_issue189_release_selector(server_module: Any) -> bool:
                 "published_at": str(release.get("published_at", "") or ""),
                 "html_url": str(release.get("html_url", "") or ""),
                 "body": str(release.get("body", "") or "")[:12000],
-                "prerelease": bool(release.get("prerelease")),
+                "prerelease": False,
             }
 
         def stable_estimate_release() -> dict[str, Any]:
-            return _catalog()[0]["release"]
+            return _latest_stable_entry(_catalog())["release"]
 
         web_update_api._state_payload = state_payload  # type: ignore[attr-defined]  # noqa: SLF001
         web_update_api._launch_update = launch_update  # type: ignore[attr-defined]  # noqa: SLF001
@@ -229,4 +244,4 @@ def install_issue189_release_selector(server_module: Any) -> bool:
         return True
 
 
-__all__ = ["install_issue189_release_selector"]
+__all__ = ["ALL_RELEASE_LIMIT", "RELEASE_ONLY_LIMIT", "install_issue189_release_selector"]
