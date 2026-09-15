@@ -1,0 +1,62 @@
+name: Validate unified Release model
+
+on:
+  pull_request:
+    paths:
+      - 'VERSION'
+      - 'core/RELEASE_NOTES.md'
+      - 'apps/windows/version.py'
+      - 'apps/windows/update_channel.py'
+      - 'apps/windows/release_selector.py'
+      - 'apps/windows/update_page.py'
+      - 'apps/server/issue185_runtime_guard.py'
+      - 'apps/server/issue189_release_selector.py'
+      - 'apps/web/static/web_updater_control.js'
+      - '.github/workflows/package-windows-x64.yml'
+      - '.github/workflows/package-macos.yml'
+      - '.github/workflows/release-dispatch-bridge.yml'
+      - '.github/workflows/promote-existing-release.yml'
+      - '.github/ci/issue275_release_model_guard.py'
+      - '.github/workflows/issue275-release-model.yml'
+  push:
+    branches:
+      - now
+    paths:
+      - 'VERSION'
+      - 'core/RELEASE_NOTES.md'
+      - 'apps/windows/version.py'
+      - 'apps/windows/update_channel.py'
+      - 'apps/windows/release_selector.py'
+      - 'apps/windows/update_page.py'
+      - 'apps/server/issue185_runtime_guard.py'
+      - 'apps/server/issue189_release_selector.py'
+      - 'apps/web/static/web_updater_control.js'
+      - '.github/workflows/package-windows-x64.yml'
+      - '.github/workflows/package-macos.yml'
+      - '.github/workflows/release-dispatch-bridge.yml'
+      - '.github/workflows/promote-existing-release.yml'
+      - '.github/ci/issue275_release_model_guard.py'
+      - '.github/workflows/issue275-release-model.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile release/update modules
+        run: >-
+          python -m py_compile
+          apps/windows/version.py
+          apps/windows/update_channel.py
+          apps/windows/release_selector.py
+          apps/windows/update_page.py
+          apps/server/issue185_runtime_guard.py
+          apps/server/issue189_release_selector.py
+      - name: Validate unified Release model
+        run: python .github/ci/issue275_release_model_guard.py
