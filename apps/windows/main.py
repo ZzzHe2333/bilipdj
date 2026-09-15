@@ -219,7 +219,12 @@ def _run_desktop() -> None:
     if "--backend" in sys.argv[1:] or "--overlay-host" in sys.argv[1:]:
         control_panel.main()
         return
-    root, _app, _errors = _create_desktop()
+    root, app, _errors = _create_desktop()
+    if "--gui-close-self-test" in sys.argv[1:]:
+        # Exercise the same close callback bound to the window X button.  Do
+        # not call os._exit here: the packaging probe must observe whether the
+        # real frozen process terminates on its own (or via the shutdown guard).
+        root.after(1200, app.on_close)
     root.mainloop()
 
 
@@ -247,6 +252,7 @@ if __name__ == "__main__":
         main()
     except BaseException as exc:
         log_path = _write_startup_error(str(exc) or type(exc).__name__, exc=exc)
-        if "--gui-startup-self-test" not in sys.argv[1:]:
+        gui_probe = "--gui-startup-self-test" in sys.argv[1:] or "--gui-close-self-test" in sys.argv[1:]
+        if not gui_probe:
             _show_startup_error(str(exc) or type(exc).__name__, log_path)
         raise

@@ -25,6 +25,7 @@ from .purple_mouse_control_guard import patch_control_panel_purple_mouse
 from .queue_clear_dialog import install_queue_clear_dialog
 from .redtv_control_guard import patch_control_panel_redtv
 from .release_selector import install_release_selector
+from .shutdown_guard import install_shutdown_guard
 from .style_save_transport import install_style_save_transport
 from .support_us import _render_support_content, patch_control_panel_support_us
 from .unified_theme import patch_control_panel_unified_theme
@@ -110,6 +111,7 @@ def _install_tk_page_runtime(panel_class: type[Any]) -> None:
 def _install_compatibility_runtime(panel_class: type[Any]) -> None:
     patch_control_panel_issue185(panel_class)
     patch_control_panel_issue187(panel_class)
+    install_shutdown_guard(panel_class)
     patch_control_panel_issue194(panel_class)
     patch_control_panel_unified_theme(panel_class)
     patch_control_panel_issue209(panel_class)
