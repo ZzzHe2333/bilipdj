@@ -28,6 +28,10 @@
     node.style.color = ok ? '' : 'var(--danger)';
   }
 
+  function currentFilter() {
+    return String($('web-update-filter')?.value || '发行包');
+  }
+
   function ensureUi() {
     const view = $('view-update');
     const card = view?.querySelector('.card');
@@ -37,10 +41,11 @@
     section.className = 'web-update-controls';
     section.innerHTML = `
       <div class="web-update-head">
-        <div><strong>Web Portable 自动更新</strong><p>同时读取云端正式版和测试版；默认选择最新正式版。支持全量更新、逐文件增量更新和本地版本恢复，更新开始后会打开独立的俄罗斯方块进度页。</p></div>
+        <div><strong>Web Portable 自动更新</strong><p>默认以最新发行包为更新目标。“发行包”显示最近 3 个正式 Release，“全部”显示最近 10 个 Release（包含预发行包）。</p></div>
         <span id="web-update-capability" class="web-update-chip">检测中</span>
       </div>
       <div class="web-update-picker-row">
+        <label>范围<select id="web-update-filter"><option value="发行包">发行包</option><option value="全部">全部</option></select></label>
         <label>选择版本<select id="web-update-version"><option>正在读取…</option></select></label>
         <div class="web-update-actions">
           <button id="web-update-full" class="button" type="button" disabled>全量更新</button>
@@ -54,20 +59,24 @@
     if (notes?.parentElement === card) card.insertBefore(section, notes);
     else card.appendChild(section);
 
+    $('web-update-filter').addEventListener('change', () => { buildCandidates(); renderSelected(); renderCatalogStatus(); });
     $('web-update-version').addEventListener('change', renderSelected);
     $('web-update-refresh').addEventListener('click', refreshState);
     $('web-update-full').addEventListener('click', () => startSelected('full'));
     $('web-update-incremental').addEventListener('click', () => startSelected('incremental'));
   }
 
+  function visibleReleases() {
+    if (currentFilter() === '全部') return Array.isArray(state?.releases) ? state.releases.slice(0, 10) : [];
+    if (Array.isArray(state?.stable_releases)) return state.stable_releases.slice(0, 3);
+    return state?.cloud?.version ? [state.cloud] : [];
+  }
+
   function buildCandidates() {
     candidates = new Map();
-    const releases = Array.isArray(state?.releases) && state.releases.length
-      ? state.releases
-      : (state?.cloud?.version ? [state.cloud] : []);
-    for (const cloud of releases) {
+    for (const cloud of visibleReleases()) {
       if (!cloud?.version) continue;
-      const kind = cloud.prerelease ? '云端测试版' : '云端正式版';
+      const kind = cloud.prerelease ? '预发行包' : '发行包';
       const label = `${kind} · v${cloud.version}`;
       candidates.set(label, { source: 'cloud', version: cloud.version, cloud });
     }
@@ -109,11 +118,11 @@
     } else {
       full.textContent = '全量更新'; full.disabled = !canRun;
       incremental.disabled = !canRun || !candidate.cloud.incremental_available;
-      const releaseKind = candidate.cloud.prerelease ? '测试版' : '正式版';
+      const releaseKind = candidate.cloud.prerelease ? '预发行包' : '发行包';
       const incrementalText = candidate.cloud.incremental_available
         ? `增量资源上限 ${fmtBytes(candidate.cloud.incremental_max_bytes)}；实际仅按本机 SHA-256 差异 Range 下载。`
         : '当前 Release 没有 Web 增量资源。';
-      detail.innerHTML = `<strong>云端${releaseKind} v${candidate.version}</strong><span>全量包 ${fmtBytes(candidate.cloud.full_download_bytes)}。${incrementalText}</span>`;
+      detail.innerHTML = `<strong>${releaseKind} v${candidate.version}</strong><span>全量包 ${fmtBytes(candidate.cloud.full_download_bytes)}。${incrementalText}</span>`;
       const fullEstimate = $('update-full-estimate');
       const incrementalEstimate = $('update-incremental-estimate');
       if (fullEstimate) fullEstimate.textContent = fmtBytes(candidate.cloud.full_download_bytes);
@@ -124,7 +133,16 @@
     }
   }
 
+  function renderCatalogStatus() {
+    if (state?.cloud_error) { setStatus(`云端版本读取失败：${state.cloud_error}`, false); return; }
+    const stableCount = Array.isArray(state?.stable_releases) ? state.stable_releases.length : (state?.cloud ? 1 : 0);
+    const allCount = Array.isArray(state?.releases) ? state.releases.length : 0;
+    setStatus(`当前 v${state?.current_version || '?'}；发行包 ${stableCount}/3，全部 ${allCount}/10，本地备份 ${(state?.backups || []).length} 个。默认更新目标为最新发行包。`);
+  }
+
   function renderState() {
+    const filter = $('web-update-filter');
+    if (filter && !['发行包', '全部'].includes(filter.value)) filter.value = '发行包';
     buildCandidates();
     const chip = $('web-update-capability');
     if (chip) {
@@ -134,17 +152,13 @@
       else { chip.textContent = '自动更新可用'; chip.classList.add('ok'); }
     }
     renderSelected();
-    if (state?.cloud_error) setStatus(`云端版本读取失败：${state.cloud_error}`, false);
-    else {
-      const cloudCount = Array.isArray(state?.releases) ? state.releases.length : (state?.cloud ? 1 : 0);
-      setStatus(`当前 v${state?.current_version || '?'}；已读取 ${cloudCount} 个云端通道版本和 ${(state?.backups || []).length} 个本地可恢复版本。默认选择正式版。`);
-    }
+    renderCatalogStatus();
   }
 
   async function refreshState() {
     ensureUi();
     const refresh = $('web-update-refresh'); if (refresh) refresh.disabled = true;
-    setStatus('正在读取云端正式版、测试版与本地备份…');
+    setStatus('正在读取最近 3 个发行包、最近 10 个全部 Release 与本地备份…');
     try {
       state = await api('/api/control/web-update/state');
       renderState();
@@ -170,7 +184,7 @@
     if (popup) {
       try { popup.document.write('<meta charset="utf-8"><title>BiliPDJ 更新器</title><body style="background:#090e1a;color:#e6edf7;font-family:sans-serif;padding:32px">正在启动独立更新器…</body>'); } catch (_) { /* ignore */ }
     }
-    document.querySelectorAll('#web-update-controls button,#web-update-version').forEach(node => { node.disabled = true; });
+    document.querySelectorAll('#web-update-controls button,#web-update-controls select').forEach(node => { node.disabled = true; });
     setStatus(`正在启动独立更新器：${label}…`);
     try {
       const payload = { mode };
