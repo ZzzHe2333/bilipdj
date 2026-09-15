@@ -4,7 +4,9 @@ import re
 import sys
 from pathlib import Path
 
-_VERSION_PATTERN = re.compile(r"^\d+(?:\.\d+){2,}(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$")
+# New BiliPDJ builds use only x.y.z. Release/Pre-release is GitHub metadata,
+# never part of the application version string.
+_VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 
 
 def _version_candidates() -> tuple[Path, ...]:
@@ -34,7 +36,7 @@ def load_app_version() -> str:
         except OSError:
             continue
         if not _VERSION_PATTERN.fullmatch(version):
-            raise RuntimeError(f"VERSION 文件格式无效：{path} -> {version!r}")
+            raise RuntimeError(f"VERSION 文件格式无效：{path} -> {version!r}；新版本只允许 x.y.z")
         return version
     raise RuntimeError(f"找不到 VERSION 文件，已检查：{', '.join(checked)}")
 
