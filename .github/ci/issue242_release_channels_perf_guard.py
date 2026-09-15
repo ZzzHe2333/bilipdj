@@ -25,7 +25,6 @@ def check_release_channels() -> None:
     assert CHANNEL_ORDER == ("发行包", "全部")
     assert RELEASE_ONLY_LIMIT == 3
     assert ALL_RELEASE_LIMIT == 10
-    # A version string no longer defines a channel; GitHub prerelease is source of truth.
     assert release_channel("3.0.15") == "全部"
     assert release_channel("3.0.15-test") == "全部"
     assert display_version("3.0.15-test") == "3.0.15-test"
@@ -47,9 +46,11 @@ def check_update_page_policy() -> None:
     page = read("apps/windows/update_page.py")
     assert "update_page.RELEASE_CHANNELS = CHANNEL_ORDER" in source
     assert "def _install_update_page_policy" in source
-    assert "最近 3 个发行包" in source
-    assert "最近 10 个 Release" in source
-    assert 'text="版本类型"' in page
+    assert 'RELEASE_CHANNELS = ("发行包", "全部")' in page
+    assert 'text="版本范围"' in page
+    assert 'tk.StringVar(value="发行包")' in page
+    assert "最近 3 个正式 Release" in page
+    assert "最近 10 个 Release" in page
     assert "_update_channel_combo" in page
     assert "_update_version_combo" in page
 
