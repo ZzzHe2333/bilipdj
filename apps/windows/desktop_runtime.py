@@ -10,6 +10,7 @@ from .command_console_ui import patch_control_panel_command_console
 from .control_panel_features import patch_control_panel_features
 from .control_panel_guard import patch_control_panel_class
 from .control_panel_ui_finish import patch_control_panel_ui_finish
+from .download_acceleration import install_download_acceleration
 from .gift_compatibility_ui import install_gift_compatibility_ui
 from .gui_log_sink import patch_control_panel_logging
 from .gui_stability import patch_control_panel_issue185
@@ -69,6 +70,7 @@ def _install_core_runtime(panel_class: type[Any]) -> None:
     install_style_save_transport()
     install_update_channel_guard()
     install_release_selector()
+    install_download_acceleration()
     # Install before issue180 captures/finalizes the update-page builder.
     install_backup_cleanup_ui()
 
