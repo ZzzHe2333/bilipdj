@@ -35,23 +35,19 @@ def check_release_channel_selection() -> None:
         del timeout
         calls.append(url)
         if url == module.LATEST_RELEASE_API:
-            return {"tag_name": "v3.0.2", "draft": False, "prerelease": False}
-        if url == module.RELEASES_API:
-            return [
-                {"tag_name": "v3.0.4-test", "draft": False, "prerelease": True},
-                {"tag_name": "v3.0.2", "draft": False, "prerelease": False},
-            ]
+            return {"tag_name": "v3.0.16", "draft": False, "prerelease": False}
         raise AssertionError(url)
 
     original = module._request_json
     module._request_json = fake_request
     try:
-        stable = module._select_release("3.0.2")
-        assert stable["tag_name"] == "v3.0.2"
+        stable = module._select_release("3.0.15")
+        assert stable["tag_name"] == "v3.0.16"
         assert calls[-1] == module.LATEST_RELEASE_API
-        prerelease = module._select_release("3.0.4-test")
-        assert prerelease["tag_name"] == "v3.0.4-test"
-        assert calls[-1] == module.RELEASES_API
+        # Historical suffixed installs no longer opt into Pre-release updates.
+        from_legacy_prerelease = module._select_release("3.0.15-test")
+        assert from_legacy_prerelease["tag_name"] == "v3.0.16"
+        assert calls[-1] == module.LATEST_RELEASE_API
     finally:
         module._request_json = original
 
@@ -61,10 +57,11 @@ def check_server_installation() -> None:
     assert "from apps.server.issue185_runtime_guard import install_issue185_runtime_guards" in source
     assert "install_issue185_runtime_guards(backend)" in source
     guard = read("apps/server/issue185_runtime_guard.py")
-    assert "web_update_api._load_manifest = load_manifest_for_channel" in guard
+    assert "web_update_api._load_manifest = load_manifest_for_release" in guard
     assert "update_estimate_api._fetch_latest_release = fetch_release_for_estimate" in guard
-    assert "web_control_guard._update_payload = update_payload_for_channel" in guard
+    assert "web_control_guard._update_payload = update_payload_for_release" in guard
     assert "update-manifest.json" in guard
+    assert "_is_prerelease_version" not in guard
 
 
 def check_desktop_stability() -> None:
