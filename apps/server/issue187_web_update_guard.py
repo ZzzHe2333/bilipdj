@@ -10,6 +10,13 @@ import urllib.parse
 from pathlib import Path
 from typing import Any
 
+from apps.update_download_source import (
+    GH_PROXY_SOURCE,
+    OFFICIAL_SOURCE,
+    normalize_download_source,
+    rewrite_package_download_urls,
+    source_label,
+)
 from apps.update_workspace import allocate_update_session, cleanup_update_session
 
 
@@ -58,6 +65,12 @@ def install_issue187_web_update_guard(server_module: Any) -> bool:
         if mode not in {"full", "incremental", "restore"}:
             raise ValueError("mode 必须是 full / incremental / restore")
 
+        download_source = OFFICIAL_SOURCE
+        if mode in {"full", "incremental"}:
+            download_source = normalize_download_source(payload.get("download_source"))
+            if download_source == GH_PROXY_SOURCE and payload.get("third_party_confirmed") is not True:
+                raise ValueError("第三方加速必须由用户针对本次下载明确确认")
+
         session_dir = allocate_update_session(app_dir, f"web-{mode}")
         process: subprocess.Popen[Any] | None = None
         try:
@@ -80,11 +93,15 @@ def install_issue187_web_update_guard(server_module: Any) -> bool:
                 "current_version": web_update_api._version(active_server_module),  # noqa: SLF001
                 "return_url": f"http://127.0.0.1:{server_port}/control",
                 "launch_dir": str(session_dir),
+                "download_source": download_source,
             }
 
             if mode in {"full", "incremental"}:
                 manifest = web_update_api._load_manifest()  # noqa: SLF001
-                package = manifest["packages"][web_update_api.WEB_PACKAGE_KEY]
+                raw_package = manifest["packages"][web_update_api.WEB_PACKAGE_KEY]
+                if not isinstance(raw_package, dict):
+                    raise RuntimeError("Web 更新清单中的包信息无效")
+                package = rewrite_package_download_urls(raw_package, download_source)
                 if mode == "incremental":
                     if not isinstance(package.get("file_manifest"), dict) or not isinstance(package.get("incremental"), dict):
                         raise RuntimeError("当前 Release 没有 Web Portable 增量资源；请使用全量更新")
@@ -126,8 +143,12 @@ def install_issue187_web_update_guard(server_module: Any) -> bool:
                             "status": "ok",
                             "mode": mode,
                             "target_version": request.get("target_version", ""),
+                            "download_source": download_source,
                             "update_url": f"http://127.0.0.1:{port}/update.html?token={urllib.parse.quote(token)}",
-                            "message": "独立 Web 更新器已启动；主服务将在更新页打开后退出。",
+                            "message": (
+                                "独立 Web 更新器已启动；主服务将在更新页打开后退出。"
+                                f" 下载线路：{source_label(download_source)}。"
+                            ),
                         }
                     error = str(ready.get("error", "") or "Web 更新器启动失败")
                     raise RuntimeError(error)
