@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
-from apps.update_download_source import (
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from apps.update_download_source import (  # noqa: E402
     GH_PROXY_PREFIX,
     GH_PROXY_SOURCE,
     OFFICIAL_SOURCE,
@@ -10,8 +15,6 @@ from apps.update_download_source import (
     rewrite_download_url,
     rewrite_package_download_urls,
 )
-
-ROOT = Path(__file__).resolve().parents[2]
 
 
 def read(relative: str) -> str:
