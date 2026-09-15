@@ -1,0 +1,50 @@
+name: Validate guarded download acceleration
+
+on:
+  pull_request:
+    paths:
+      - 'apps/update_download_source.py'
+      - 'apps/windows/download_acceleration.py'
+      - 'apps/windows/desktop_runtime.py'
+      - 'apps/windows/update_client.py'
+      - 'apps/windows/incremental_update.py'
+      - 'apps/server/issue187_web_update_guard.py'
+      - 'apps/web/static/web_updater_control.js'
+      - 'apps/web/web_updater.py'
+      - '.github/ci/issue279_download_acceleration_guard.py'
+      - '.github/workflows/issue279-download-acceleration.yml'
+  push:
+    branches:
+      - now
+    paths:
+      - 'apps/update_download_source.py'
+      - 'apps/windows/download_acceleration.py'
+      - 'apps/windows/desktop_runtime.py'
+      - 'apps/windows/update_client.py'
+      - 'apps/windows/incremental_update.py'
+      - 'apps/server/issue187_web_update_guard.py'
+      - 'apps/web/static/web_updater_control.js'
+      - 'apps/web/web_updater.py'
+      - '.github/ci/issue279_download_acceleration_guard.py'
+      - '.github/workflows/issue279-download-acceleration.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile changed update modules
+        run: >-
+          python -m py_compile
+          apps/update_download_source.py
+          apps/windows/download_acceleration.py
+          apps/windows/desktop_runtime.py
+          apps/server/issue187_web_update_guard.py
+      - name: Validate per-use confirmation and integrity policy
+        run: python .github/ci/issue279_download_acceleration_guard.py
