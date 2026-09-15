@@ -91,6 +91,14 @@ try {
         throw "Frozen Windows GUI startup self-test failed with exit code $startupExit"
     }
 
+    # Reproduce the user's real close path: create the packaged desktop, invoke
+    # the same callback as the title-bar X button, and require the process to
+    # disappear instead of remaining headless in Task Manager.
+    $closeExit = Invoke-FrozenProbe -FilePath $mainExe -Arguments "--gui-close-self-test" -Label "Frozen Windows GUI close self-test" -TimeoutSeconds 20
+    if ($closeExit -ne 0) {
+        throw "Frozen Windows GUI close self-test failed with exit code $closeExit"
+    }
+
     New-Item -ItemType Directory -Path "dist\bilipdj\key" -Force | Out-Null
     @"
 BiliPDJ 更新元数据目录
