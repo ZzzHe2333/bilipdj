@@ -1,35 +1,11 @@
 from __future__ import annotations
 
 import json
-import re
-import sys
-from pathlib import Path
 from typing import Any
-
-RELEASES_API = "https://api.github.com/repos/ZzzHe2333/bilipdj/releases?per_page=30"
 
 from apps.versioning import is_prerelease_version, version_key
 
-
-def _installed_version() -> str:
-    candidates: list[Path] = []
-    if bool(getattr(sys, "frozen", False)):
-        try:
-            candidates.append(Path(sys.executable).resolve().parent / "VERSION")
-        except Exception:
-            pass
-    try:
-        candidates.append(Path(__file__).resolve().parents[2] / "VERSION")
-    except Exception:
-        pass
-    for path in candidates:
-        try:
-            value = path.read_text(encoding="utf-8-sig").strip()
-        except OSError:
-            continue
-        if value:
-            return value
-    return ""
+RELEASES_API = "https://api.github.com/repos/ZzzHe2333/bilipdj/releases?per_page=100"
 
 
 def _release_version(payload: dict[str, Any]) -> str:
@@ -38,19 +14,28 @@ def _release_version(payload: dict[str, Any]) -> str:
 
 
 def select_channel_release(releases: list[Any]) -> dict[str, Any]:
-    candidates: list[tuple[tuple[tuple[int, ...], int, tuple[tuple[int, int, str], ...]], dict[str, Any]]] = []
+    """Return the newest published non-prerelease GitHub Release.
+
+    Release status, rather than a version suffix, is the update channel source of
+    truth. Historical suffixed versions remain parseable for compatibility, but
+    they never make a prerelease eligible for the default update target.
+    """
+    candidates: list[dict[str, Any]] = []
     for raw in releases:
-        if not isinstance(raw, dict) or bool(raw.get("draft")):
+        if not isinstance(raw, dict) or bool(raw.get("draft")) or bool(raw.get("prerelease")):
             continue
-        version = _release_version(raw)
         try:
-            key = version_key(version)
+            version_key(_release_version(raw))
         except ValueError:
             continue
-        candidates.append((key, raw))
+        candidates.append(raw)
     if not candidates:
-        raise RuntimeError("没有可用的 GitHub Release")
-    return max(candidates, key=lambda item: item[0])[1]
+        raise RuntimeError("没有可用的正式 GitHub Release")
+    candidates.sort(
+        key=lambda item: str(item.get("published_at") or item.get("created_at") or ""),
+        reverse=True,
+    )
+    return candidates[0]
 
 
 def _manifest_asset_url(payload: dict[str, Any]) -> str:
@@ -79,7 +64,10 @@ def install_update_channel_guard() -> bool:
     def is_newer_version(candidate: str, current: str) -> bool:
         return version_key(candidate) > version_key(current)
 
-    def fetch_prerelease_channel(*, timeout: float = 15.0):
+    def fetch_latest_release(*, timeout: float = 15.0):
+        # Always follow the newest published Release. Pre-release packages are
+        # selectable manually from the "全部" catalog but never become the
+        # automatic/default update target.
         request = update_client._request(RELEASES_API, timeout=timeout)  # noqa: SLF001
         with request as response:
             try:
@@ -88,7 +76,10 @@ def install_update_channel_guard() -> bool:
                 raise update_client.UpdateError("GitHub Release 列表无法解析") from exc
         if not isinstance(payload, list):
             raise update_client.UpdateError("GitHub Release 列表格式无效")
-        release = select_channel_release(payload)
+        try:
+            release = select_channel_release(payload)
+        except RuntimeError as exc:
+            raise update_client.UpdateError(str(exc)) from exc
         manifest_url = _manifest_asset_url(release)
         if manifest_url:
             try:
@@ -99,16 +90,6 @@ def install_update_channel_guard() -> bool:
             except Exception:
                 pass
         return update_client._release_from_github_payload(release)  # noqa: SLF001
-
-    def fetch_latest_release(*, timeout: float = 15.0):
-        current = _installed_version()
-        try:
-            prerelease = bool(current) and is_prerelease_version(current)
-        except ValueError:
-            prerelease = False
-        if prerelease:
-            return fetch_prerelease_channel(timeout=timeout)
-        return original_fetch_latest(timeout=timeout)
 
     update_client.normalize_version = normalize_version
     update_client.is_newer_version = is_newer_version
