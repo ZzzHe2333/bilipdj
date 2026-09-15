@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 SELECTOR = ROOT / "apps" / "windows" / "update_version_selector.py"
 PAGE = ROOT / "apps" / "windows" / "update_page.py"
@@ -51,11 +50,12 @@ def main() -> None:
     require(
         RELEASE_SELECTOR,
         (
-            'CHANNEL_ORDER = ("正式版", "公测版", "创新版", "内测版", "废弃版")',
-            "RECENT_RELEASE_LIMIT = 10",
+            'CHANNEL_ORDER = ("发行包", "全部")',
+            "RELEASE_ONLY_LIMIT = 3",
+            "ALL_RELEASE_LIMIT = 10",
             "def on_channel_selected",
-            "def release_channel",
-            "def display_version",
+            'update_page.RELEASE_CHANNELS = CHANNEL_ORDER',
+            'app.update_channel_var.set("发行包")',
         ),
     )
     require(
