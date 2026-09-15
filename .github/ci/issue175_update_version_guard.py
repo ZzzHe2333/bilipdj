@@ -36,8 +36,10 @@ def main() -> None:
         PAGE,
         (
             "update_version_selector",
-            'text="版本类型"',
+            'RELEASE_CHANNELS = ("发行包", "全部")',
+            'text="版本范围"',
             'text="版本"',
+            'tk.StringVar(value="发行包")',
             "_update_channel_combo",
             "_update_version_combo",
             "ttk.Combobox(",
