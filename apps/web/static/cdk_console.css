@@ -1,0 +1,349 @@
+/* Issue #294 — BiliPDJ Web visual refresh, inspired by linux-do/cdk.
+ * Presentation-only layer: API, IDs, JS, custom themes and OBS styles remain unchanged.
+ * Keep selectors scoped to management pages; NEVER apply to the /index OBS overlay.
+ */
+
+/* Console: respect the existing light/dark/custom theme palette. */
+body.cdk-console {
+  --ui-radius: var(--radius, 12px);
+  --ui-shadow: 0 1px 3px rgba(0,0,0,.035), 0 12px 35px rgba(0,0,0,.045);
+  --ui-soft: color-mix(in srgb, var(--text) 4%, var(--panel));
+  --ui-quiet: color-mix(in srgb, var(--text) 3%, var(--bg));
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.55;
+}
+.cdk-console .app-shell { min-height: 100dvh; }
+.cdk-console .topbar {
+  height: 76px;
+  padding: 0 clamp(16px, 2.4vw, 36px);
+  gap: clamp(12px, 2vw, 28px);
+  background: var(--sidebar, var(--panel)) !important;
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 1px 1px rgba(0,0,0,.025);
+}
+.cdk-console .brand { display: flex; align-items: center; gap: 12px; min-width: max-content; }
+.cdk-console .brand-mark {
+  display: grid; place-items: center; flex: 0 0 38px;
+  width: 38px; height: 38px;
+  border-radius: 12px;
+  background: var(--accent); color: #fff;
+  box-shadow: 0 5px 16px color-mix(in srgb, var(--accent) 18%, transparent);
+  font-size: 20px; font-weight: 800; letter-spacing: -.08em;
+}
+.cdk-console .brand-copy { display: flex; flex-direction: column; justify-content: center; gap: 1px; }
+.cdk-console .brand strong { color: var(--text) !important; font-size: 17px; font-weight: 730; line-height: 1.3; letter-spacing: -.03em; }
+.cdk-console .brand span:not(.brand-mark) { font-size: 11px; letter-spacing: .015em; }
+.cdk-console .health {
+  flex: 1 1 auto;
+  font-size: 12px; color: var(--muted); justify-content: flex-end;
+  white-space: nowrap;
+}
+.cdk-console .health .dot { width: 8px; height: 8px; box-shadow: 0 0 0 4px color-mix(in srgb, var(--text) 5%, transparent); }
+.cdk-console .top-actions { gap: 8px; }
+.cdk-console .layout { grid-template-columns: 230px minmax(0,1fr); min-height: calc(100dvh - 76px); }
+.cdk-console .sidebar {
+  position: sticky; top: 76px; align-self: start; height: calc(100dvh - 76px);
+  padding: 26px 15px;
+  gap: 3px; overflow-y: auto; overscroll-behavior: contain;
+  background: var(--sidebar, var(--panel)) !important;
+  border-right: 1px solid var(--line) !important;
+}
+.cdk-console .sidebar-label {
+  padding: 10px 12px 7px; color: var(--muted);
+  font-size: 10px; font-weight: 750; letter-spacing: .1em;
+}
+.cdk-console .sidebar-label:not(:first-child) { margin-top: 17px; }
+.cdk-console .nav {
+  display: flex; align-items: center; width: 100%; min-height: 42px;
+  border: 1px solid transparent; border-radius: 9px;
+  padding: 10px 12px; font-size: 13px; font-weight: 550;
+  color: var(--muted); line-height: 1.3;
+  transition: background .14s ease, color .14s ease, border-color .14s ease;
+}
+.cdk-console .nav::before {
+  content: ""; flex: 0 0 6px; width: 6px; height: 6px;
+  margin-right: 12px; border-radius: 50%;
+  background: color-mix(in srgb, var(--muted) 40%, transparent);
+}
+.cdk-console .nav:hover { color: var(--text) !important; background: var(--ui-quiet) !important; }
+.cdk-console .nav.active {
+  color: var(--text) !important;
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel)) !important;
+  border-color: color-mix(in srgb, var(--accent) 14%, var(--line)) !important;
+  box-shadow: none !important;
+  font-weight: 680;
+}
+.cdk-console .nav.active::before { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 13%, transparent); }
+.cdk-console .content {
+  width: 100%; max-width: 1660px; margin: 0 auto;
+  padding: clamp(22px, 3vw, 44px) clamp(16px, 3vw, 44px) 70px;
+}
+.cdk-console .page-head { align-items: center; gap: 20px; margin-bottom: 23px; }
+.cdk-console .page-head h1 { margin: 0 0 7px; color: var(--text) !important; font-size: clamp(23px, 2vw, 29px); font-weight: 760; letter-spacing: -.035em; }
+.cdk-console .page-head p { font-size: 13px; line-height: 1.65; }
+.cdk-console .card,
+.cdk-console .metric,
+.cdk-console .switch-item,
+.cdk-console .subtab,
+.cdk-console .backend-command-row {
+  border: 1px solid var(--line) !important;
+  background: var(--panel) !important;
+  border-radius: var(--ui-radius) !important;
+}
+.cdk-console .card {
+  padding: clamp(18px, 2vw, 26px);
+  margin-bottom: 17px;
+  box-shadow: var(--ui-shadow);
+}
+.cdk-console .card h2,
+.cdk-console .card h3 { margin-top: 0; color: var(--text); letter-spacing: -.02em; }
+.cdk-console .button {
+  min-height: 38px; padding: 8px 15px; border-radius: 9px !important;
+  font-size: 12px; font-weight: 650; letter-spacing: .01em;
+  box-shadow: 0 1px 2px rgba(0,0,0,.06);
+}
+.cdk-console .button.ghost {
+  color: var(--text) !important;
+  border: 1px solid var(--line) !important;
+  background: var(--panel) !important;
+  box-shadow: none;
+}
+.cdk-console .button.ghost:hover { background: var(--ui-soft) !important; }
+.cdk-console .button.danger {
+  color: var(--danger) !important;
+  border: 1px solid color-mix(in srgb, var(--danger) 25%, var(--line)) !important;
+  background: color-mix(in srgb, var(--danger) 8%, var(--panel)) !important;
+}
+.cdk-console .button.danger:hover { background: color-mix(in srgb, var(--danger) 15%, var(--panel)) !important; }
+.cdk-console :where(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid var(--accent) !important; outline-offset: 3px;
+}
+.cdk-console input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+.cdk-console select,
+.cdk-console textarea,
+.cdk-console .url-box,
+.cdk-console .log-output,
+.cdk-console .json-output,
+.cdk-console .notes {
+  background: var(--input, var(--panel)) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 9px !important;
+  color: var(--text) !important;
+}
+.cdk-console :where(input, select, textarea):not([type="checkbox"]):not([type="radio"]):not([type="color"]) {
+  min-height: 39px; padding: 9px 12px;
+}
+.cdk-console input::placeholder, .cdk-console textarea::placeholder { color: var(--muted); opacity: .7; }
+.cdk-console .toolbar { gap: 9px; margin-bottom: 14px; }
+.cdk-console .top-actions .button { margin: 0; }
+.cdk-console .page-head .toolbar, .cdk-console .card .toolbar { margin-bottom: 0; }
+.cdk-console .subtabs {
+  flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain;
+  gap: 5px; padding: 5px; margin-bottom: 17px;
+  border: 1px solid var(--line); border-radius: 12px;
+  background: var(--ui-quiet);
+}
+.cdk-console .subtab {
+  flex: 0 0 auto; padding: 9px 14px; border: 1px solid transparent !important;
+  background: transparent !important; color: var(--muted);
+  border-radius: 8px !important; font-size: 12px; font-weight: 600;
+  box-shadow: none !important;
+}
+.cdk-console .subtab:hover { background: var(--panel) !important; color: var(--text) !important; }
+.cdk-console .subtab.active {
+  background: var(--panel) !important; color: var(--text) !important;
+  border-color: var(--line) !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06) !important;
+}
+.cdk-console .log-output, .cdk-console .json-output, .cdk-console .notes {
+  font-size: 12px; line-height: 1.7; padding: 17px;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,.025);
+}
+.cdk-console .log-output { height: calc(100dvh - 258px); min-height: 360px; }
+.cdk-console .table-wrap, .cdk-console .preview, .cdk-console .config-frame {
+  border: 1px solid var(--line) !important; border-radius: 11px !important;
+}
+.cdk-console table { font-size: 13px; }
+.cdk-console th {
+  background: var(--ui-quiet) !important; color: var(--muted) !important;
+  font-size: 12px; font-weight: 680;
+}
+.cdk-console th, .cdk-console td { padding: 12px 14px; border-bottom-color: var(--line) !important; }
+.cdk-console tbody tr:hover { background: var(--ui-quiet); }
+.cdk-console .metric-grid { gap: 14px; }
+.cdk-console .metric { padding: 19px; box-shadow: var(--ui-shadow); }
+.cdk-console .metric span { font-size: 12px; }
+.cdk-console .metric strong { display: inline-block; font-size: 25px; font-weight: 750; line-height: 1.35; }
+.cdk-console .queue-add { gap: 10px; }
+.cdk-console .form-grid { gap: 16px; }
+.cdk-console .form-grid label>span { color: var(--text); font-size: 12px; }
+.cdk-console .switch-item { padding: 13px 15px; box-shadow: none; }
+.cdk-console .switch-item:hover { border-color: color-mix(in srgb, var(--accent) 24%, var(--line)) !important; }
+.cdk-console .backend-command-row { box-shadow: none; }
+.cdk-console .url-box, .cdk-console .details { font-size: 12px; }
+.cdk-console .status { font-size: 12px; line-height: 1.6; }
+.cdk-console .hint { font-size: 12px; }
+.cdk-console .config-frame { height: min(850px, calc(100dvh - 254px)); min-height: 610px; background: var(--panel); }
+.cdk-console .preview { background: transparent; }
+.cdk-console .unified-theme-card, .cdk-console .about { max-width: 1100px; }
+.cdk-console .web-update-controls { background: var(--ui-quiet); box-shadow: none; }
+.cdk-console .web-update-chip { border-radius: 999px; }
+.cdk-console .unified-theme-preview, .cdk-console .issue79-preview { border-radius: 12px; overflow: hidden; }
+
+/* Config & QR login: deliberately standalone because these pages run in iframes/popups. */
+body.cdk-config, body.cdk-login, body.cdk-plugin {
+  --cdk-bg: #f8fafc; --cdk-paper: #fff; --cdk-soft: #f4f4f5;
+  --cdk-border: #e4e4e7; --cdk-ink: #18181b; --cdk-muted: #71717a;
+  --cdk-primary: #27272a; --cdk-on-primary: #fff;
+  margin: 0; padding: 0 !important; background: var(--cdk-bg) !important; background-image: none !important;
+  color: var(--cdk-ink) !important;
+  font-family: Inter, "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif !important;
+  line-height: 1.6;
+  color-scheme: light;
+}
+.cdk-config .page { width: min(1040px, calc(100% - 36px)); gap: 20px; padding: 34px 0 56px; }
+.cdk-config header { padding: 0 2px 4px; }
+.cdk-config header span { color: var(--cdk-muted); font-size: 11px; letter-spacing: .11em; }
+.cdk-config header h1 { margin: 8px 0 7px; color: var(--cdk-ink); font-size: clamp(24px, 3.5vw, 34px); font-weight: 770; letter-spacing: -.035em; }
+.cdk-config header p { color: var(--cdk-muted); font-size: 13px; }
+.cdk-config .card, .cdk-login .card, .cdk-plugin .panel {
+  border: 1px solid var(--cdk-border) !important; border-radius: 14px !important;
+  background: var(--cdk-paper) !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,.03), 0 16px 40px rgba(0,0,0,.025) !important;
+}
+.cdk-config .card { padding: clamp(18px, 3vw, 28px); }
+.cdk-config .heading { gap: 13px; margin-bottom: 23px; }
+.cdk-config .step {
+  width: 38px; height: 38px; border: 1px solid var(--cdk-border);
+  background: var(--cdk-soft); color: var(--cdk-primary); border-radius: 10px; font-size: 12px;
+}
+.cdk-config .heading h2 { color: var(--cdk-ink); font-size: 18px; font-weight: 720; }
+.cdk-config .heading p { color: var(--cdk-muted); font-size: 12px; }
+.cdk-config .row { margin: 15px 0; gap: 15px; align-items: center; }
+.cdk-config .row label { color: var(--cdk-ink); font-size: 12px; }
+.cdk-config .row small { color: var(--cdk-muted); font-size: 11px; }
+.cdk-config :where(input, select, textarea), .cdk-plugin :where(input, select) {
+  min-height: 42px; padding: 10px 12px !important;
+  border: 1px solid var(--cdk-border) !important;
+  border-radius: 9px !important;
+  background: var(--cdk-paper) !important; color: var(--cdk-ink) !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,.025);
+}
+.cdk-config :where(input, select, textarea):focus, .cdk-plugin :where(input, select):focus {
+  border-color: #a1a1aa !important; box-shadow: 0 0 0 3px rgba(113,113,122,.12) !important; outline: none;
+}
+.cdk-config :where(input, textarea)::placeholder, .cdk-plugin input::placeholder { color: var(--cdk-muted); opacity: .76; }
+.cdk-config input[type=checkbox], .cdk-plugin input[type=checkbox] { width: 17px; height: 17px; min-height: 0; accent-color: var(--cdk-primary); padding: 0 !important; }
+.cdk-config .checks { color: var(--cdk-muted); }
+.cdk-config .checks label { color: var(--cdk-ink); width: auto; display: flex; align-items: center; gap: 6px; }
+.cdk-config .actions { gap: 9px; margin-top: 20px; }
+.cdk-config button, .cdk-login button, .cdk-plugin button {
+  min-height: 40px; padding: 9px 16px; margin-top: 0;
+  border: 1px solid var(--cdk-border) !important;
+  border-radius: 9px !important;
+  background: var(--cdk-paper) !important; color: var(--cdk-ink) !important;
+  font: inherit; font-size: 12px; font-weight: 680; letter-spacing: normal;
+  text-transform: none; cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0,0,0,.035);
+}
+.cdk-config #save-btn, .cdk-config #backup-save, .cdk-config #backup-run,
+.cdk-login #refresh, .cdk-plugin button[type=submit] {
+  background: var(--cdk-primary) !important; color: var(--cdk-on-primary) !important;
+  border-color: var(--cdk-primary) !important;
+}
+.cdk-config button:hover:not(:disabled), .cdk-login button:hover:not(:disabled), .cdk-plugin button:hover:not(:disabled) {
+  filter: brightness(.95); box-shadow: 0 3px 9px rgba(0,0,0,.09) !important;
+}
+.cdk-config .status, .cdk-config .hint, .cdk-login .status, .cdk-login .hint { color: var(--cdk-muted); text-shadow: none; font-size: 12px; }
+.cdk-config code { color: var(--cdk-ink); padding: 1px 4px; background: var(--cdk-soft); border-radius: 4px; }
+.cdk-config .backup-list { min-height: 136px; }
+.cdk-config .backend-panel[hidden] { display: none !important; }
+.cdk-login .wrap { max-width: 580px; padding: 28px 16px; }
+.cdk-login .card { padding: 26px; }
+.cdk-login .card::before, .cdk-login .card::after { content: none !important; display: none !important; }
+.cdk-login .title {
+  margin: 0 0 18px; color: var(--cdk-ink); font-family: inherit; font-size: 18px;
+  font-weight: 750; letter-spacing: -.02em; text-shadow: none; text-transform: none;
+}
+.cdk-login .title::before, .cdk-login .title::after,
+.cdk-login .status::before, .cdk-login .hint::before { content: none !important; }
+.cdk-login #qrcode { min-height: 300px; padding: 12px; background: white; border: 1px solid var(--cdk-border); border-radius: 12px; box-shadow: none; }
+.cdk-login #qrcode img { max-width: 100%; height: auto; }
+.cdk-login button { display: block; width: 100%; margin-top: 14px; }
+.cdk-login .status { margin-top: 14px; white-space: pre-wrap; }
+
+/* Server-rendered plugin form: styles only, no changes to POST/CSRF/field handling. */
+.cdk-plugin { padding: 20px !important; }
+.cdk-plugin h1 { font-size: 22px; font-weight: 740; letter-spacing: -.03em; }
+.cdk-plugin h2 { font-size: 16px; }
+.cdk-plugin p { opacity: 1; color: var(--cdk-muted); }
+.cdk-plugin .layout { gap: 14px; }
+.cdk-plugin .nav { background: var(--cdk-paper); border: 1px solid var(--cdk-border); border-radius: 12px; padding: 9px; }
+.cdk-plugin .plugin { padding: 11px 12px; font-size: 13px; }
+.cdk-plugin .plugin:hover, .cdk-plugin .plugin.active { background: var(--cdk-soft); color: var(--cdk-ink); }
+.cdk-plugin .plugin.active { font-weight: 700; }
+.cdk-plugin .plugin small, .cdk-plugin .field small { color: var(--cdk-muted); }
+.cdk-plugin .panel { padding: 20px; }
+.cdk-plugin .field { color: var(--cdk-ink); font-size: 13px; }
+.cdk-plugin button { margin-top: 14px; }
+.cdk-plugin .message { border: 1px solid var(--cdk-border); border-radius: 10px; }
+.cdk-plugin .message.ok { background: #ecfdf3; color: #067647; }
+.cdk-plugin .message.error { background: #fef3f2; color: #b42318; }
+
+@media (max-width: 960px) {
+  .cdk-console .layout { grid-template-columns: 1fr; }
+  .cdk-console .sidebar {
+    position: sticky; top: 76px; z-index: 18;
+    flex-direction: row; align-items: center; gap: 4px;
+    height: auto; overflow-x: auto; overflow-y: hidden;
+    padding: 8px 12px; border-right: none !important;
+    border-bottom: 1px solid var(--line);
+  }
+  .cdk-console .sidebar-label { display: none; }
+  .cdk-console .nav { flex: 0 0 auto; width: auto; white-space: nowrap; min-height: 37px; padding: 9px 12px; }
+  .cdk-console .nav::before { margin-right: 7px; }
+  .cdk-console .content { padding: 25px 20px 55px; }
+  .cdk-console .config-frame { height: 760px; min-height: 580px; }
+}
+@media (max-width: 640px) {
+  .cdk-console .topbar { height: 64px; gap: 8px; padding: 0 12px; }
+  .cdk-console .brand { gap: 7px; }
+  .cdk-console .brand-mark { flex-basis: 30px; width: 30px; height: 30px; border-radius: 9px; font-size: 17px; }
+  .cdk-console .brand strong { font-size: 13px; }
+  .cdk-console .brand-copy > span { display: none; }
+  .cdk-console .health { flex: 1 1 auto; font-size: 11px; overflow: hidden; }
+  .cdk-console #health-text { display: block; overflow: hidden; text-overflow: ellipsis; }
+  .cdk-console .top-actions { flex: 0 0 auto; }
+  .cdk-console .top-actions .button { padding: 6px 9px; font-size: 11px; min-height: 33px; }
+  .cdk-console .sidebar { top: 64px; padding: 7px 10px; }
+  .cdk-console .content { padding: 21px 12px 48px; }
+  .cdk-console .page-head { flex-direction: column; align-items: flex-start; margin-bottom: 16px; }
+  .cdk-console .page-head .toolbar { width: 100%; }
+  .cdk-console .card { padding: 15px; }
+  .cdk-console .subtabs { gap: 3px; }
+  .cdk-console .subtab { padding: 8px 10px; }
+  .cdk-console .log-output { height: calc(100dvh - 270px); }
+  .cdk-console .queue-add { grid-template-columns: 1fr; }
+  .cdk-console .config-frame { height: 690px; min-height: 500px; }
+  .cdk-config .page { width: calc(100% - 22px); padding: 18px 0 32px; }
+  .cdk-config .card { padding: 17px; }
+  .cdk-config .row { grid-template-columns: 1fr; gap: 5px; }
+  .cdk-config .checks { margin-left: 0; }
+  .cdk-config .actions button { flex: 1 1 150px; }
+  .cdk-login .card { padding: 17px; }
+  .cdk-plugin { padding: 12px !important; }
+}
+@media (prefers-color-scheme: dark) {
+  body.cdk-config, body.cdk-login, body.cdk-plugin {
+    --cdk-bg: #09090b; --cdk-paper: #18181b; --cdk-soft: #27272a;
+    --cdk-border: #3f3f46; --cdk-ink: #fafafa; --cdk-muted: #a1a1aa;
+    --cdk-primary: #fafafa; --cdk-on-primary: #18181b;
+    color-scheme: dark;
+  }
+  .cdk-config code { background: #27272a; }
+  .cdk-login #qrcode { border-color: var(--cdk-border); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cdk-console *, .cdk-config *, .cdk-login *, .cdk-plugin * { transition-duration: 0.01ms !important; }
+}
