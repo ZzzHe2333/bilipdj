@@ -234,6 +234,8 @@ def configure_server_runtime_layout(server_module: Any) -> tuple[Path, Path]:
         server_module.BLACKLIST_PATH = server_module.PD_DIR / "blacklist.csv"
         server_module.STYLE_PATH = data_dir / "style.json"
         server_module.APPEARANCE_PATH = data_dir / "appearance.json"
+        # Generated CSS belongs in persistent storage, not readonly Web assets.
+        server_module.LIVE_STYLE_CSS_PATH = data_dir / "moren.css"
         server_module.PLUGINS_DIR = data_dir / "plugins"
         server_module.BACKUP_DIR = data_dir / "backup"
     return core_dir, key_dir

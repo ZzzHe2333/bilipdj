@@ -104,7 +104,7 @@ def configure_runtime_paths(module: Any = server) -> Any:
     module.UPDATE_RESULT_PATH = key_dir / "update-result.json"
     module.PLUGINS_DIR = (data_dir if external_data_dir else app_dir) / "plugins"
     module.BACKUP_DIR = (data_dir if external_data_dir else app_dir) / "backup"
-    module.LIVE_STYLE_CSS_PATH = ui_dir / "moren.css"
+    module.LIVE_STYLE_CSS_PATH = (data_dir if external_data_dir else ui_dir) / "moren.css"
     module._CONFIG_LOCK_PATH = runtime_core_dir / ".config.lock"
     return module
 

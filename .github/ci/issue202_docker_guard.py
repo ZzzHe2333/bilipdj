@@ -103,9 +103,14 @@ def check_wiring_and_compose() -> None:
     assert "module.PLUGINS_DIR" in init_source
     assert "install_plugin_data_root(_plugin_manager)" in init_source
     assert "install_docker_local_access(server)" in init_source
+    assert '(data_dir if external_data_dir else ui_dir) / "moren.css"' in init_source
 
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-    assert '"127.0.0.1:9816:9816"' in compose
+    assert '"127.0.0.1:${BILIPDJ_HOST_PORT:-9816}:9816"' in compose
+    assert "read_only: true" in compose
+    assert "cap_drop:" in compose and "cap_add:" in compose
+    assert "DAC_OVERRIDE" in compose
+    assert "tmpfs:" in compose
     assert "BILIPDJ_DATA_DIR: /data" in compose
     assert 'BILIPDJ_DOCKER: "1"' in compose
     assert "BILIPDJ_DOCKER_TRUSTED_CIDRS: auto" in compose

@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
   push:
     branches: [now]
-    paths: ['apps/server/**', 'apps/web/**', 'core/**', 'docker-compose.yml', '.dockerignore', '.github/ci/redtv_issue121_guard.py', '.github/ci/issue123_regression_guard.py', '.github/ci/issue126_security_guard.py', '.github/ci/issue128_plugin_architecture_guard.py', '.github/ci/issue130_plugin_manager_guard.py', '.github/ci/issue130_plugin_hardening_guard.py', '.github/ci/issue130_js_runtime_probe.py', '.github/ci/issue132_plugin_api_security_guard.py', '.github/ci/issue134_plugin_mutation_guard.py', 'requirements.txt']
+    paths: ['apps/server/**', 'apps/web/**', 'core/**', 'docker-compose.yml', '.dockerignore', 'docs/DOCKER.md', '.github/ci/redtv_issue121_guard.py', '.github/ci/issue123_regression_guard.py', '.github/ci/issue126_security_guard.py', '.github/ci/issue128_plugin_architecture_guard.py', '.github/ci/issue130_plugin_manager_guard.py', '.github/ci/issue130_plugin_hardening_guard.py', '.github/ci/issue130_js_runtime_probe.py', '.github/ci/issue132_plugin_api_security_guard.py', '.github/ci/issue134_plugin_mutation_guard.py', 'requirements.txt']
   pull_request:
-    paths: ['apps/server/**', 'apps/web/**', 'core/**', 'docker-compose.yml', '.dockerignore', '.github/ci/redtv_issue121_guard.py', '.github/ci/issue123_regression_guard.py', '.github/ci/issue126_security_guard.py', '.github/ci/issue128_plugin_architecture_guard.py', '.github/ci/issue130_plugin_manager_guard.py', '.github/ci/issue130_plugin_hardening_guard.py', '.github/ci/issue130_js_runtime_probe.py', '.github/ci/issue132_plugin_api_security_guard.py', '.github/ci/issue134_plugin_mutation_guard.py', 'requirements.txt']
+    paths: ['apps/server/**', 'apps/web/**', 'core/**', 'docker-compose.yml', '.dockerignore', 'docs/DOCKER.md', '.github/ci/redtv_issue121_guard.py', '.github/ci/issue123_regression_guard.py', '.github/ci/issue126_security_guard.py', '.github/ci/issue128_plugin_architecture_guard.py', '.github/ci/issue130_plugin_manager_guard.py', '.github/ci/issue130_plugin_hardening_guard.py', '.github/ci/issue130_js_runtime_probe.py', '.github/ci/issue132_plugin_api_security_guard.py', '.github/ci/issue134_plugin_mutation_guard.py', 'requirements.txt']
 
 jobs:
   validate-server:
@@ -131,6 +131,62 @@ jobs:
           test -d data/core/cd
           test -d data/key
           test -d data/plugins
+      - name: Verify Docker Web parity and durable generated CSS
+        shell: bash
+        run: |
+          set -euo pipefail
+          container="$(docker compose ps -q bilipdj)"
+          test "$(docker inspect -f '{{.HostConfig.ReadonlyRootfs}}' "$container")" = true
+          docker exec "$container" sh -ec '
+            test -w /data
+            test ! -d /app/apps/windows
+            python -c "import quickjs, cryptography, PIL, google.protobuf; print(\"server dependencies OK\")"
+          '
+          python - <<'PY'
+          import json, urllib.request
+          base = "http://127.0.0.1:9816"
+          for path in ("/health", "/control", "/config", "/index", "/api/control/meta",
+                       "/api/config/basic", "/api/queue/state", "/api/queue/archive",
+                       "/api/runtime-status", "/api/platforms/active", "/api/style", "/api/appearance"):
+              with urllib.request.urlopen(base + path, timeout=8) as response:
+                  content = response.read()
+                  assert response.status == 200 and content, path
+                  if path.startswith("/api/"):
+                      assert isinstance(json.loads(content), dict), path
+                  if path == "/api/control/meta":
+                      assert json.loads(content).get("deployment") == "docker"
+                  if path == "/control":
+                      assert b"queue-next" in content, "not the canonical Web UI"
+          def post(path, data):
+              req = urllib.request.Request(base + path, data=json.dumps(data).encode(),
+                                           headers={"Content-Type": "application/json"}, method="POST")
+              with urllib.request.urlopen(req, timeout=12) as response:
+                  return json.load(response)
+          assert post("/api/queue/insert", {"after": 0, "entry": "DockerSmokePersist_301"}).get("status") == "ok"
+          assert post("/api/style", {"text_color": "#a1b2c3"}).get("status") == "ok"
+          with urllib.request.urlopen(base + "/moren.css", timeout=8) as response:
+              assert b"#a1b2c3" in response.read()
+          PY
+          docker exec "$container" sh -ec 'test -f /data/moren.css; grep -q "#a1b2c3" /data/moren.css'
+          docker compose restart bilipdj
+          for _ in $(seq 1 60); do
+            status="$(docker inspect --format '{{.State.Health.Status}}' "$container")"
+            test "$status" != unhealthy
+            if [ "$status" = healthy ]; then break; fi
+            sleep 1
+          done
+          test "$(docker inspect --format '{{.State.Health.Status}}' "$container")" = healthy
+          python - <<'PY'
+          import json, urllib.request
+          base = "http://127.0.0.1:9816"
+          with urllib.request.urlopen(base + "/api/queue/state", timeout=8) as response:
+              assert "DockerSmokePersist_301" in str(json.load(response).get("queue", []))
+          with urllib.request.urlopen(base + "/api/style", timeout=8) as response:
+              assert json.load(response).get("text_color") == "#a1b2c3"
+          with urllib.request.urlopen(base + "/moren.css", timeout=8) as response:
+              assert b"#a1b2c3" in response.read()
+          print("Docker Web, OBS styles, queue persistence: OK")
+          PY
       - name: Reject another container as management client
         shell: bash
         run: |

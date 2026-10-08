@@ -55,7 +55,7 @@
     try {
       const [health, meta, runtime] = await Promise.all([json('/health'), json('/api/control/meta'), json('/api/runtime-status')]);
       state.meta = meta;
-      $('version').textContent = `v${meta.version || 'unknown'} · Web 控制台`;
+      $('version').textContent = `v${meta.version || 'unknown'} · ${meta.deployment === 'docker' ? 'Docker Web 控制台' : 'Web 控制台'}`;
       $('health-dot').className = 'dot ok';
       const connected = Boolean(runtime.danmu_connected || runtime.connected || runtime.relay_connected);
       const room = runtime.roomid || runtime.room_id || '';
@@ -352,7 +352,12 @@
       $('update-current').textContent = payload.current_version || '-'; $('update-latest').textContent = payload.latest_version || '-';
       $('update-notes').textContent = payload.body || '暂无发行说明。';
       const link = $('update-open'); link.href = payload.html_url || '#'; link.classList.toggle('disabled', !payload.html_url);
-      message('update-status', payload.current_version === payload.latest_version ? '当前已是最新版本。' : `发现版本 ${payload.tag_name || payload.latest_version}。Web Portable 请下载新包后完整解压替换。`);
+      const docker = state.meta?.deployment === 'docker';
+      message('update-status', docker
+        ? (payload.current_version === payload.latest_version
+          ? 'Docker 容器已是当前版本；需要重新部署时，请在宿主机执行 docker compose up -d --build，持久化 ./data 不受影响。'
+          : `发现版本 ${payload.tag_name || payload.latest_version}。Docker 版不能使用 Web Portable 安装包覆盖容器；请在宿主机更新代码并执行 docker compose up -d --build。`)
+        : (payload.current_version === payload.latest_version ? '当前已是最新版本。' : `发现版本 ${payload.tag_name || payload.latest_version}。Web Portable 请下载新包后完整解压替换。`));
     } catch (error) { message('update-status', error.message, false); }
   }
 

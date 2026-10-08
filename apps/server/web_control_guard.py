@@ -12,6 +12,8 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import Any
 
+from apps.server.docker_runtime import docker_mode_enabled
+
 _PATCH_LOCK = threading.RLock()
 _CONTROL_GET_PATHS = {
     "/api/control/meta",
@@ -273,6 +275,8 @@ def install_web_control_guard(server_module: Any) -> bool:
                         "platform": str(runtime.get("platform", "bilibili")) if isinstance(runtime, dict) else "bilibili",
                         "port": int(server_cfg.get("port", getattr(self.server, "server_port", 9816)) or 9816),
                         "local_only": True,
+                        "deployment": "docker" if docker_mode_enabled() else "portable",
+                        "update_method": "rebuild_image" if docker_mode_enabled() else "portable",
                     }
                 )
                 return

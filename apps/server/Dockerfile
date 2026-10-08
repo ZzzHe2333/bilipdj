@@ -8,14 +8,20 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY requirements.txt /app/requirements.txt
+# Install only Server/Web runtime dependencies; desktop tray libraries do not
+# belong in the Docker image. Core API dependencies and QuickJS stay available.
+COPY apps/server/requirements.txt /app/requirements.txt
 RUN python -m pip install --no-cache-dir -r /app/requirements.txt
 
 COPY VERSION README.md /app/
 COPY core /app/core
-COPY apps /app/apps
+COPY apps/__init__.py apps/update_download_source.py apps/update_workspace.py apps/versioning.py /app/apps/
+COPY apps/server /app/apps/server
+COPY apps/web/static /app/apps/web/static
 
 RUN mkdir -p /data
+
+STOPSIGNAL SIGTERM
 
 EXPOSE 9816
 
