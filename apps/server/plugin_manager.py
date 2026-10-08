@@ -382,7 +382,10 @@ class PluginManager:
         self.server_module = server_module
         self.registry = registry
         self.issue79_module = issue79_module
-        self.plugins_root = Path(getattr(server_module, "APP_DIR", ".")) / "plugins"
+        # Use the configured runtime plugin root *before* creating folders.
+        # Docker mounts /data read-write while its packaged /app is read-only.
+        fallback_root = Path(getattr(server_module, "APP_DIR", ".")) / "plugins"
+        self.plugins_root = Path(getattr(server_module, "PLUGINS_DIR", fallback_root))
         self.data_root = self.plugins_root / "data"
         self.state_path = self.plugins_root / "state.json"
         self.trusted_keys_path = self.plugins_root / "trusted_keys.json"
