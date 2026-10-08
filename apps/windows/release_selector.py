@@ -338,14 +338,10 @@ def _install_candidate_button_policy() -> None:
                 )
                 update_version_selector._configure_buttons_for_candidate(app, candidate)  # noqa: SLF001
                 return
-            operation = _operation_text(candidate.version, str(getattr(app, "_update_current_version", "")))
-            incremental = candidate.release.tag_name in set(getattr(app, "_incremental_eligible_tags", set()) or set())
-            size_mb = candidate.release.zip_asset.size / 1024**2
-            kind = "预发行包" if _RELEASE_PRERELEASE_BY_TAG.get(candidate.release.tag_name, False) else "发行包"
-            suffix = "增量可用" if incremental else "该目标与当前版本无兼容增量基线，仅支持全量"
-            app.update_status_var.set(
-                f"已选择{kind} v{display_version(candidate.version)} · {operation} · 完整包约 {size_mb:.1f} MB；{suffix}。"
-            )
+            # The selected version and available actions are already shown by
+            # the combobox and enabled buttons. Reserve status text for errors,
+            # actual checking, downloading and installing.
+            app.update_status_var.set("")
             update_version_selector._configure_buttons_for_candidate(app, candidate)  # noqa: SLF001
 
         setattr(on_version_selected, "_release_status_status", True)
@@ -400,6 +396,63 @@ def _install_update_page_policy() -> None:
     update_page.build_update_tab = build_update_tab  # type: ignore[assignment]
 
 
+def _latest_stable_from_third_party() -> list[update_client.ReleaseInfo]:
+    """User-approved recovery when official GitHub release discovery is unreachable.
+
+    GH-Proxy serves only a Release asset here, not privileged GitHub API calls.
+    Its manifest is not independently signed; the caller must obtain explicit
+    per-use consent and must never forward credentials to this endpoint.
+    """
+    from apps.update_download_source import GH_PROXY_SOURCE, rewrite_download_url
+
+    manifest_url = (
+        "https://github.com/ZzzHe2333/bilipdj/"
+        "releases/latest/download/update-manifest.json"
+    )
+    proxy_url = rewrite_download_url(manifest_url, GH_PROXY_SOURCE)
+    if proxy_url == manifest_url:
+        raise update_client.UpdateError("更新清单代理链接不受支持")
+    with update_client._request(proxy_url, timeout=18) as response:  # noqa: SLF001
+        payload = update_client._decode_json_response(response, "第三方加速更新清单")  # noqa: SLF001
+    release = update_client._release_from_manifest(payload, source_url=proxy_url)  # noqa: SLF001
+    version = release.version
+    tag = release.tag_name
+    filename = release.zip_asset.name
+    official_asset = (
+        f"https://github.com/ZzzHe2333/bilipdj/releases/download/"
+        f"{tag}/{filename}"
+    )
+    # Disallow a forged manifest redirecting update downloads elsewhere.
+    if tag != f"v{version}" or release.zip_asset.download_url != official_asset:
+        raise update_client.UpdateError("第三方清单的版本标识或 Windows 下载地址无效")
+    if release.zip_asset.size <= 0:
+        raise update_client.UpdateError("第三方清单缺少合法安装包大小")
+    _RELEASE_TAGS_BY_FILTER["发行包"] = [tag]
+    _RELEASE_TAGS_BY_FILTER["全部"] = [tag]
+    _RELEASE_PRERELEASE_BY_TAG[tag] = False
+    return [release]
+
+
+def _offer_third_party_on_discovery_failure(app: Any, error: str) -> bool:
+    """Prompt only after an explicit check; never silently trust a mirror."""
+    from apps.update_download_source import GH_PROXY_SOURCE, SOURCE_LABELS
+
+    approved = update_ui.messagebox.askyesno(
+        "GitHub 连接失败",
+        f"访问 GitHub 官方版本列表失败：\n{error}\n\n"
+        "是否尝试通过 gh-proxy.com 读取最新正式版的更新清单？\n"
+        "第三方传输的清单没有独立签名，SHA-256 仅能验证文件与该清单一致，"
+        "不能证明第三方没有篡改清单。仅在信任该服务时使用。\n\n"
+        "拒绝则保留官方线路；同意不会保存长期信任。",
+        parent=getattr(app, "root", None),
+    )
+    if approved:
+        source_var = getattr(app, "update_download_source_var", None)
+        if source_var is not None:
+            source_var.set(SOURCE_LABELS[GH_PROXY_SOURCE])
+    return bool(approved)
+
+
 def _check_for_versions(app: Any, *, silent: bool = False) -> None:
     if getattr(app, "_update_busy", False):
         return
@@ -415,24 +468,26 @@ def _check_for_versions(app: Any, *, silent: bool = False) -> None:
     if channel_picker is not None:
         channel_picker.configure(state="disabled")
 
-    def worker() -> None:
-        releases: list[update_client.ReleaseInfo] = []
-        cloud_error = ""
-        try:
-            releases = fetch_release_choices()
-        except Exception as exc:  # noqa: BLE001
-            cloud_error = str(exc)
-        app._incremental_eligible_tags = _incremental_eligible_tags(
-            str(getattr(app, "_update_current_version", "")), releases
-        )
-        candidates = _build_version_candidates(app._update_app_dir, releases)
-        by_tag = {release.tag_name: release for release in releases}
-        default_release = next(
-            (by_tag[tag] for tag in _RELEASE_TAGS_BY_FILTER["发行包"] if tag in by_tag),
-            None,
-        )
-
+    def deliver(releases: list[update_client.ReleaseInfo], cloud_error: str, *, mirrored: bool = False) -> None:
         def finish() -> None:
+            if cloud_error and not silent and not mirrored:
+                # Dialogs run only in Tk's main thread. Keep the loader alive
+                # until the user decides and the optional retry terminates.
+                if _offer_third_party_on_discovery_failure(app, cloud_error):
+                    app.update_status_var.set("正在通过第三方加速读取最新正式版…")
+                    threading.Thread(
+                        target=proxy_worker, name="bilipdj-release-proxy-check", daemon=True
+                    ).start()
+                    return
+            app._incremental_eligible_tags = _incremental_eligible_tags(
+                str(getattr(app, "_update_current_version", "")), releases
+            )
+            candidates = _build_version_candidates(app._update_app_dir, releases)
+            by_tag = {release.tag_name: release for release in releases}
+            default_release = next(
+                (by_tag[tag] for tag in _RELEASE_TAGS_BY_FILTER["发行包"] if tag in by_tag),
+                releases[0] if releases else None,
+            )
             if hasattr(app, "update_channel_var"):
                 app.update_channel_var.set("发行包")
             update_version_selector._finish_version_check(  # noqa: SLF001
@@ -440,8 +495,29 @@ def _check_for_versions(app: Any, *, silent: bool = False) -> None:
             )
             if channel_picker is not None:
                 channel_picker.configure(state="readonly")
+            if mirrored and not cloud_error:
+                app.update_status_var.set(
+                    "已从第三方源读取最新正式版清单（仅此版本）；"
+                    "请核对版本信息，下载时仍须再次确认第三方来源。"
+                )
 
         app.root.after(0, finish)
+
+    def proxy_worker() -> None:
+        try:
+            releases = _latest_stable_from_third_party()
+        except Exception as exc:  # noqa: BLE001
+            deliver([], f"官方源不可用；第三方源也失败：{exc}", mirrored=True)
+        else:
+            deliver(releases, "", mirrored=True)
+
+    def worker() -> None:
+        try:
+            releases = fetch_release_choices()
+        except Exception as exc:  # noqa: BLE001
+            deliver([], str(exc))
+        else:
+            deliver(releases, "")
 
     threading.Thread(target=worker, name="bilipdj-version-catalog", daemon=True).start()
 

@@ -108,15 +108,12 @@ def _install_source_picker() -> None:
             master=getattr(app, "root", None),
             value=SOURCE_LABELS[OFFICIAL_SOURCE],
         )
-        network = _find_labeled_frame(frame, "更新网络")
-        if network is None or getattr(app, "_update_download_source_frame", None) is not None:
+        update_frame = _find_labeled_frame(frame, "检测更新与更新内容")
+        if update_frame is None or getattr(app, "_update_download_source_frame", None) is not None:
             return result
-        try:
-            _, rows = network.grid_size()
-        except Exception:
-            rows = 99
-        source_frame = ttk.Frame(network)
-        source_frame.grid(row=max(0, int(rows)), column=0, columnspan=3, sticky="ew", pady=(12, 2))
+        parent = update_frame.master
+        source_frame = ttk.Frame(parent)
+        source_frame.grid(row=1, column=0, sticky="ew", pady=(5, 9))
         source_frame.columnconfigure(1, weight=1)
         ttk.Label(source_frame, text="下载线路").grid(row=0, column=0, sticky="w", padx=(0, 10))
         combo = ttk.Combobox(
@@ -127,14 +124,6 @@ def _install_source_picker() -> None:
             width=24,
         )
         combo.grid(row=0, column=1, sticky="w")
-        ttk.Label(
-            source_frame,
-            text=(
-                "默认使用 GitHub 官方。第三方加速只改写 Release 文件下载地址；"
-                "每次真正使用前都会再次弹窗确认，确认不会保存。"
-            ),
-            wraplength=720,
-        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(5, 0))
         app._update_download_source_frame = source_frame
         app._update_download_source_combo = combo
         return result

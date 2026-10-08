@@ -186,14 +186,16 @@ def build_update_tab(app: Any, frame: ttk.Frame, app_name: str, current_version:
     inner.columnconfigure(0, weight=1)
     _bind_stable_scroll_region(canvas, inner, window_id)
 
-    ttk.Label(inner, text=f"{app_name} 软件更新", font=("Microsoft YaHei UI", 16, "bold") if sys.platform == "win32" else ("", 16, "bold")).grid(row=0, column=0, sticky="w", pady=(4, 3))
-    ttk.Label(inner, text=f"当前版本：v{current_version}").grid(row=1, column=0, sticky="w", pady=(0, 12))
+    title_row = ttk.Frame(inner)
+    title_row.grid(row=0, column=0, sticky="ew", pady=(4, 3))
+    ttk.Label(title_row, text=f"{app_name} 软件更新", font=("Microsoft YaHei UI", 16, "bold") if sys.platform == "win32" else ("", 16, "bold")).pack(side="left")
+    ttk.Label(title_row, text=f"v{current_version}", foreground="#6354cf").pack(side="left", padx=(14, 0))
 
     update_frame = ttk.LabelFrame(inner, text="检测更新与更新内容", padding=12)
     update_frame.grid(row=2, column=0, sticky="ew")
     update_frame.columnconfigure(0, weight=1)
 
-    status_slot = ttk.Frame(update_frame, height=42)
+    status_slot = ttk.Frame(update_frame, height=30)
     status_slot.grid(row=0, column=0, columnspan=2, sticky="ew")
     status_slot.grid_propagate(False)
     ttk.Label(status_slot, textvariable=app.update_status_var, wraplength=760, justify="left").place(x=0, y=0, relwidth=1.0, relheight=1.0)
@@ -222,7 +224,6 @@ def build_update_tab(app: Any, frame: ttk.Frame, app_name: str, current_version:
     app._update_install_button = app._update_full_button
     app._update_incremental_button = ttk.Button(button_row, text="增量更新", command=lambda: update_version_selector.install_selected_incremental(app), state="disabled")
     app._update_incremental_button.pack(side="left")
-    ttk.Label(update_frame, text="“发行包”显示最近 3 个正式 Release；“全部”显示最近 10 个 Release（含预发行包）。默认更新目标为最新发行包。", wraplength=760).grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
     ttk.Label(update_frame, text="更新内容").grid(row=5, column=0, sticky="w", pady=(12, 4))
     notes_frame = ttk.Frame(update_frame)
     notes_frame.grid(row=6, column=0, columnspan=2, sticky="nsew")

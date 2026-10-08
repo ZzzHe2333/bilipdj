@@ -139,6 +139,8 @@ class UpdaterWindow:
         self.completed = False
         self.failed = False
         self.last_log_path = "log/update_*.log"
+        self._worker_running = False
+        self.waiting_for_close = False
 
         self.root = tk.Tk()
         self.root.title("弹幕排队姬更新器")
@@ -173,8 +175,12 @@ class UpdaterWindow:
         self.progress.pack(fill="x", pady=(0, 5))
         self.percent_var = tk.StringVar(value="0%")
         ttk.Label(container, textvariable=self.percent_var, anchor="e").pack(fill="x")
+        self.continue_button = ttk.Button(
+            container, text="继续更新", command=self._resume_update, state="disabled"
+        )
+        self.continue_button.pack(fill="x", pady=(5, 0))
 
-        threading.Thread(target=self._worker, name="bilipdj-updater-worker", daemon=True).start()
+        self._start_worker()
         self.root.after(50, self._poll_events)
 
     def _center_geometry(self) -> str:
@@ -186,10 +192,28 @@ class UpdaterWindow:
         return f"{WINDOW_SIZE}x{WINDOW_SIZE}+{x}+{y}"
 
     def _request_close(self) -> None:
-        if not self.completed:
+        if not self.completed and not self.waiting_for_close:
             return
+        if self.waiting_for_close:
+            self.failed = True  # explicit cancellation before any file changes
         self.animator.stop()
         self.root.destroy()
+
+    def _start_worker(self) -> None:
+        if self.completed or self._worker_running:
+            return
+        self._worker_running = True
+        threading.Thread(target=self._worker, name="bilipdj-updater-worker", daemon=True).start()
+
+    def _resume_update(self) -> None:
+        if not self.waiting_for_close or self._worker_running or self.completed:
+            return
+        self.waiting_for_close = False
+        self.continue_button.configure(state="disabled")
+        self.progress_value = 0
+        self._set_progress(0)
+        self.status_var.set("正在重新检查主程序状态…")
+        self._start_worker()
 
     def _emit(self, kind: str, payload: Any) -> None:
         self.events.put((kind, payload))
@@ -212,6 +236,12 @@ class UpdaterWindow:
                 log_path = target_root / "log" / f"update_unknown_{room_token}.log"
             self._emit("status", (str(message), str(log_path)))
 
+        # Never enter staging/backup/rollback while the old process is open.
+        # A wait timeout is a recoverable UI state, not a failed installation.
+        self._emit("waiting", None)
+        if not legacy.wait_for_process_exit(self.args.pid):
+            self._emit("wait_for_close", None)
+            return
         legacy._write_log = categorized_write_log
         try:
             updater_v2.perform_update(
@@ -240,17 +270,35 @@ class UpdaterWindow:
                 kind, payload = self.events.get_nowait()
             except queue.Empty:
                 break
-            if kind == "status":
+            if kind == "waiting":
+                self.status_var.set("正在等待主程序关闭（最多 45 秒）…")
+            elif kind == "wait_for_close":
+                self._worker_running = False
+                self.waiting_for_close = True
+                self.continue_button.configure(state="normal")
+                self.status_var.set("主程序尚未关闭。关闭后点击“继续更新”，无需重新下载。")
+                self.root.attributes("-topmost", True)
+                self.root.lift()
+                messagebox.showwarning(
+                    "请关闭主程序",
+                    "主程序仍在运行。请先完全关闭弹幕排队姬，"
+                    "再点击更新器中的“继续更新”。更新文件已保留，不需要重新下载。",
+                    parent=self.root,
+                )
+            elif kind == "status":
                 message, log_path = payload
                 self.status_var.set(str(message))
                 self._set_progress(progress_for_message(str(message), self.progress_value))
                 self.last_log_path = str(log_path)
             elif kind == "success":
+                self._worker_running = False
+                self.root.attributes("-topmost", False)
                 self.completed = True
                 self.status_var.set(f"v{payload} 更新完成，正在启动新版本……")
                 self._set_progress(100)
                 self.root.after(900, self._request_close)
             elif kind == "error":
+                self._worker_running = False
                 self.completed = True
                 self.failed = True
                 self.status_var.set(f"更新失败：{payload}")
@@ -261,7 +309,7 @@ class UpdaterWindow:
                     parent=self.root,
                 )
         if not self.completed:
-            if self.progress_value < 92:
+            if self._worker_running and self.progress_value < 92:
                 self._set_progress(self.progress_value + 1)
             self.root.after(140, self._poll_events)
 

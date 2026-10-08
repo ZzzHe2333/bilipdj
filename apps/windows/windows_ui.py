@@ -165,31 +165,9 @@ def _polish_update_page(app: Any, frame: Any, module: Any) -> None:
     if update_frame is None:
         return
 
-    # Reserve one fixed row for selected-version metadata. Moving all following
-    # rows once prevents status text changes from shifting the action controls.
-    direct_children = list(update_frame.winfo_children())
-    for child in direct_children:
-        try:
-            info = child.grid_info()
-            row = int(info.get("row", 0))
-        except Exception:
-            continue
-        if row >= 2:
-            try:
-                child.grid_configure(row=row + 1)
-            except Exception:
-                pass
-
-    app.update_selection_summary_var = module.tk.StringVar(value="来源：尚未检查 · 目标版本：-- · 可用操作：--")
-    selection_slot = module.ttk.Frame(update_frame, height=30)
-    selection_slot.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(3, 1))
-    selection_slot.grid_propagate(False)
-    module.ttk.Label(
-        selection_slot,
-        textvariable=app.update_selection_summary_var,
-        anchor="w",
-        justify="left",
-    ).place(x=0, y=0, relwidth=1.0, relheight=1.0)
+    # Selection details are already visible in the version combobox. Keep the
+    # variable for compatibility, but do not add a redundant text row.
+    app.update_selection_summary_var = module.tk.StringVar(value="")
 
     progress = getattr(app, "_update_progress", None)
     if progress is not None:
