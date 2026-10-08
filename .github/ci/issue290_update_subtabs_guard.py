@@ -60,7 +60,7 @@ class FakeWidget:
     def bind(self, *args, **kwargs):
         pass
 
-    def configure(self, **kwargs):
+    def configure(self, *args, **kwargs):
         pass
 
     def create_window(self, *args, **kwargs):
