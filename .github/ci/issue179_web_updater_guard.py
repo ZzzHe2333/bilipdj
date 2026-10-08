@@ -80,7 +80,17 @@ def check_packaging() -> None:
 
 def check_no_implicit_release() -> None:
     workflow = read(".github/workflows/package-windows-x64.yml")
-    assert "if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')" in workflow
+    # Normal branch pushes stay build-only. Additional authorized path:
+    # a release-titled commit on the production branch, validated against VERSION.
+    release_guard = (
+        "if: >-\n"
+        "      github.event_name == 'workflow_dispatch' ||\n"
+        "      startsWith(github.ref, 'refs/tags/v') ||\n"
+        "      (github.event_name == 'push' && github.ref == 'refs/heads/now' "
+        "&& startsWith(github.event.head_commit.message, 'release: v'))"
+    )
+    assert release_guard in workflow
+    assert "RELEASE_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}" in workflow
     assert "default: prerelease" in workflow
     assert "release_status:" in workflow
 
