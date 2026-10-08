@@ -45,7 +45,7 @@ def main() -> None:
             "ttk.Combobox(",
             "def _bind_stable_scroll_region",
             "after_idle(refresh_scroll_region)",
-            "status_slot = ttk.Frame(update_frame, height=42)",
+            "status_slot = ttk.Frame(update_frame, height=30)",
             "status_slot.grid_propagate(False)",
         ),
     )
