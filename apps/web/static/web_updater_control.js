@@ -20,6 +20,7 @@
   };
   let state = null;
   let candidates = new Map();
+  let checkInFlight = false;
 
   function setStatus(text, ok = true) {
     const node = $('web-update-action-status');
@@ -167,7 +168,14 @@
 
   async function refreshState() {
     ensureUi();
-    const refresh = $('web-update-refresh'); if (refresh) refresh.disabled = true;
+    // Repeated clicks must not start overlapping requests or remove the glow early.
+    if (checkInFlight) return;
+    checkInFlight = true;
+    const container = $('web-update-controls');
+    const refresh = $('web-update-refresh');
+    if (refresh) refresh.disabled = true;
+    container?.classList.add('is-checking');
+    container?.setAttribute('aria-busy', 'true');
     setStatus('正在读取最近 3 个发行包、最近 10 个全部 Release 与本地备份…');
     try {
       state = await api('/api/control/web-update/state');
@@ -175,6 +183,9 @@
     } catch (error) {
       setStatus(`读取 Web 更新状态失败：${error.message}`, false);
     } finally {
+      checkInFlight = false;
+      container?.classList.remove('is-checking');
+      container?.removeAttribute('aria-busy');
       if (refresh) refresh.disabled = false;
     }
   }

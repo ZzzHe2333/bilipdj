@@ -31,6 +31,7 @@ from .style_save_transport import install_style_save_transport
 from .support_us import _render_support_content, patch_control_panel_support_us
 from .unified_theme import patch_control_panel_unified_theme
 from .update_channel import install_update_channel_guard
+from .update_check_glow import install_update_check_glow
 from .update_stability import patch_control_panel_issue187
 from .webdav_backup_ui import patch_control_panel_webdav_backup
 from .window_policy import patch_control_panel_issue194
@@ -71,6 +72,7 @@ def _install_core_runtime(panel_class: type[Any]) -> None:
     install_update_channel_guard()
     install_release_selector()
     install_download_acceleration()
+    install_update_check_glow()
     # Install before issue180 captures/finalizes the update-page builder.
     install_backup_cleanup_ui()
 

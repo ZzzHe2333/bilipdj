@@ -95,6 +95,10 @@ jobs:
         run: python .github/ci/issue283_multi_platform_guard.py
       - name: Validate gh-proxy update download fallbacks
         run: python .github/ci/issue285_gh_proxy_update_guard.py
+      - name: Validate update check glow lifecycle
+        run: |
+          python .github/ci/issue286_update_check_glow_guard.py
+          node --check apps/web/static/web_updater_control.js
       - name: Validate dynamic multi-source plugin activation
         run: python .github/ci/issue284_multi_source_guard.py
       - name: Validate Huya protocol framing

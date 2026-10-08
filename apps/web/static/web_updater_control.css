@@ -13,3 +13,21 @@
 .web-update-detail{display:flex;flex-direction:column;gap:4px;margin-top:13px;padding:11px 12px;border:1px solid var(--line);border-radius:calc(var(--radius) - 2px);background:var(--panel)}
 .web-update-detail strong{color:var(--text);font-size:12px}.web-update-detail span{color:var(--muted);font-size:11px;line-height:1.55}
 @media(max-width:760px){.web-update-picker-row{grid-template-columns:1fr}.web-update-head{flex-direction:column}.web-update-actions .button{flex:1 1 auto}}
+
+/* Version discovery: a single moving highlight, no layout shifts or polling. */
+.web-update-controls{position:relative;isolation:isolate}
+.web-update-controls.is-checking{
+  border-color:color-mix(in srgb,var(--accent, #7768e8) 60%,var(--line));
+  box-shadow:0 0 0 1px color-mix(in srgb,var(--accent, #7768e8) 22%,transparent),0 0 18px color-mix(in srgb,var(--accent, #7768e8) 18%,transparent)
+}
+.web-update-controls.is-checking::after{
+  content:"";position:absolute;z-index:1;pointer-events:none;left:0;top:0;width:36%;height:3px;
+  border-radius:999px;
+  background:linear-gradient(90deg,transparent,var(--accent, #7768e8),#f3eeff,var(--accent, #7768e8),transparent);
+  filter:drop-shadow(0 0 6px var(--accent, #7768e8));
+  animation:web-update-glow-sweep 1.75s ease-in-out infinite alternate
+}
+@keyframes web-update-glow-sweep{from{transform:translateX(0)}to{transform:translateX(178%)}}
+@media(prefers-reduced-motion:reduce){
+  .web-update-controls.is-checking::after{animation:none;width:100%;opacity:.65}
+}
