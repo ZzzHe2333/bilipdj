@@ -112,7 +112,8 @@ def check_update_ui():
     assert 'text=f"当前版本：v{current_version}"' not in page
     assert '"“发行包”显示最近 3 个正式 Release' not in page
     assert 'Selection details are already visible' in polished
-    assert 'source_frame.grid(row=1, column=0' in accelerator
+    assert 'source_frame.grid(row=0, column=0' in accelerator
+    assert 'getattr(app, "_update_settings_content", None)' in accelerator
     assert '"已选择{kind}' not in selector
     assert '_offer_third_party_on_discovery_failure(app, cloud_error)' in selector
     assert '"releases/latest/download/update-manifest.json"' in selector

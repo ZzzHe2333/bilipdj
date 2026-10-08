@@ -148,6 +148,22 @@ def _bind_stable_scroll_region(canvas: tk.Canvas, inner: ttk.Frame, window_id: i
     canvas.bind("<Configure>", resize_inner)
 
 
+def _scrollable_update_content(page: ttk.Frame) -> ttk.Frame:
+    """Give each update subtab an independent scrollbar and natural height."""
+    page.columnconfigure(0, weight=1)
+    page.rowconfigure(0, weight=1)
+    canvas = tk.Canvas(page, highlightthickness=0, bd=0)
+    canvas.grid(row=0, column=0, sticky="nsew")
+    scrollbar = ttk.Scrollbar(page, orient="vertical", command=canvas.yview)
+    scrollbar.grid(row=0, column=1, sticky="ns")
+    canvas.configure(yscrollcommand=scrollbar.set)
+    inner = ttk.Frame(canvas, padding=(10, 8, 10, 16))
+    window_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+    inner.columnconfigure(0, weight=1)
+    _bind_stable_scroll_region(canvas, inner, window_id)
+    return inner
+
+
 def build_update_tab(app: Any, frame: ttk.Frame, app_name: str, current_version: str, app_dir: Path) -> None:
     current_version = APP_VERSION
     app._update_current_version = current_version
@@ -175,24 +191,28 @@ def build_update_tab(app: Any, frame: ttk.Frame, app_name: str, current_version:
     app.root.bind("<Destroy>", lambda event: update_ui._on_root_destroy(app, event), add="+")  # noqa: SLF001
 
     frame.columnconfigure(0, weight=1)
-    frame.rowconfigure(0, weight=1)
-    canvas = tk.Canvas(frame, highlightthickness=0, bd=0)
-    canvas.grid(row=0, column=0, sticky="nsew")
-    scrollbar = ttk.Scrollbar(frame, orient="vertical", command=canvas.yview)
-    scrollbar.grid(row=0, column=1, sticky="ns")
-    canvas.configure(yscrollcommand=scrollbar.set)
-    inner = ttk.Frame(canvas, padding=(10, 4, 10, 16))
-    window_id = canvas.create_window((0, 0), window=inner, anchor="nw")
-    inner.columnconfigure(0, weight=1)
-    _bind_stable_scroll_region(canvas, inner, window_id)
+    frame.rowconfigure(1, weight=1)
 
-    title_row = ttk.Frame(inner)
-    title_row.grid(row=0, column=0, sticky="ew", pady=(4, 3))
+    # The update list and network settings are separate pages, each with its
+    # own scroll region. Existing update/backup/estimate patches still find
+    # the original LabelFrame and all app._update_* controls by reference.
+    title_row = ttk.Frame(frame, padding=(10, 8, 10, 4))
+    title_row.grid(row=0, column=0, sticky="ew")
     ttk.Label(title_row, text=f"{app_name} 软件更新", font=("Microsoft YaHei UI", 16, "bold") if sys.platform == "win32" else ("", 16, "bold")).pack(side="left")
     ttk.Label(title_row, text=f"v{current_version}", foreground="#6354cf").pack(side="left", padx=(14, 0))
 
-    update_frame = ttk.LabelFrame(inner, text="检测更新与更新内容", padding=12)
-    update_frame.grid(row=2, column=0, sticky="ew")
+    sub_tabs = ttk.Notebook(frame)
+    sub_tabs.grid(row=1, column=0, sticky="nsew", pady=(2, 0))
+    versions_tab = ttk.Frame(sub_tabs)
+    settings_tab = ttk.Frame(sub_tabs)
+    sub_tabs.add(versions_tab, text="版本更新")
+    sub_tabs.add(settings_tab, text="更新设置")
+    app._update_subtabs = sub_tabs
+    app._update_versions_content = _scrollable_update_content(versions_tab)
+    app._update_settings_content = _scrollable_update_content(settings_tab)
+
+    update_frame = ttk.LabelFrame(app._update_versions_content, text="检测更新与更新内容", padding=12)
+    update_frame.grid(row=0, column=0, sticky="ew")
     update_frame.columnconfigure(0, weight=1)
 
     status_slot = ttk.Frame(update_frame, height=42)
@@ -236,8 +256,10 @@ def build_update_tab(app: Any, frame: ttk.Frame, app_name: str, current_version:
     app._update_notes.configure(yscrollcommand=notes_scroll.set)
     _set_notes(app, "点击“检查更新”加载最近 3 个发行包；切换到“全部”可查看最近 10 个 Release（含预发行包）以及完整更新说明。")
 
-    network = ttk.LabelFrame(inner, text="更新网络", padding=12)
-    network.grid(row=3, column=0, sticky="ew", pady=(12, 0))
+    network = ttk.LabelFrame(app._update_settings_content, text="更新网络", padding=12)
+    # Row 0 is reserved for the optional GitHub/GH-Proxy selector, installed
+    # by download_acceleration after the base page has been constructed.
+    network.grid(row=1, column=0, sticky="ew", pady=(6, 0))
     network.columnconfigure(1, weight=1)
     ttk.Checkbutton(network, text="绕过系统代理", variable=app.update_bypass_proxy_var, command=lambda: _toggle_bypass(app)).grid(row=0, column=0, columnspan=2, sticky="w", pady=4)
     ttk.Label(network, text="开启后更新请求不读取 Windows/环境变量代理；只有 TUN 模式或其他网络层代理可以接管。", wraplength=760).grid(row=1, column=0, columnspan=3, sticky="w", padx=(12, 0), pady=(0, 7))

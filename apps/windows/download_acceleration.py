@@ -111,12 +111,11 @@ def _install_source_picker() -> None:
             master=getattr(app, "root", None),
             value=SOURCE_LABELS[OFFICIAL_SOURCE],
         )
-        update_frame = _find_labeled_frame(frame, "检测更新与更新内容")
-        if update_frame is None or getattr(app, "_update_download_source_frame", None) is not None:
+        settings_content = getattr(app, "_update_settings_content", None)
+        if settings_content is None or getattr(app, "_update_download_source_frame", None) is not None:
             return result
-        parent = update_frame.master
-        source_frame = ttk.Frame(parent)
-        source_frame.grid(row=1, column=0, sticky="ew", pady=(5, 9))
+        source_frame = ttk.Frame(settings_content)
+        source_frame.grid(row=0, column=0, sticky="ew", padx=(10, 0), pady=(6, 10))
         source_frame.columnconfigure(1, weight=1)
         ttk.Label(source_frame, text="下载线路").grid(row=0, column=0, sticky="w", padx=(0, 10))
         combo = ttk.Combobox(

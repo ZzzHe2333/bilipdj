@@ -97,6 +97,8 @@ jobs:
         run: python .github/ci/issue285_gh_proxy_update_guard.py
       - name: Validate update page cleanup and updater resume
         run: python .github/ci/issue288_update_resume_guard.py
+      - name: Validate update page subtab layout
+        run: python .github/ci/issue290_update_subtabs_guard.py
       - name: Validate native Windows startup progress
         run: python .github/ci/issue289_native_startup_splash_guard.py
       - name: Validate update check glow lifecycle
