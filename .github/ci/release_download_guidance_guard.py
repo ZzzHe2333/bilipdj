@@ -22,6 +22,11 @@ def _assert_release_links(label: str, text: str, *, version: str) -> None:
 def _assert_readme_release_links(readme: str) -> str:
     windows = re.search(r"BiliPDJ-v(?P<version>\d+\.\d+\.\d+)-Windows-Tk-Portable-x64\.zip", readme)
     web = re.search(r"BiliPDJ-v(?P<version>\d+\.\d+\.\d+)-Web-Portable-x64\.zip", readme)
+    if "https://github.com/ZzzHe2333/bilipdj/releases/latest" in readme:
+        assert "Windows-Tk-Portable-x64.zip" in readme, "README should identify Windows package type"
+        assert "Web-Portable-x64.zip" in readme, "README should identify Web package type"
+        assert "v3.0.12" not in readme, "README still has outdated release URLs"
+        return "latest"
     assert windows, "README does not name a stable Windows client package"
     assert web, "README does not name a stable Web portable package"
     windows_version = windows.group("version")

@@ -143,7 +143,7 @@ function PDJ_RenderQueue(queue) {
     if (!container) return;
 
     var fragment = document.createDocumentFragment();
-    queue.forEach(function(item, index) {
+    queue.slice(0, 8).forEach(function(item, index) {
         var row = document.createElement("div");
         row.className = "queue-item";
         row.setAttribute("role", "listitem");
@@ -174,10 +174,18 @@ function PDJ_RenderQueue(queue) {
 
     container.replaceChildren(fragment);
     if (empty) empty.hidden = queue.length > 0;
+    PDJ_UpdateOverlayState();
     requestAnimationFrame(function() { PDJ_StartAutoScroll(true); });
 }
 
+function PDJ_UpdateOverlayState() {
+    var badge = document.getElementById("overlay-state");
+    if (!badge) return;
+    badge.hidden = pdjConnected && pdjCurrentQueue.length > 0;
+    badge.textContent = pdjConnected ? "当前无人排队" : "队列连接中断，正在重连…";
+}
 function PDJ_SetConnectionBadge(connected) {
+    PDJ_UpdateOverlayState();
     var badge = document.getElementById("connectionBadge");
     if (!badge) return;
     badge.textContent = connected ? "实时连接" : "正在重连";

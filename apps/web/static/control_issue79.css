@@ -54,3 +54,20 @@ input,select,textarea,.url-box{background:var(--input,#08121f)}.log-output,.json
 :root[data-theme="light"] .platform-chip.reconnecting { color:#875711; }
 @media(max-width:1050px) { .topbar { height:auto; min-height:68px; flex-wrap:wrap; padding:12px 18px; } .live-platform-status { order:3; width:100%; } .queue-live-hero { flex-wrap:wrap; } }
 @media(max-width:700px) { .queue-next-box { width:100%; align-items:stretch; } .queue-next-button { width:100%; } .queue-live-hero { padding:18px; } }
+
+.issue79-preview-tools { display:flex; flex-wrap:wrap; align-items:flex-end; gap:12px; margin-top:18px; }
+.issue79-preview-tools label { display:flex; flex-direction:column; gap:5px; font-size:13px; color:var(--muted); }
+.issue79-preview-tools input[type="file"] { max-width:225px; font-size:12px; }
+.issue79-preview-tools select { min-width:135px; }
+.issue79-preview-tools button { align-self:end; }
+.issue79-contrast-warning { padding:9px 12px; border:1px solid var(--line); border-radius:8px; color:var(--muted); margin:10px 0 0; font-size:12px; }
+.issue79-contrast-warning.low-contrast { border-color:#ad6335; color:#f4ac83; }
+:root[data-theme="light"] .issue79-contrast-warning.low-contrast { color:#933713; }
+.issue79-preview-stage.preview-checker { background: conic-gradient(#e5e5e5 25%,#5b6472 0 50%,#e5e5e5 0 75%,#5b6472 0) 0 0 / 32px 32px !important; }
+.issue79-preview-stage.preview-green { background:#00ff00 !important; }
+.issue79-preview-stage.preview-game { background: linear-gradient(135deg,#213d5a,#44545b 45%,#29341f 75%,#1c252b) center / cover !important; }
+.issue79-preview-stage.preview-game[style*="url("] { background-size:cover !important; background-position:center !important; background-image:var(--preview-game-image,none) !important; }
+.issue79-preview-text { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:middle; display:inline-block; max-width:calc(100% - 54px); }
+.issue79-preview-row { max-width:100%; min-width:0; overflow:hidden; }
+.issue79-preview-empty { font-size:clamp(15px,1.5vw,20px); color:var(--preview-text,#eaf6ff); }
+.issue79-preview-stage.preview-game[style*="--preview-game-image: url"] { background-image:var(--preview-game-image) !important; }

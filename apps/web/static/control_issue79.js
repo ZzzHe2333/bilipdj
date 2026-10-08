@@ -284,12 +284,27 @@
     if (!pane || !textarea || $('issue79-style-editor')) return;
     const editor = document.createElement('div');
     editor.id = 'issue79-style-editor';
-    editor.innerHTML = `<div class="card"><div class="issue79-section-title"><div><h3>可视化样式设置</h3><p class="hint">调整后下方实时预览；点击原“保存样式”按钮后写入后端并刷新队列看板。</p></div><button id="issue-style-reload" class="button ghost">重新读取</button></div><div class="issue79-editor-grid">${STYLE_FIELDS.map(styleFieldMarkup).join('')}<label>开启文字描边<input id="issue-style-text_stroke_enabled" type="checkbox"></label><label>自动滚动<input id="issue-style-auto_scroll" type="checkbox"></label><label>显示序号<input id="issue-style-show_sequence" type="checkbox"></label></div><div class="issue79-preview"><div id="issue79-preview-stage" class="issue79-preview-stage"><div id="issue79-preview-queue" class="issue79-preview-queue"><div class="issue79-preview-row"><span class="issue79-preview-number">01</span><span>雪梦茉莉 牵丝霖</span></div><div class="issue79-preview-row"><span class="issue79-preview-number">02</span><span>示例用户 排队内容</span></div><div class="issue79-preview-row"><span class="issue79-preview-number">03</span><span>第三位玩家</span></div></div></div></div><details class="issue79-advanced"><summary>高级 JSON（保留原编辑方式）</summary><p class="hint">可直接修改下方 JSON；重新读取会以服务器数据覆盖。</p></details></div>`;
+    editor.innerHTML = `<div class="card"><div class="issue79-section-title"><div><h3>可视化样式设置</h3><p class="hint">调整后下方实时预览；点击原“保存样式”按钮后写入后端并刷新队列看板。</p></div><button id="issue-style-reload" class="button ghost">重新读取</button></div><div class="issue79-editor-grid">${STYLE_FIELDS.map(styleFieldMarkup).join('')}<label>开启文字描边<input id="issue-style-text_stroke_enabled" type="checkbox"></label><label>自动滚动<input id="issue-style-auto_scroll" type="checkbox"></label><label>显示序号<input id="issue-style-show_sequence" type="checkbox"></label></div><div class="issue79-preview-tools">
+       <label>预览背景 <select id="issue79-preview-bg"><option value="checker">透明棋盘格</option><option value="green">纯绿幕</option><option value="game">游戏画面（本地截图）</option></select></label>
+       <label class="issue79-preview-upload">选择游戏截图 <input type="file" accept="image/png,image/jpeg,image/webp" id="issue79-preview-file"></label>
+       <label>模拟数据 <select id="issue79-preview-case"><option value="long">超长用户名</option><option value="gift">礼物插队</option><option value="empty">空队列</option><option value="normal">正常队列</option></select></label>
+       <button class="button ghost" id="issue79-copy-obs" type="button">复制 OBS 地址</button>
+       </div><p id="issue79-contrast-warning" class="issue79-contrast-warning" role="status" aria-live="polite"></p><div class="issue79-preview"><div id="issue79-preview-stage" class="issue79-preview-stage preview-checker" class="issue79-preview-stage"><div id="issue79-preview-queue" class="issue79-preview-queue"><div class="issue79-preview-row"><span class="issue79-preview-number">01</span><span>雪梦茉莉 牵丝霖</span></div><div class="issue79-preview-row"><span class="issue79-preview-number">02</span><span>示例用户 排队内容</span></div><div class="issue79-preview-row"><span class="issue79-preview-number">03</span><span>第三位玩家</span></div></div></div></div><details class="issue79-advanced"><summary>高级 JSON（保留原编辑方式）</summary><p class="hint">可直接修改下方 JSON；重新读取会以服务器数据覆盖。</p></details></div>`;
     pane.insertBefore(editor, pane.firstChild);
     const details = editor.querySelector('.issue79-advanced');
     details?.appendChild(textarea);
     textarea.classList.add('tall');
     editor.querySelectorAll('input,select').forEach(node => node.addEventListener('input', applyStylePreview));
+    $('issue79-preview-bg')?.addEventListener('change', updatePreviewBackground);
+    $('issue79-preview-case')?.addEventListener('change', renderPreviewCase);
+    $('issue79-preview-file')?.addEventListener('change', loadPreviewScreenshot);
+    $('issue79-copy-obs')?.addEventListener('click', async () => {
+      const value = location.origin + '/index';
+      try { await navigator.clipboard.writeText(value); setStatus('style-status', 'OBS 地址已复制：' + value); }
+      catch (_) { window.prompt('复制 OBS 地址', value); }
+    });
+    renderPreviewCase();
+    updatePreviewBackground();
     $('issue-style-reload')?.addEventListener('click', loadVisualStyle);
 
     const styleButton = document.querySelector('[data-settings="style"]');
@@ -348,6 +363,73 @@
       setStatus('style-status', `样式加载失败：${error.message}`, false);
     }
   }
+  let previewImageUrl = '';
+  function renderPreviewCase() {
+    const target = $('issue79-preview-queue');
+    if (!target) return;
+    const scenario = $('issue79-preview-case')?.value || 'long';
+    const samples = {
+      long: ['01', '某位名字特别特别特别长的直播观众_测试昵称ABCDEFGHIJKLMNOPQRSTUVWXYZ'],
+      gift: ['01', '礼物插队 · 感谢观众支持', '02', '普通观众排队等待'],
+      normal: ['01', '第一位玩家', '02', '第二位玩家'],
+      empty: [],
+    };
+    const data = samples[scenario] || samples.normal;
+    target.replaceChildren();
+    if (data.length === 0) {
+      const blank = document.createElement('div');
+      blank.className = 'issue79-preview-empty';
+      blank.textContent = '当前无人排队（空队列模拟）';
+      target.appendChild(blank);
+    } else {
+      for (let i = 0; i < data.length; i += 2) {
+        const row = document.createElement('div');
+        row.className = 'issue79-preview-row';
+        const number = document.createElement('span');
+        number.className = 'issue79-preview-number';
+        number.textContent = data[i];
+        const text = document.createElement('span');
+        text.className = 'issue79-preview-text';
+        text.textContent = data[i + 1];
+        row.append(number, text);
+        target.appendChild(row);
+      }
+    }
+    applyStylePreview();
+  }
+  function updatePreviewBackground() {
+    const stage = $('issue79-preview-stage');
+    if (!stage) return;
+    const mode = $('issue79-preview-bg')?.value || 'checker';
+    stage.classList.remove('preview-checker', 'preview-green', 'preview-game');
+    stage.classList.add('preview-' + mode);
+    stage.style.setProperty('--preview-game-image', mode === 'game' && previewImageUrl ? 'url("' + previewImageUrl + '")' : 'none');
+    applyStylePreview();
+  }
+  function loadPreviewScreenshot() {
+    const file = $('issue79-preview-file')?.files?.[0];
+    if (previewImageUrl) { URL.revokeObjectURL(previewImageUrl); previewImageUrl = ''; }
+    if (file && /^image\/(png|jpeg|webp)$/.test(file.type) && file.size <= 12 * 1024 * 1024) {
+      previewImageUrl = URL.createObjectURL(file);
+      if ($('issue79-preview-bg')) $('issue79-preview-bg').value = 'game';
+    } else if (file) {
+      setStatus('style-status', '只支持不超过 12 MB 的 PNG、JPEG 或 WebP 图片。', false);
+    }
+    updatePreviewBackground();
+  }
+  function luminance(hex) {
+    const value = String(hex || '').replace('#','');
+    if (!/^[0-9a-f]{6}$/i.test(value)) return 0;
+    const linear = [0,2,4].map(i => {
+      const c = parseInt(value.slice(i,i+2),16) / 255;
+      return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+  }
+  function contrastRatio(a,b) {
+    const l1 = luminance(a), l2 = luminance(b);
+    return (Math.max(l1,l2)+0.05) / (Math.min(l1,l2)+0.05);
+  }
   function applyStylePreview() {
     const payload = collectVisualStyle();
     const stage = $('issue79-preview-stage');
@@ -372,6 +454,16 @@
     queue.style.setProperty('--preview-py', `${Number(payload.queue_item_padding_y || 0)}px`);
     queue.querySelectorAll('.issue79-preview-row').forEach(row => row.classList.toggle('issue79-stroke', Boolean(payload.text_stroke_enabled)));
     queue.querySelectorAll('.issue79-preview-number').forEach(node => { node.style.display = payload.show_sequence ? 'inline-block' : 'none'; });
+    const mode = $('issue79-preview-bg')?.value || 'checker';
+    const backgrounds = mode === 'green' ? ['#00ff00'] : mode === 'checker'
+      ? ['#f3f3f3','#444444'] : [payload.bg1, payload.bg2, payload.bg3];
+    const ratio = Math.min(...backgrounds.map(bg => contrastRatio(payload.text_color, bg)));
+    const warning = $('issue79-contrast-warning');
+    if (warning) {
+      warning.classList.toggle('low-contrast', ratio < 4.5);
+      warning.textContent = (ratio < 4.5 ? '对比度不足' : '对比度达标') + '：最低 ' + ratio.toFixed(2) +
+        ':1（建议至少 4.5:1）。' + (mode === 'game' ? '游戏图片背景只能作为视觉预览，真实截图请人工确认可读性。' : '');
+    }
   }
 
   // ---------- Control panel theme ----------

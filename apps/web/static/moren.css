@@ -117,3 +117,9 @@ html, body {
     from { color: var(--neon); text-shadow: 0 0 8px rgba(0,229,255,0.9), 0 0 28px rgba(0,229,255,0.5); opacity: 1; }
     to { color: #ffffff; text-shadow: 0 0 18px rgba(255,255,255,1), 0 0 36px rgba(0,229,255,0.7); opacity: 0.8; }
 }
+
+/* OBS legibility: compact lines, readable name edges and a finite visible queue. */
+.queue-content { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-shadow:-1px -1px 0 var(--text-stroke),1px -1px 0 var(--text-stroke),-1px 1px 0 var(--text-stroke),1px 1px 0 var(--text-stroke),0 2px 9px rgba(0,0,0,.75); }
+.queue-item { max-width:100%; overflow:hidden; }
+.overlay-state { color:var(--text-color); font-size:clamp(16px,2vw,24px); font-weight:700; text-shadow:0 2px 4px rgba(0,0,0,.85); padding:10px 16px; }
+.overlay-state[hidden] { display:none!important; }
