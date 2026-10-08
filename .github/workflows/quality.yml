@@ -47,6 +47,13 @@ jobs:
         run: python .github/ci/issue138_release_policy_guard.py
       - name: Validate release download guidance
         run: python .github/ci/release_download_guidance_guard.py
+      - name: Validate live console, landing and DPI behavior
+        run: |
+          python .github/ci/issue298_landing_web_guard.py
+          node --check site/app.js
+          node --check apps/web/static/control.js
+          node --check apps/web/static/control_issue79.js
+          node --check apps/web/static/myjs.js
       - name: Validate updater backup repository
         run: python .github/ci/issue150_updater_backup_guard.py
       - name: Validate incremental updater

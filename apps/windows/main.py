@@ -19,6 +19,8 @@ if str(REPO_ROOT) not in sys.path:
 if getattr(sys, "frozen", False):
     os.environ.setdefault("BILIPDJ_PORTABLE_AUTO_BACKEND", "1")
 
+from apps.windows.dpi_awareness import enable_system_dpi_awareness  # noqa: E402
+enable_system_dpi_awareness()  # before creating any HWND, including the splash
 from apps.windows.startup_splash import open_startup_splash  # noqa: E402
 
 # A native Win32 message loop starts before tkinter/backend/UI imports. It stays
