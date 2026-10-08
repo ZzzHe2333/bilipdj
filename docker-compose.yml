@@ -12,6 +12,10 @@ services:
       - /tmp:rw,nosuid,size=128m
     cap_drop:
       - ALL
+    # Existing ./data may be owned by the host user; only allow Docker's
+    # root to write the explicitly mounted data volume despite that ownership.
+    cap_add:
+      - DAC_OVERRIDE
     pids_limit: 256
     stop_grace_period: 30s
     security_opt:
