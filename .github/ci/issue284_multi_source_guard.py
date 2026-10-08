@@ -68,7 +68,11 @@ def backend_five_relay_test():
                 assert relay.proxy.runtime_config["platform"] == platform
             reloaded = backend.load_config()
             assert reloaded["active_platforms"] == wanted, reloaded
-            backend.save_config(backend._merge_config(reloaded, {"platform": "douyin"}))
+            # The real GUI persists the selected platform into its active
+            # platform-configuration slot before saving global config.yaml.
+            changed = backend._merge_config(reloaded, {"platform": "douyin"})
+            backend.save_platform_config_slot(1, backend._build_platform_config_payload(changed))
+            backend.save_config(changed)
             assert backend.load_config()["active_platforms"] == wanted
             assert backend.load_config()["platform"] == "douyin"
             request = FakeHandler(fake_server, [])
