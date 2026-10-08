@@ -5,7 +5,7 @@
 
 /* Console: respect the existing light/dark/custom theme palette. */
 body.cdk-console {
-  --ui-radius: max(8px, var(--radius, 12px));
+  --ui-radius: var(--radius, 12px);
   --ui-shadow: 0 1px 3px rgba(0,0,0,.035), 0 12px 35px rgba(0,0,0,.045);
   --ui-soft: color-mix(in srgb, var(--text) 4%, var(--panel));
   --ui-quiet: color-mix(in srgb, var(--text) 3%, var(--bg));
@@ -196,10 +196,11 @@ body.cdk-config, body.cdk-login, body.cdk-plugin {
   --cdk-bg: #f8fafc; --cdk-paper: #fff; --cdk-soft: #f4f4f5;
   --cdk-border: #e4e4e7; --cdk-ink: #18181b; --cdk-muted: #71717a;
   --cdk-primary: #27272a; --cdk-on-primary: #fff;
-  margin: 0; background: var(--cdk-bg) !important; background-image: none !important;
+  margin: 0; padding: 0 !important; background: var(--cdk-bg) !important; background-image: none !important;
   color: var(--cdk-ink) !important;
   font-family: Inter, "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif !important;
   line-height: 1.6;
+  color-scheme: light;
 }
 .cdk-config .page { width: min(1040px, calc(100% - 36px)); gap: 20px; padding: 34px 0 56px; }
 .cdk-config header { padding: 0 2px 4px; }
@@ -338,6 +339,7 @@ body.cdk-config, body.cdk-login, body.cdk-plugin {
     --cdk-bg: #09090b; --cdk-paper: #18181b; --cdk-soft: #27272a;
     --cdk-border: #3f3f46; --cdk-ink: #fafafa; --cdk-muted: #a1a1aa;
     --cdk-primary: #fafafa; --cdk-on-primary: #18181b;
+    color-scheme: dark;
   }
   .cdk-config code { background: #27272a; }
   .cdk-login #qrcode { border-color: var(--cdk-border); }
