@@ -12,6 +12,30 @@ sys.path.insert(0, str(ROOT))
 from apps.windows import startup_splash
 
 
+def check_rainbow() -> None:
+    assert len(startup_splash.RAINBOW_RGB) == 7
+    assert startup_splash._stage_colors(1) == startup_splash.RAINBOW_RGB[:1]
+    assert startup_splash._stage_colors(4) == startup_splash.RAINBOW_RGB[:4]
+    assert startup_splash._stage_colors(7) == startup_splash.RAINBOW_RGB
+    s = startup_splash.NativeStartupSplash(enabled=True)
+    s.advance(3)
+    assert s._completed == 3
+    s.advance(1)
+    assert s._completed == 3, "colors must never disappear during boot"
+    s.advance(17)
+    assert s._completed == 7
+    assert not s._stop.is_set()
+    s.close()
+    s.advance(6)
+    assert s._completed == 7
+    code = (ROOT / "apps/windows/startup_splash.py").read_text(encoding="utf-8")
+    assert "_TITLE = \"BiliPDJ 启动中\"" in code
+    assert "CreateWindowExW" in code and "DrawTextW" in code
+    assert "msctls_progress32" not in code
+    assert "_WS_CAPTION" not in code
+    assert "CreatePen" in code and "math.cos" in code
+
+
 def check_arguments() -> None:
     show = startup_splash.should_show_startup_splash
     assert show([], frozen=True, platform="nt")
@@ -51,6 +75,8 @@ def check_main_order() -> None:
     assert code.index("open_startup_splash(sys.argv[1:]") < code.index("from apps.server import server as backend")
     assert code.index("open_startup_splash(sys.argv[1:]") < code.index("from apps.windows import control_panel, update_ui")
     assert "def _initialize_runtime()" in code
+    assert "_startup_splash.advance(7)" in code
+    assert "_startup_splash.wait_for_stage(7" in code
     assert "_initialize_runtime()" in ast.get_source_segment(code, next(
         n for n in module.body if isinstance(n, ast.FunctionDef) and n.name == "main"
     ))
@@ -70,6 +96,8 @@ def check_native_window() -> None:
         splash.start()
         assert splash._ready.wait(3), "Win32 thread did not initialize"
         assert splash._hwnd, "startup window could not be created"
+        splash.advance(7)
+        assert splash.wait_for_stage(7, timeout=2), "final rainbow frame was not painted"
         splash.update("正在加载模块（启动窗口自检）…")
         time.sleep(0.2)
         assert splash._thread is not None and splash._thread.is_alive()
@@ -80,6 +108,7 @@ def check_native_window() -> None:
 
 if __name__ == "__main__":
     check_native_window()
+    check_rainbow()
     check_arguments()
     check_lifecycle()
     check_main_order()

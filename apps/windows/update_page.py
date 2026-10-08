@@ -161,6 +161,22 @@ def _scrollable_update_content(page: ttk.Frame) -> ttk.Frame:
     window_id = canvas.create_window((0, 0), window=inner, anchor="nw")
     inner.columnconfigure(0, weight=1)
     _bind_stable_scroll_region(canvas, inner, window_id)
+
+    # When the content is shorter than the available viewport, extend the
+    # scrolled window itself.  The notes Text's grid weight then fills what
+    # used to be a large blank block at the bottom of the update page.
+    def stretch_to_viewport(_event: Any = None) -> None:
+        try:
+            requested = int(inner.winfo_reqheight())
+            available = int(canvas.winfo_height())
+            target = max(requested, available)
+            if abs(int(canvas.itemcget(window_id, "height") or 0) - target) > 1:
+                canvas.itemconfigure(window_id, height=target)
+        except (tk.TclError, ValueError, AttributeError, TypeError):
+            pass
+
+    canvas.bind("<Configure>", stretch_to_viewport, add="+")
+    inner.bind("<Configure>", stretch_to_viewport, add="+")
     return inner
 
 
@@ -201,7 +217,13 @@ def build_update_tab(app: Any, frame: ttk.Frame, app_name: str, current_version:
     ttk.Label(title_row, text=f"{app_name} 软件更新", font=("Microsoft YaHei UI", 16, "bold") if sys.platform == "win32" else ("", 16, "bold")).pack(side="left")
     ttk.Label(title_row, text=f"v{current_version}", foreground="#6354cf").pack(side="left", padx=(14, 0))
 
-    sub_tabs = ttk.Notebook(frame)
+    # Main settings notebook uses global TNotebook tabposition="wn"
+    # (west/left).  Isolate the nested update notebook so it remains a small
+    # horizontal tab strip without consuming ~180 px of content width.
+    style = ttk.Style(frame)
+    style.configure("BiliPDJUpdate.TNotebook", tabposition="n", tabmargins=(0, 0, 0, 0))
+    style.configure("BiliPDJUpdate.TNotebook.Tab", padding=(14, 5))
+    sub_tabs = ttk.Notebook(frame, style="BiliPDJUpdate.TNotebook")
     sub_tabs.grid(row=1, column=0, sticky="nsew", pady=(2, 0))
     versions_tab = ttk.Frame(sub_tabs)
     settings_tab = ttk.Frame(sub_tabs)
@@ -209,13 +231,15 @@ def build_update_tab(app: Any, frame: ttk.Frame, app_name: str, current_version:
     sub_tabs.add(settings_tab, text="更新设置")
     app._update_subtabs = sub_tabs
     app._update_versions_content = _scrollable_update_content(versions_tab)
+    app._update_versions_content.rowconfigure(0, weight=1)
     app._update_settings_content = _scrollable_update_content(settings_tab)
 
     update_frame = ttk.LabelFrame(app._update_versions_content, text="检测更新与更新内容", padding=12)
-    update_frame.grid(row=0, column=0, sticky="ew")
+    update_frame.grid(row=0, column=0, sticky="nsew")
     update_frame.columnconfigure(0, weight=1)
+    update_frame.rowconfigure(6, weight=1)
 
-    status_slot = ttk.Frame(update_frame, height=42)
+    status_slot = ttk.Frame(update_frame, height=30)
     status_slot.grid(row=0, column=0, columnspan=2, sticky="ew")
     status_slot.grid_propagate(False)
     ttk.Label(status_slot, textvariable=app.update_status_var, wraplength=760, justify="left").place(x=0, y=0, relwidth=1.0, relheight=1.0)
@@ -248,7 +272,8 @@ def build_update_tab(app: Any, frame: ttk.Frame, app_name: str, current_version:
     notes_frame = ttk.Frame(update_frame)
     notes_frame.grid(row=6, column=0, columnspan=2, sticky="nsew")
     notes_frame.columnconfigure(0, weight=1)
-    app._update_notes = tk.Text(notes_frame, height=10, wrap="word", state="disabled")
+    notes_frame.rowconfigure(0, weight=1)
+    app._update_notes = tk.Text(notes_frame, height=16, wrap="word", state="disabled")
     app._all_text_widgets.append(app._update_notes)
     app._update_notes.grid(row=0, column=0, sticky="nsew")
     notes_scroll = ttk.Scrollbar(notes_frame, orient="vertical", command=app._update_notes.yview)

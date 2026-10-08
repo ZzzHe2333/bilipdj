@@ -89,7 +89,7 @@ def verify_layout():
     # Simulate Tk widgets without a desktop display, while executing the
     # actual update page and source-picker constructors (not only source grep).
     ui_names = ("Frame", "LabelFrame", "Label", "Scrollbar", "Entry",
-                "Combobox", "Progressbar", "Button", "Checkbutton", "Notebook")
+                "Combobox", "Progressbar", "Button", "Checkbutton", "Notebook", "Style")
     with patch.multiple(update_page.tk, StringVar=FakeVar, BooleanVar=FakeVar,
                         DoubleVar=FakeVar, Canvas=FakeWidget, Text=FakeWidget), \
          patch.multiple(update_page.ttk, **{name: FakeWidget for name in ui_names}), \
@@ -128,6 +128,11 @@ def verify_layout():
 def check_source_layout():
     source = (ROOT / "apps/windows/update_page.py").read_text(encoding="utf-8")
     acceleration = (ROOT / "apps/windows/download_acceleration.py").read_text(encoding="utf-8")
+    assert 'style.configure("BiliPDJUpdate.TNotebook", tabposition="n"' in source
+    assert 'style="BiliPDJUpdate.TNotebook"' in source
+    assert "notes_frame.rowconfigure(0, weight=1)" in source
+    assert "update_frame.rowconfigure(6, weight=1)" in source
+    assert "height=16, wrap=\"word\"" in source
     assert 'sub_tabs.add(versions_tab, text="版本更新")' in source
     assert 'sub_tabs.add(settings_tab, text="更新设置")' in source
     assert 'network.grid(row=1' in source

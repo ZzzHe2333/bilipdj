@@ -28,6 +28,7 @@ _startup_splash = open_startup_splash(sys.argv[1:], frozen=bool(getattr(sys, "fr
 _startup_splash.update("正在准备图形界面…")
 
 import tkinter as tk  # noqa: E402
+_startup_splash.advance(2)
 
 GUI_STARTUP_LOG_NAME = "gui-startup-error.log"
 
@@ -43,6 +44,7 @@ def _initialize_runtime() -> None:
     from apps.server.main import configure_web_assets
     from apps.server.runtime_layout import ensure_runtime_layout
     configure_web_assets()
+    _startup_splash.advance(3)
 
     _startup_splash.update("正在加载控制台组件…")
     from apps.windows import control_panel, update_ui
@@ -50,12 +52,14 @@ def _initialize_runtime() -> None:
     from apps.windows.update_estimate_ui import patch_update_ui
     from apps.windows.update_workspace_runtime import install_windows_update_workspace
     from apps.windows.window_policy import WINDOW_HEIGHT, WINDOW_WIDTH
+    _startup_splash.advance(4)
 
     _startup_splash.update("正在加载配置并安装界面模块…")
     _configure_control_panel_paths()
     install_windows_update_workspace()
     patch_update_ui(update_ui)
     install_desktop_runtime(control_panel.ControlPanelApp)
+    _startup_splash.advance(5)
 
 
 
@@ -164,12 +168,15 @@ def _create_desktop() -> tuple[tk.Tk, Any, list[str]]:
     _startup_splash.update("正在创建主窗口…")
     root = tk.Tk()
     root.withdraw()
+    _startup_splash.advance(6)
     callback_errors = _install_callback_error_logger(root)
     try:
         _startup_splash.update("正在初始化设置与导航页面…")
         app = control_panel.ControlPanelApp(root)
         root._bilipdj_control_panel = app  # type: ignore[attr-defined]
         _startup_splash.update("主界面准备就绪")
+        _startup_splash.advance(7)
+        _startup_splash.wait_for_stage(7, timeout=0.16)
         # Remove the transient native topmost window before showing Tk, so
         # input focus and taskbar ownership remain with the main application.
         _startup_splash.close()
