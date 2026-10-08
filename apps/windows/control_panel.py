@@ -949,14 +949,16 @@ class ControlPanelApp:
         tree_frame.columnconfigure(0, weight=1)
         tree_frame.rowconfigure(0, weight=1)
 
-        columns = ("seq", "item_id", "content")
+        columns = ("seq", "item_id", "content", "platform")
         self.queue_tree = ttk.Treeview(tree_frame, columns=columns, show="headings", selectmode="browse")
         self.queue_tree.heading("seq", text="#")
         self.queue_tree.heading("item_id", text="ID")
         self.queue_tree.heading("content", text="排队内容")
+        self.queue_tree.heading("platform", text="来源平台")
         self.queue_tree.column("seq", width=40, minwidth=30, anchor="center", stretch=False)
         self.queue_tree.column("item_id", width=160, minwidth=80, anchor="w")
         self.queue_tree.column("content", width=300, minwidth=100, anchor="w")
+        self.queue_tree.column("platform", width=85, minwidth=60, anchor="center", stretch=False)
 
         y_scroll = ttk.Scrollbar(tree_frame, orient="vertical", command=self.queue_tree.yview)
         self.queue_tree.configure(yscrollcommand=y_scroll.set)
@@ -1609,11 +1611,12 @@ class ControlPanelApp:
         self._switch_queue_slot(slot)
 
     @staticmethod
-    def _build_queue_entry(item_id: Any, content: Any, last_operation_at: Any = "") -> dict[str, str]:
+    def _build_queue_entry(item_id: Any, content: Any, last_operation_at: Any = "", platform: Any = "") -> dict[str, str]:
         return {
             "id": str(item_id or "").strip(),
             "content": str(content or "").strip(),
             "last_operation_at": str(last_operation_at or "").strip(),
+            "platform": str(platform or "").strip().lower(),
         }
 
     @staticmethod
@@ -1642,6 +1645,7 @@ class ControlPanelApp:
                             entry.get("id", ""),
                             entry.get("content", ""),
                             entry.get("last_operation_at", ""),
+                            entry.get("platform", ""),
                         )
                     )
                 return entries
@@ -1672,6 +1676,7 @@ class ControlPanelApp:
                     entry.get("id", ""),
                     entry.get("content", ""),
                     entry.get("last_operation_at", ""),
+                    entry.get("platform", ""),
                 )
                 for entry in entries
                 if isinstance(entry, dict)
@@ -1734,7 +1739,7 @@ class ControlPanelApp:
             iid = self.queue_tree.insert(
                 "",
                 "end",
-                values=(idx, str(entry.get("id", "")), str(entry.get("content", ""))),
+                values=(idx, str(entry.get("id", "")), str(entry.get("content", "")), str(entry.get("platform", "") or "未知")),
             )
             iid_map[idx] = iid
         self.queue_count_var.set(f"当前排队：{len(entries)} 人")
@@ -2602,6 +2607,7 @@ class ControlPanelApp:
                 entry.get("id", ""),
                 entry.get("content", ""),
                 entry.get("last_operation_at", ""),
+                entry.get("platform", ""),
             )
             for entry in new_entries
             if isinstance(entry, dict)
@@ -2748,7 +2754,7 @@ class ControlPanelApp:
 
         def op(entries):
             pos = max(0, min(idx, len(entries)))
-            entries.insert(pos, self._build_queue_entry(item_id, content, self._queue_entry_timestamp_now()))
+            entries.insert(pos, self._build_queue_entry(item_id, content, self._queue_entry_timestamp_now(), "manual"))
             return entries
 
         threading.Thread(target=self._queue_local_op, args=(op, f"已在第{idx}位后新增"), daemon=True).start()
@@ -4461,6 +4467,7 @@ class ControlPanelApp:
                     entry.get("id", ""),
                     entry.get("content", ""),
                     entry.get("last_operation_at", ""),
+                    entry.get("platform", ""),
                 )
                 for entry in entries
                 if isinstance(entry, dict)

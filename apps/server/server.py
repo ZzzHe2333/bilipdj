@@ -585,12 +585,13 @@ def queue_parts_to_item(item_id: Any, content: Any) -> str:
     return f"{item_id_text} {content_text}".rstrip()
 
 
-def build_queue_entry(item_id: Any, content: Any, last_operation_at: Any = "") -> dict[str, str]:
+def build_queue_entry(item_id: Any, content: Any, last_operation_at: Any = "", platform: Any = "") -> dict[str, str]:
     timestamp = str(last_operation_at or "").strip()
     return {
         "id": str(item_id or "").strip(),
         "content": str(content or "").strip(),
         "last_operation_at": _format_archive_timestamp(timestamp) if timestamp else "",
+        "platform": str(platform or "").strip().lower(),
     }
 
 
@@ -600,6 +601,7 @@ def queue_item_to_entry(item: Any, last_operation_at: Any = "") -> dict[str, str
             item.get("id", ""),
             item.get("content", ""),
             item.get("last_operation_at", last_operation_at),
+            item.get("platform", ""),
         )
     item_id, content = queue_item_to_parts(item)
     return build_queue_entry(item_id, content, last_operation_at)
@@ -658,12 +660,14 @@ def parse_queue_archive_rows(rows: list[list[str]]) -> tuple[dict[str, str], lis
                 item_id = str(row[1]).strip()
                 content = str(row[2]).strip()
                 last_operation_at = str(row[3]).strip() if len(row) > 3 else ""
+                platform = str(row[4]).strip().lower() if len(row) > 4 else ""
             elif len(row) >= 2:
                 item_id, content = queue_item_to_parts(row[1])
                 last_operation_at = ""
+                platform = ""
             else:
                 continue
-            entries.append(build_queue_entry(item_id, content, last_operation_at))
+            entries.append(build_queue_entry(item_id, content, last_operation_at, platform))
 
     fallback_timestamp = str(meta.get("timestamp", "")).strip()
     if fallback_timestamp:
@@ -716,7 +720,7 @@ def write_queue_archive_entries(path: Path, entries: list[dict[str, Any]], meta:
     writer.writerow([ARCHIVE_META_ACTOR, str(metadata.get("actor", "") or "")])
     writer.writerow([ARCHIVE_META_MESSAGE, str(metadata.get("message", "") or "")])
     writer.writerow([])
-    writer.writerow([ARCHIVE_HEADER_SEQ, ARCHIVE_HEADER_ID, ARCHIVE_HEADER_CONTENT, ARCHIVE_HEADER_LAST_OPERATION_AT])
+    writer.writerow([ARCHIVE_HEADER_SEQ, ARCHIVE_HEADER_ID, ARCHIVE_HEADER_CONTENT, ARCHIVE_HEADER_LAST_OPERATION_AT, "来源平台"])
     for idx, entry in enumerate(entries, start=1):
         normalized = queue_item_to_entry(entry)
         writer.writerow(
@@ -725,6 +729,7 @@ def write_queue_archive_entries(path: Path, entries: list[dict[str, Any]], meta:
                 normalized.get("id", ""),
                 normalized.get("content", ""),
                 normalized.get("last_operation_at", ""),
+                normalized.get("platform", ""),
             ]
         )
     _atomic_write_text(path, buffer.getvalue(), encoding="utf-8-sig")
@@ -1795,6 +1800,7 @@ class QueueArchiveManager:
                     entry.get("id", ""),
                     entry.get("content", ""),
                     entry.get("last_operation_at", "") or default_timestamp,
+                    entry.get("platform", ""),
                 )
                 for entry in queue_items_to_entries(queue_items)
             ]
@@ -1910,6 +1916,10 @@ class QueueManager:
         self._lock = threading.Lock()
         self._persons: list[str] = []
         self._entry_timestamps: list[str] = []
+        self._entry_platforms: list[str] = []
+        # Per-event thread locality ensures concurrently active relays cannot
+        # assign another platform's source to a queue operation.
+        self._queue_origin_context = threading.local()
         self._admins: list[str] = []
         self._blacklist: list[str] = []
         self._jianzhang: list[str] = []
@@ -2108,10 +2118,16 @@ class QueueManager:
             self._entry_timestamps.extend([""] * missing)
         elif missing < 0:
             del self._entry_timestamps[len(self._persons):]
+        origin_delta = len(self._persons) - len(self._entry_platforms)
+        if origin_delta > 0:
+            self._entry_platforms.extend([""] * origin_delta)
+        elif origin_delta < 0:
+            del self._entry_platforms[len(self._persons):]
 
     def _set_queue_from_entries_unlocked(self, entries: list[dict[str, Any]]) -> None:
         persons: list[str] = []
         timestamps: list[str] = []
+        platforms: list[str] = []
         for entry in entries:
             normalized = queue_item_to_entry(entry)
             item = self._strip_html(
@@ -2124,8 +2140,10 @@ class QueueManager:
                 continue
             persons.append(item)
             timestamps.append(str(normalized.get("last_operation_at", "") or "").strip())
+            platforms.append(str(normalized.get("platform", "") or "").strip().lower())
         self._persons = persons
         self._entry_timestamps = timestamps
+        self._entry_platforms = platforms
         self._sync_entry_timestamps_unlocked()
 
     def _get_queue_entries_unlocked(self) -> list[dict[str, str]]:
@@ -2135,7 +2153,9 @@ class QueueManager:
             item_text = str(item or "").strip()
             if not item_text:
                 continue
-            entries.append(queue_item_to_entry(item_text, self._entry_timestamps[idx]))
+            entry = queue_item_to_entry(item_text, self._entry_timestamps[idx])
+            entry["platform"] = self._entry_platforms[idx]
+            entries.append(entry)
         return entries
 
     def _append_queue_item_unlocked(self, item: Any, last_operation_at: Any | None = None) -> bool:
@@ -2143,8 +2163,10 @@ class QueueManager:
         if not item_text:
             return False
         timestamp = str(last_operation_at or "").strip() or self._now_queue_timestamp()
+        self._sync_entry_timestamps_unlocked()
         self._persons.append(item_text)
         self._entry_timestamps.append(_format_archive_timestamp(timestamp))
+        self._entry_platforms.append(str(getattr(self._queue_origin_context, "platform", "") or "manual").lower())
         return True
 
     def _insert_queue_item_unlocked(self, pos: int, item: Any, last_operation_at: Any | None = None) -> bool:
@@ -2156,6 +2178,7 @@ class QueueManager:
         timestamp = str(last_operation_at or "").strip() or self._now_queue_timestamp()
         self._persons.insert(insert_pos, item_text)
         self._entry_timestamps.insert(insert_pos, _format_archive_timestamp(timestamp))
+        self._entry_platforms.insert(insert_pos, str(getattr(self._queue_origin_context, "platform", "") or "manual").lower())
         return True
 
     def _replace_queue_item_unlocked(self, index: int, item: Any) -> bool:
@@ -2176,6 +2199,7 @@ class QueueManager:
         self._persons.pop(index)
         if 0 <= index < len(self._entry_timestamps):
             self._entry_timestamps.pop(index)
+            self._entry_platforms.pop(index)
         else:
             self._sync_entry_timestamps_unlocked()
         return True
@@ -2275,6 +2299,9 @@ class QueueManager:
                     self._entry_timestamps[index - 1],
                     self._entry_timestamps[index - 2],
                 )
+                self._entry_platforms[index - 2], self._entry_platforms[index - 1] = (
+                    self._entry_platforms[index - 1], self._entry_platforms[index - 2],
+                )
                 self._touch_queue_items_unlocked(index - 2, index - 1)
             elif direction == "down" and 1 <= index <= n - 1:
                 self._persons[index - 1], self._persons[index] = (
@@ -2285,6 +2312,9 @@ class QueueManager:
                 self._entry_timestamps[index - 1], self._entry_timestamps[index] = (
                     self._entry_timestamps[index],
                     self._entry_timestamps[index - 1],
+                )
+                self._entry_platforms[index - 1], self._entry_platforms[index] = (
+                    self._entry_platforms[index], self._entry_platforms[index - 1],
                 )
                 self._touch_queue_items_unlocked(index - 1, index)
         self._broadcast_and_archive("gui", f"move_{direction}_{index}")
@@ -2316,6 +2346,9 @@ class QueueManager:
             previous_queue = list(self._persons)
             self._persons.clear()
             self._entry_timestamps.clear()
+            self._entry_platforms.clear()
+            self._queue_archive.write_blank_snapshot("gui", "clear")
+            self._ws_hub.broadcast_json(None, {"type": "QUEUE_UPDATE", "queue": [], "entries": []})
 
         if previous_queue:
             self._logger.info(
@@ -2326,8 +2359,6 @@ class QueueManager:
         else:
             self._logger.info("[队列] 一键清空时原始队列为空")
 
-        self._ws_hub.broadcast_json(None, {"type": "QUEUE_UPDATE", "queue": [], "entries": []})
-        self._queue_archive.write_blank_snapshot("gui", "clear")
         self._logger.info("[队列] 当前槽位 %s 已恢复为空白存档", self._queue_archive.get_active_slot())
         return []
 
@@ -2367,20 +2398,28 @@ class QueueManager:
         target = str(uname or "").strip()
         if not target:
             return -1
+        self._sync_entry_timestamps_unlocked()
+        origin = str(getattr(self._queue_origin_context, "platform", "") or "").lower()
         for i, item in enumerate(self._persons):
             item_id, _content = queue_item_to_parts(item)
-            if item_id == target:
+            # The same display name on Bilibili and Douyin represents separate
+            # participants. Historical CSV rows have an unknown source; retain
+            # the old name-only duplicate check for those rows.
+            if item_id == target and (not origin or self._entry_platforms[i] in ("", origin)):
                 return i
         return -1
 
     def _broadcast_and_archive(self, actor: str, msg: str) -> None:
-        queue_entries = self.get_queue_entries()
-        queue_snapshot = queue_entries_to_items(queue_entries)
-        self._ws_hub.broadcast_json(
-            None,
-            {"type": "QUEUE_UPDATE", "queue": queue_snapshot, "entries": queue_entries},
-        )
-        self._queue_archive.write_snapshot(actor, msg, queue_entries)
+        # Serialize archive writes with queue changes across all relay threads.
+        # Without the same lock, an older relay's delayed snapshot can overwrite
+        # a newer Bilibili/Douyin join and make the participant disappear on disk.
+        with self._lock:
+            queue_entries = self._get_queue_entries_unlocked()
+            self._queue_archive.write_snapshot(actor, msg, queue_entries)
+            self._ws_hub.broadcast_json(
+                None,
+                {"type": "QUEUE_UPDATE", "queue": queue_entries_to_items(queue_entries), "entries": queue_entries},
+            )
 
     def get_last_danmu_event(self) -> dict[str, Any]:
         with self._lock:
@@ -2452,7 +2491,11 @@ class QueueManager:
         perm = "黑名单" if is_blacklisted else ("主播" if is_anchor else ("super_admin" if uname in self._super_admins else ("房管" if is_admin_flag else (guard_name or ("管理员" if uname in self._admins else "普通用户")))))
         self._logger.info("[弹幕][%s] %s(%s%s): %s", event.platform, uname, perm, medal_text, msg)
 
-        modified, note = self._process(uid, uname, msg, is_anchor, is_admin_flag, is_guard, guard_level)
+        self._queue_origin_context.platform = event.platform
+        try:
+            modified, note = self._process(uid, uname, msg, is_anchor, is_admin_flag, is_guard, guard_level)
+        finally:
+            self._queue_origin_context.platform = ""
         if modified:
             self._broadcast_and_archive(uname, msg)
             self._logger.info(
