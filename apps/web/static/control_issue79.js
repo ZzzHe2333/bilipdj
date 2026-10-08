@@ -288,6 +288,7 @@
        <label>预览背景 <select id="issue79-preview-bg"><option value="checker">透明棋盘格</option><option value="green">纯绿幕</option><option value="game">游戏画面（本地截图）</option></select></label>
        <label class="issue79-preview-upload">选择游戏截图 <input type="file" accept="image/png,image/jpeg,image/webp" id="issue79-preview-file"></label>
        <label>模拟数据 <select id="issue79-preview-case"><option value="long">超长用户名</option><option value="gift">礼物插队</option><option value="empty">空队列</option><option value="normal">正常队列</option></select></label>
+       <label>样式预设 <select id="issue79-style-preset"><option value="">仅预览，不自动保存</option><option value="classic">高对比经典</option><option value="cyan">青蓝夜光</option><option value="bright">浅色简洁</option></select></label>
        <button class="button ghost" id="issue79-copy-obs" type="button">复制 OBS 地址</button>
        </div><p id="issue79-contrast-warning" class="issue79-contrast-warning" role="status" aria-live="polite"></p><div class="issue79-preview"><div id="issue79-preview-stage" class="issue79-preview-stage preview-checker" class="issue79-preview-stage"><div id="issue79-preview-queue" class="issue79-preview-queue"><div class="issue79-preview-row"><span class="issue79-preview-number">01</span><span>雪梦茉莉 牵丝霖</span></div><div class="issue79-preview-row"><span class="issue79-preview-number">02</span><span>示例用户 排队内容</span></div><div class="issue79-preview-row"><span class="issue79-preview-number">03</span><span>第三位玩家</span></div></div></div></div><details class="issue79-advanced"><summary>高级 JSON（保留原编辑方式）</summary><p class="hint">可直接修改下方 JSON；重新读取会以服务器数据覆盖。</p></details></div>`;
     pane.insertBefore(editor, pane.firstChild);
@@ -295,6 +296,18 @@
     details?.appendChild(textarea);
     textarea.classList.add('tall');
     editor.querySelectorAll('input,select').forEach(node => node.addEventListener('input', applyStylePreview));
+    $('issue79-style-preset')?.addEventListener('change', event => {
+      const presets = {
+        classic: { text_color:'#ffffff', text_stroke_color:'#000000', bg1:'#0b1020', bg2:'#111c33', bg3:'#050713' },
+        cyan: { text_color:'#d9ffff', text_stroke_color:'#020d16', bg1:'#071e31', bg2:'#08253a', bg3:'#030d17' },
+        bright: { text_color:'#17253b', text_stroke_color:'#ffffff', bg1:'#ffffff', bg2:'#f1f5fa', bg3:'#e5edf6' },
+      };
+      const preset = presets[event.target.value];
+      if (!preset) return;
+      Object.entries(preset).forEach(([key, value]) => { const input = $('issue-style-'+key); if (input) input.value = value; });
+      applyStylePreview();
+      setStatus('style-status', '预设已应用到预览，点击“保存样式”后才会写入配置。');
+    });
     $('issue79-preview-bg')?.addEventListener('change', updatePreviewBackground);
     $('issue79-preview-case')?.addEventListener('change', renderPreviewCase);
     $('issue79-preview-file')?.addEventListener('change', loadPreviewScreenshot);

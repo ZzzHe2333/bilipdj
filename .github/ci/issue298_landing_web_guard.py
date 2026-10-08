@@ -20,9 +20,12 @@ def main() -> None:
     logic = get("apps/web/static/control.js")
     assert 'async function completeCurrent()' in logic and "'/api/queue/delete', { index: 1 }" in logic
     assert "refreshPlatformConnections" in logic and "event.altKey" in logic
+    assert "function undoCompleted()" in logic and "queueSignature" in logic
+    assert "compact-mode" in get("apps/web/static/control_issue79.css")
     detailed = get("apps/web/static/control_issue79.js")
     assert "username.focus()" in detailed and "dragstart" in detailed
     assert "contrastRatio" in detailed and "loadPreviewScreenshot" in detailed and "renderPreviewCase" in detailed
+    assert "issue79-style-preset" in detailed
     overlay = get("apps/web/static/myjs.js")
     assert "queue.slice(0, 8)" in overlay and "PDJ_UpdateOverlayState" in overlay
     dpi = get("apps/windows/main.py")

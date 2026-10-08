@@ -71,3 +71,14 @@ input,select,textarea,.url-box{background:var(--input,#08121f)}.log-output,.json
 .issue79-preview-row { max-width:100%; min-width:0; overflow:hidden; }
 .issue79-preview-empty { font-size:clamp(15px,1.5vw,20px); color:var(--preview-text,#eaf6ff); }
 .issue79-preview-stage.preview-game[style*="--preview-game-image: url"] { background-image:var(--preview-game-image) !important; }
+
+.queue-undo { display:flex; align-items:center; gap:12px; margin-top:10px; padding:9px 12px; border:1px solid var(--line); border-radius:8px; background:var(--panel2); }
+.queue-undo[hidden] { display:none!important; }
+.compact-mode .layout { grid-template-columns:148px minmax(0,1fr); }
+.compact-mode .content { padding:10px; }
+.compact-mode .sidebar { padding:8px 5px; }
+.compact-mode .nav { padding:9px; font-size:13px; }
+.compact-mode .card { padding:10px; margin-bottom:8px; }
+.compact-mode th,.compact-mode td { padding:6px 8px; }
+.compact-mode .queue-live-hero { padding:12px 16px; margin-bottom:8px; }
+.compact-mode .page-head { margin-bottom:8px; }

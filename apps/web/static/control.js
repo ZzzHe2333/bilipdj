@@ -1,7 +1,7 @@
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
-  const state = { view: 'queue', logTimer: 0, queueTimer: 0, perfTimer: 0, headerTimer: 0, meta: null, queue: null, moving: false };
+  const state = { view: 'queue', logTimer: 0, queueTimer: 0, perfTimer: 0, headerTimer: 0, meta: null, queue: null, moving: false, undo: null, undoTimer: 0 };
 
   async function json(path, options = {}) {
     const response = await fetch(path, { cache: 'no-store', ...options });
@@ -137,6 +137,40 @@
     if ($('queue-next')) $('queue-next').disabled = !current || state.moving;
   }
 
+  function queueSignature(snapshot) {
+    const entries = Array.isArray(snapshot?.entries) ? snapshot.entries : (snapshot?.queue || []);
+    return JSON.stringify(entries.map(e => typeof e === 'string' ? e : [e.id ?? e.username ?? '', e.content ?? '']));
+  }
+  function clearQueueUndo() {
+    state.undo = null;
+    if (state.undoTimer) clearTimeout(state.undoTimer);
+    state.undoTimer = 0;
+    if ($('queue-undo')) $('queue-undo').hidden = true;
+  }
+  function offerQueueUndo(record, signature) {
+    clearQueueUndo();
+    state.undo = { record, signature };
+    if ($('queue-undo')) $('queue-undo').hidden = false;
+    state.undoTimer = setTimeout(clearQueueUndo, 9000);
+  }
+  async function undoCompleted() {
+    if (state.moving || !state.undo) return;
+    const item = state.undo;
+    clearQueueUndo();
+    state.moving = true;
+    try {
+      const current = await json('/api/queue/state');
+      if (queueSignature(current) !== item.signature) {
+        message('queue-status', '队列已发生变化，为避免错误恢复，撤销已取消。', false);
+        return;
+      }
+      await post('/api/queue/insert', { after: 0, ...item.record });
+      await refreshQueue();
+      message('queue-status', '已撤销上一次“下一位”。');
+    } catch (error) { message('queue-status', '撤销失败：' + error.message, false); }
+    finally { state.moving = false; }
+  }
+
   async function completeCurrent() {
     if (state.moving) return;
     state.moving = true;
@@ -147,9 +181,18 @@
       if (!Number(snapshot.size ?? (snapshot.entries || snapshot.queue || []).length)) {
         message('queue-status', '当前队列为空。'); return;
       }
+      const first = Array.isArray(snapshot.entries) ? snapshot.entries[0] : null;
+      const fallback = String(snapshot.queue?.[0] || '').trim();
+      const name = String(first?.id ?? first?.username ?? fallback.split(' ')[0] ?? '').trim();
+      const content = String(first?.content ?? fallback.slice(name.length).trim() ?? '').trim();
+      if (!name) { message('queue-status','无法取得可靠的队首用户名，已取消操作。',false); return; }
+      clearQueueUndo();
       await post('/api/queue/delete', { index: 1 });
+      const after = await json('/api/queue/state');
+      state.queue = after;
       await refreshQueue();
-      message('queue-status', '已完成队首项目，已切换到下一位。');
+      offerQueueUndo({ username:name, content, entry:content ? name+' '+content : name }, queueSignature(after));
+      message('queue-status', '已进入下一位；9 秒内可以撤销。');
     } catch (error) { message('queue-status', '下一位失败：' + error.message, false); }
     finally { state.moving = false; if ($('queue-next')) $('queue-next').disabled = !Number(state.queue?.size ?? (state.queue?.entries || state.queue?.queue || []).length); }
   }
@@ -318,6 +361,19 @@
     document.querySelectorAll('.subtab').forEach(n => n.classList.toggle('active', n === btn));
     document.querySelectorAll('.settings-pane').forEach(n => n.classList.toggle('active', n.id === `settings-${btn.dataset.settings}`));
   }));
+  const compactKey = 'bilipdj.console.compact';
+  const applyCompact = enabled => {
+    document.body.classList.toggle('compact-mode', enabled);
+    const button = $('compact-console');
+    button.setAttribute('aria-pressed', String(enabled));
+    button.textContent = enabled ? '标准模式' : '紧凑模式';
+  };
+  try { applyCompact(localStorage.getItem(compactKey) === '1'); } catch (_) { applyCompact(false); }
+  $('compact-console').addEventListener('click', () => {
+    const enabled = !document.body.classList.contains('compact-mode');
+    applyCompact(enabled);
+    try { localStorage.setItem(compactKey, enabled ? '1' : '0'); } catch (_) {}
+  });
   $('refresh-all').addEventListener('click', async () => { await refreshHeader(); switchView(state.view); });
   $('log-refresh').addEventListener('click', refreshLogs); $('log-kind').addEventListener('change', refreshLogs); $('log-search').addEventListener('input', refreshLogs); $('log-clear').addEventListener('click', () => { $('log-output').textContent = ''; });
   $('queue-body').addEventListener('click', event => {
@@ -329,6 +385,7 @@
     if (action === 'edit') { const content = prompt('修改排队内容', btn.dataset.content || ''); if (content !== null) queueAction('/api/queue/update', { index, content }); }
   });
   $('queue-next').addEventListener('click', completeCurrent);
+  $('queue-undo-button').addEventListener('click', undoCompleted);
   document.addEventListener('keydown', event => {
     if (state.view !== 'queue' || event.repeat || event.key.toLowerCase() !== 'n' || !event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     if (event.target?.closest?.('input,select,textarea,[contenteditable="true"]')) return;
