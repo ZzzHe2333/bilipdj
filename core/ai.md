@@ -29,6 +29,14 @@ core/             旧导入兼容层 + 兼容运行数据位置 + 项目文档
 - 不在 Windows / Web 中复制一套 QueueManager 或平台协议业务逻辑。
 - 第三方客户端优先依据 `packages/shared/api-contract.md` 开发。
 
+### 两套 UI 的长期维护决定
+
+- **保留 Windows Tk 和 Web 控制台两套独立 UI，作为同等重要的正式客户端持续维护。**
+- **不以 WebView2 / pywebview 替换 Tk**，除非用户今后明确重新作出架构决策。不能因为 Web 界面先实现某项功能，就自动废弃 Windows Tk 对应入口。
+- 两端保留不同的 UI 设计和平台特性，但共享的排队、平台激活、权限、配置、样式、更新等操作应遵循相同 Server API 契约与安全规则。
+- 任何跨端功能变更先列出 Windows/Web 的受影响点，再分别实现或明确登记差异，完成双端相应验证后才能宣称“通用功能已完成”。
+- **规范与检查清单：** `docs/DUAL_UI_MAINTENANCE.md`。
+
 ## 统一主题 / Design System
 
 Windows 与 Web 不再维护两套互不兼容的主题配置。
