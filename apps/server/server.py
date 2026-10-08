@@ -1920,6 +1920,9 @@ class QueueManager:
         # Per-event thread locality ensures concurrently active relays cannot
         # assign another platform's source to a queue operation.
         self._queue_origin_context = threading.local()
+        # Serializes read-snapshot -> archive-write across simultaneous relays,
+        # without nesting the queue lock inside file/config locks.
+        self._archive_write_lock = threading.RLock()
         self._admins: list[str] = []
         self._blacklist: list[str] = []
         self._jianzhang: list[str] = []
@@ -2342,11 +2345,12 @@ class QueueManager:
 
     def clear_queue(self) -> list[str]:
         """清空队列。"""
-        with self._lock:
-            previous_queue = list(self._persons)
-            self._persons.clear()
-            self._entry_timestamps.clear()
-            self._entry_platforms.clear()
+        with self._archive_write_lock:
+            with self._lock:
+                previous_queue = list(self._persons)
+                self._persons.clear()
+                self._entry_timestamps.clear()
+                self._entry_platforms.clear()
             self._queue_archive.write_blank_snapshot("gui", "clear")
             self._ws_hub.broadcast_json(None, {"type": "QUEUE_UPDATE", "queue": [], "entries": []})
 
@@ -2410,11 +2414,12 @@ class QueueManager:
         return -1
 
     def _broadcast_and_archive(self, actor: str, msg: str) -> None:
-        # Serialize archive writes with queue changes across all relay threads.
-        # Without the same lock, an older relay's delayed snapshot can overwrite
-        # a newer Bilibili/Douyin join and make the participant disappear on disk.
-        with self._lock:
-            queue_entries = self._get_queue_entries_unlocked()
+        # The *separate* writer lock preserves snapshot order across Bilibili,
+        # Douyin and other relays. Never hold _lock while writing CSV: platform
+        # command guards may hold the config lock and wait for _lock, whereas
+        # CSV writes acquire that config lock (ABBA deadlock).
+        with self._archive_write_lock:
+            queue_entries = self.get_queue_entries()
             self._queue_archive.write_snapshot(actor, msg, queue_entries)
             self._ws_hub.broadcast_json(
                 None,
