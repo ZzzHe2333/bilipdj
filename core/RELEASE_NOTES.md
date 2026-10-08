@@ -17,7 +17,7 @@
 - **Windows Tk 便携版：** [BiliPDJ-v3.0.21-Windows-Tk-Portable-x64.zip](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.21/BiliPDJ-v3.0.21-Windows-Tk-Portable-x64.zip)
 - **Web 便携版：** [BiliPDJ-v3.0.21-Web-Portable-x64.zip](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.21/BiliPDJ-v3.0.21-Web-Portable-x64.zip)
 
-升级器使用的其他文件包括 `Windows-Tk-files.json`、`Windows-Tk-Incremental-x64.pack`、`Web-files.json`、`Web-Incremental-x64.pack`、`update-manifest.json` 及对应 `*.sha256`。普通用户通常只需选择适用的便携包。
+升级器使用的其他文件包括 `Windows-Tk-files.json`、`Windows-Tk-Incremental-x64.pack`、`Web-files.json`、`Web-Incremental-x64.pack`、`update-manifest.json` 及对应 `*.sha256`。**普通用户无需手动下载**这些增量清单与校验资源，只需选择适用的便携包。
 
 ## 验证与兼容
 
