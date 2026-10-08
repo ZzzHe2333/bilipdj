@@ -4,7 +4,6 @@ import multiprocessing as mp
 import os
 import sys
 import time
-import tkinter as tk
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -20,19 +19,44 @@ if str(REPO_ROOT) not in sys.path:
 if getattr(sys, "frozen", False):
     os.environ.setdefault("BILIPDJ_PORTABLE_AUTO_BACKEND", "1")
 
-from apps.server import server as backend  # noqa: E402
-from apps.server.main import configure_web_assets  # noqa: E402
-from apps.server.runtime_layout import ensure_runtime_layout  # noqa: E402
+from apps.windows.startup_splash import open_startup_splash  # noqa: E402
 
-configure_web_assets()
+# A native Win32 message loop starts before tkinter/backend/UI imports. It stays
+# responsive while the main thread initializes the desktop and is suppressed
+# for backend, overlay-host, CI probes and unfrozen source runs.
+_startup_splash = open_startup_splash(sys.argv[1:], frozen=bool(getattr(sys, "frozen", False)))
+_startup_splash.update("正在准备图形界面…")
 
-from apps.windows import control_panel, update_ui  # noqa: E402
-from apps.windows.desktop_runtime import install_desktop_runtime  # noqa: E402
-from apps.windows.update_estimate_ui import patch_update_ui  # noqa: E402
-from apps.windows.update_workspace_runtime import install_windows_update_workspace  # noqa: E402
-from apps.windows.window_policy import WINDOW_HEIGHT, WINDOW_WIDTH  # noqa: E402
+import tkinter as tk  # noqa: E402
 
 GUI_STARTUP_LOG_NAME = "gui-startup-error.log"
+
+
+def _initialize_runtime() -> None:
+    """Heavy imports occur only after the native startup indicator is visible."""
+    global backend, configure_web_assets, ensure_runtime_layout
+    global control_panel, update_ui, install_desktop_runtime, patch_update_ui
+    global install_windows_update_workspace, WINDOW_HEIGHT, WINDOW_WIDTH
+
+    _startup_splash.update("正在加载弹幕与服务组件…")
+    from apps.server import server as backend
+    from apps.server.main import configure_web_assets
+    from apps.server.runtime_layout import ensure_runtime_layout
+    configure_web_assets()
+
+    _startup_splash.update("正在加载控制台组件…")
+    from apps.windows import control_panel, update_ui
+    from apps.windows.desktop_runtime import install_desktop_runtime
+    from apps.windows.update_estimate_ui import patch_update_ui
+    from apps.windows.update_workspace_runtime import install_windows_update_workspace
+    from apps.windows.window_policy import WINDOW_HEIGHT, WINDOW_WIDTH
+
+    _startup_splash.update("正在加载配置并安装界面模块…")
+    _configure_control_panel_paths()
+    install_windows_update_workspace()
+    patch_update_ui(update_ui)
+    install_desktop_runtime(control_panel.ControlPanelApp)
+
 
 
 def _application_dir() -> Path:
@@ -104,12 +128,6 @@ def _configure_control_panel_paths() -> None:
     control_panel._BACKEND_SERVER_MODULE = backend
 
 
-_configure_control_panel_paths()
-install_windows_update_workspace()
-patch_update_ui(update_ui)
-install_desktop_runtime(control_panel.ControlPanelApp)
-
-
 def _install_callback_error_logger(root: Any) -> list[str]:
     errors: list[str] = []
 
@@ -143,13 +161,24 @@ def _finish_root_show(root: tk.Tk) -> None:
 def _create_desktop() -> tuple[tk.Tk, Any, list[str]]:
     # Native Tk is intentionally used here.  CustomTkinter previously owned the
     # root window and could disappear immediately on some frozen Windows builds.
+    _startup_splash.update("正在创建主窗口…")
     root = tk.Tk()
     root.withdraw()
     callback_errors = _install_callback_error_logger(root)
-    app = control_panel.ControlPanelApp(root)
-    root._bilipdj_control_panel = app  # type: ignore[attr-defined]
-    _finish_root_show(root)
-    return root, app, callback_errors
+    try:
+        _startup_splash.update("正在初始化设置与导航页面…")
+        app = control_panel.ControlPanelApp(root)
+        root._bilipdj_control_panel = app  # type: ignore[attr-defined]
+        _startup_splash.update("主界面准备就绪")
+        # Remove the transient native topmost window before showing Tk, so
+        # input focus and taskbar ownership remain with the main application.
+        _startup_splash.close()
+        _finish_root_show(root)
+        return root, app, callback_errors
+    except BaseException:
+        _startup_splash.close()
+        root.destroy()
+        raise
 
 
 def _stop_probe_process(process: Any) -> None:
@@ -238,6 +267,7 @@ def _run_self_test_and_exit(test: Any, label: str) -> None:
 
 
 def main() -> None:
+    _initialize_runtime()
     if "--plugin-runtime-self-test" in sys.argv[1:]:
         from apps.windows.frozen_plugin_probe import run_frozen_plugin_probe
 
@@ -251,6 +281,7 @@ if __name__ == "__main__":
     try:
         main()
     except BaseException as exc:
+        _startup_splash.close()
         log_path = _write_startup_error(str(exc) or type(exc).__name__, exc=exc)
         gui_probe = "--gui-startup-self-test" in sys.argv[1:] or "--gui-close-self-test" in sys.argv[1:]
         if not gui_probe:
