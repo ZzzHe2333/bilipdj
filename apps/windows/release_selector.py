@@ -418,6 +418,9 @@ def _latest_stable_from_third_party() -> list[update_client.ReleaseInfo]:
     version = release.version
     tag = release.tag_name
     filename = release.zip_asset.name
+    expected_filename = f"BiliPDJ-v{version}-Windows-Tk-Portable-x64.zip"
+    if filename != expected_filename:
+        raise update_client.UpdateError("第三方清单的安装包文件名无效")
     official_asset = (
         f"https://github.com/ZzzHe2333/bilipdj/releases/download/"
         f"{tag}/{filename}"

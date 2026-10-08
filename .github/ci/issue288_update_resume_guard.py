@@ -118,6 +118,7 @@ def check_update_ui():
     assert '"releases/latest/download/update-manifest.json"' in selector
     assert "第三方传输的清单没有独立签名" in selector
     assert "tag != f\"v{version}\"" in selector
+    assert 'filename != expected_filename' in selector
 
 
 def check_prompt():
