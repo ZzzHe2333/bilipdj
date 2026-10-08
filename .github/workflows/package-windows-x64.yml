@@ -125,6 +125,10 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Validate native Windows startup window
+        shell: pwsh
+        run: python .github/ci/issue289_native_startup_splash_guard.py
+
       - name: Build Tk Windows portable
         shell: pwsh
         run: |

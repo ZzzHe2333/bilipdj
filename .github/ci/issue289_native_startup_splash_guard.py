@@ -60,7 +60,26 @@ def check_main_order() -> None:
     assert 'name="main"' in spec and "console=False" in spec
 
 
+def check_native_window() -> None:
+    """Run on Windows Actions as well as Linux static tests."""
+    if sys.platform != "win32":
+        return
+    import time
+    splash = startup_splash.NativeStartupSplash(enabled=True)
+    try:
+        splash.start()
+        assert splash._ready.wait(3), "Win32 thread did not initialize"
+        assert splash._hwnd, "startup window could not be created"
+        splash.update("正在加载模块（启动窗口自检）…")
+        time.sleep(0.2)
+        assert splash._thread is not None and splash._thread.is_alive()
+    finally:
+        splash.close()
+    assert splash._hwnd == 0, "native window was not closed"
+
+
 if __name__ == "__main__":
+    check_native_window()
     check_arguments()
     check_lifecycle()
     check_main_order()
