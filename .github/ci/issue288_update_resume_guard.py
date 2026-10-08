@@ -130,8 +130,33 @@ def check_prompt():
     assert "GH-Proxy" in app.update_download_source_var.get()
 
 
+def check_download_retry_prompt():
+    app = types.SimpleNamespace(root=object(), update_download_source_var=Var("GitHub 官方"))
+    assert not download_acceleration._is_official_download_network_failure(
+        "更新包 SHA-256 校验失败"
+    )
+    assert download_acceleration._is_official_download_network_failure(
+        "网络请求失败：HTTP Error 503"
+    )
+    with patch.object(download_acceleration.messagebox, "askyesno", return_value=False):
+        assert not download_acceleration._offer_proxy_after_download_failure(
+            app, "网络请求失败：HTTP Error 503"
+        )
+    assert app.update_download_source_var.get() == "GitHub 官方"
+    with patch.object(download_acceleration.messagebox, "askyesno", return_value=True):
+        assert download_acceleration._offer_proxy_after_download_failure(
+            app, "网络请求失败：HTTP Error 503"
+        )
+    assert app._update_proxy_approved_for_retry is True
+    assert "GH-Proxy" in app.update_download_source_var.get()
+    # The per-use confirmation is consumed once, never persisted.
+    assert download_acceleration._confirm_download_source(app, "全量更新") == "gh-proxy"
+    assert app._update_proxy_approved_for_retry is False
+
+
 if __name__ == "__main__":
     check_update_ui()
     check_prompt()
+    check_download_retry_prompt()
     check_resume()
     print("issue #288 update layout, source fallback, and resume: OK")

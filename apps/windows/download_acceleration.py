@@ -58,6 +58,9 @@ def _confirm_download_source(app: Any, mode_label: str) -> str:
     selected = _selected_source(app)
     if selected != GH_PROXY_SOURCE:
         return OFFICIAL_SOURCE
+    if bool(getattr(app, "_update_proxy_approved_for_retry", False)):
+        app._update_proxy_approved_for_retry = False
+        return GH_PROXY_SOURCE
     approved = messagebox.askyesno(
         "确认使用第三方加速",
         f"你选择了 {SOURCE_LABELS[GH_PROXY_SOURCE]}。\n\n"
@@ -239,9 +242,65 @@ def _install_transport_wrappers() -> None:
         incremental_update._download_range = download_range_with_official_fallback  # type: ignore[attr-defined]  # noqa: SLF001
 
 
+def _is_official_download_network_failure(error: str) -> bool:
+    """Do not offer a different transport for checksum or validation errors."""
+    value = str(error or "").casefold()
+    if any(term in value for term in ("sha-256", "sha256", "校验", "版本不兼容", "增量基线", "格式无效", "签名")):
+        return False
+    return any(term in value for term in (
+        "网络请求失败", "网络错误", "连接失败", "连接超时",
+        "下载失败", "无法下载", "urlopen", "timed out", "timeout",
+        "connection reset", "connection refused", "http error",
+        "http 403", "http 404", "http 502", "http 503", "http 504",
+    ))
+
+
+def _offer_proxy_after_download_failure(app: Any, error: str) -> bool:
+    """Ask in the Tk thread; consent is scoped to exactly the next attempt."""
+    if _selected_source(app) != OFFICIAL_SOURCE or not _is_official_download_network_failure(error):
+        return False
+    if not messagebox.askyesno(
+        "GitHub 官方下载失败",
+        f"GitHub 官方源下载失败：\n{error}\n\n"
+        "是否仅这一次使用 gh-proxy.com 重新尝试？\n"
+        "下载内容会经过第三方服务，完成后仍会验证 SHA-256；"
+        "拒绝不会更改默认下载线路。",
+        parent=getattr(app, "root", None),
+    ):
+        return False
+    variable = getattr(app, "update_download_source_var", None)
+    if variable is not None:
+        variable.set(SOURCE_LABELS[GH_PROXY_SOURCE])
+    app._update_proxy_approved_for_retry = True
+    return True
+
+
+def _install_official_failure_prompt() -> None:
+    original_failed = update_ui._download_failed  # noqa: SLF001
+    if bool(getattr(original_failed, "_bilipdj_official_failure_prompt", False)):
+        return
+
+    @functools.wraps(original_failed)
+    def failed_with_proxy_offer(app: Any, error: str, mode: str = "更新") -> Any:
+        if mode in {"全量更新", "增量更新"} and _selected_source(app) == OFFICIAL_SOURCE:
+            # This callback runs on the Tk thread after the worker reported
+            # failure. Restore idle state before offering a fresh attempt.
+            update_ui._set_busy(app, False)  # noqa: SLF001
+            if _offer_proxy_after_download_failure(app, error):
+                app.update_status_var.set("已确认本次第三方加速，正在重新开始下载…")
+                if mode == "增量更新":
+                    return update_ui.install_incremental_update(app)
+                return update_ui.install_available_update(app)
+        return original_failed(app, error, mode)
+
+    setattr(failed_with_proxy_offer, "_bilipdj_official_failure_prompt", True)
+    update_ui._download_failed = failed_with_proxy_offer  # type: ignore[attr-defined]  # noqa: SLF001
+
+
 def install_download_acceleration() -> bool:
     _install_transport_wrappers()
     _install_confirmation_wrappers()
+    _install_official_failure_prompt()
     _install_source_picker()
     return True
 
