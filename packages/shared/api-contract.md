@@ -101,12 +101,14 @@ python .github/ci/generate_api_docs.py
     {
       "id": "用户A",
       "content": "牵丝霖",
-      "last_operation_at": "2026-09-08 17:00:00"
+      "last_operation_at": "2026-09-08 17:00:00",
+      "platform": "bilibili"
     },
     {
       "id": "用户B",
       "content": "",
-      "last_operation_at": "2026-09-08 17:00:10"
+      "last_operation_at": "2026-09-08 17:00:10",
+      "platform": "douyin"
     }
   ]
 }
@@ -117,7 +119,10 @@ python .github/ci/generate_api_docs.py
 - `entries[].id`：用户名；
 - `entries[].content`：排队内容；
 - `entries[].last_operation_at`：最近操作时间；
+- `entries[].platform`：条目来源（如 `bilibili`、`douyin`、`huya`、`manual`）；旧 CSV/旧数据缺少来源时返回空字符串，**不得猜测来源**；
 - `queue[]`：旧客户端兼容文本，不建议新客户端自行拆字符串。
+
+多个激活平台**共用一个队列和当前存档槽位**；不同平台的同名用户可同时排队。CSV 存档在原有列后新增第五列“来源平台”，兼容旧格式；主 OBS 队列展示无需在用户名上添加平台前缀。管理界面可以显示来源字段。并发写入应以 Server 快照为准，而非 UI 或平台各自独立保存。
 
 ## 6. 手动新增排队
 
@@ -129,7 +134,8 @@ python .github/ci/generate_api_docs.py
 {
   "after": 2,
   "username": "用户A",
-  "content": "牵丝霖"
+  "content": "牵丝霖",
+  "platform": "manual"
 }
 ```
 

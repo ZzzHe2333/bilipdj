@@ -92,6 +92,11 @@ def check_shared_archive(server):
             assert [x["platform"] for x in qm.get_queue_entries()] == ["bilibili", "manual", "douyin", "huya"]
             qm.update_item_content(3, "角色A")
             assert qm.get_queue_entries()[2]["platform"] == "douyin"
+            # Web 'Next' undo uses the management insert API and must restore
+            # the original source instead of relabelling it as manual.
+            qm.insert_item(2, "复原用户", platform="douyin")
+            assert qm.get_queue_entries()[2]["platform"] == "douyin"
+            qm.delete_item(3)
 
             path = root / "core/cd/queue_archive_slot_2.csv"
             assert path.is_file()

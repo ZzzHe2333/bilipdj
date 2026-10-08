@@ -191,7 +191,7 @@
       const after = await json('/api/queue/state');
       state.queue = after;
       await refreshQueue();
-      offerQueueUndo({ username:name, content, entry:content ? name+' '+content : name }, queueSignature(after));
+      offerQueueUndo({ username:name, content, entry:content ? name+' '+content : name, platform: String(first?.platform || 'manual') }, queueSignature(after));
       message('queue-status', '已进入下一位；9 秒内可以撤销。');
     } catch (error) { message('queue-status', '下一位失败：' + error.message, false); }
     finally { state.moving = false; if ($('queue-next')) $('queue-next').disabled = !Number(state.queue?.size ?? (state.queue?.entries || state.queue?.queue || []).length); }

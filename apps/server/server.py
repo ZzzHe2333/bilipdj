@@ -2172,7 +2172,7 @@ class QueueManager:
         self._entry_platforms.append(str(getattr(self._queue_origin_context, "platform", "") or "manual").lower())
         return True
 
-    def _insert_queue_item_unlocked(self, pos: int, item: Any, last_operation_at: Any | None = None) -> bool:
+    def _insert_queue_item_unlocked(self, pos: int, item: Any, last_operation_at: Any | None = None, platform: str | None = None) -> bool:
         item_text = self._strip_html(item)
         if not item_text:
             return False
@@ -2181,7 +2181,7 @@ class QueueManager:
         timestamp = str(last_operation_at or "").strip() or self._now_queue_timestamp()
         self._persons.insert(insert_pos, item_text)
         self._entry_timestamps.insert(insert_pos, _format_archive_timestamp(timestamp))
-        self._entry_platforms.insert(insert_pos, str(getattr(self._queue_origin_context, "platform", "") or "manual").lower())
+        self._entry_platforms.insert(insert_pos, str(platform or getattr(self._queue_origin_context, "platform", "") or "manual").strip().lower())
         return True
 
     def _replace_queue_item_unlocked(self, index: int, item: Any) -> bool:
@@ -2323,14 +2323,14 @@ class QueueManager:
         self._broadcast_and_archive("gui", f"move_{direction}_{index}")
         return self.get_queue()
 
-    def insert_item(self, after_index: int, entry: str) -> list[str]:
+    def insert_item(self, after_index: int, entry: str, platform: str = "manual") -> list[str]:
         """在 after_index 之后插入 entry（after_index=0 插到最前面）。"""
         entry = entry.strip()
         if not entry:
             return self.get_queue()
         with self._lock:
             pos = max(0, min(after_index, len(self._persons)))
-            self._insert_queue_item_unlocked(pos, entry)
+            self._insert_queue_item_unlocked(pos, entry, platform=platform)
         self._broadcast_and_archive("gui", f"insert_{after_index}")
         return self.get_queue()
 
