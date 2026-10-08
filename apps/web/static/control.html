@@ -6,21 +6,24 @@
   <title>弹幕排队姬 Web 控制台</title>
   <link rel="stylesheet" href="control.css">
   <link rel="stylesheet" href="unified_theme.css">
+  <link rel="stylesheet" href="cdk_console.css">
 </head>
-<body>
+<body class="cdk-console">
 <div class="app-shell">
   <header class="topbar">
-    <div class="brand"><strong>弹幕排队姬</strong><span id="version">Web 控制台</span></div>
+    <div class="brand"><span class="brand-mark" aria-hidden="true">B</span><div class="brand-copy"><strong>弹幕排队姬</strong><span id="version">Web 控制台</span></div></div>
     <div class="health"><span id="health-dot" class="dot"></span><span id="health-text">正在连接后端…</span></div>
     <div class="top-actions"><a class="button ghost" href="/index" target="_blank">队列看板</a><button id="refresh-all" class="button">刷新状态</button></div>
   </header>
   <div class="layout">
     <nav class="sidebar" aria-label="控制台导航">
+      <div class="sidebar-label" aria-hidden="true">工作空间</div>
       <button class="nav active" data-view="logs">运行日志</button>
       <button class="nav" data-view="queue">当前排队</button>
       <button class="nav" data-view="settings">设置</button>
       <button class="nav" data-view="overlay">透明窗口 / OBS</button>
       <button class="nav" data-view="permissions">权限</button>
+      <div class="sidebar-label" aria-hidden="true">系统</div>
       <button class="nav" data-view="performance">性能</button>
       <button class="nav" data-view="update">更新软件</button>
       <button class="nav" data-view="about">关于</button>
