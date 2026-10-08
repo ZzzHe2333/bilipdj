@@ -1,6 +1,6 @@
-# 弹幕排队姬 v3.0.19 正式版
+# 弹幕排队姬 v3.0.20 正式版
 
-本次是 **v3.0.19 正式版（Release）**，在 v3.0.18 基础上完善 Windows 更新界面、独立更新器和主程序启动反馈。保留 3.0.18 的多平台弹幕激活、第三方下载加速和完整性校验能力。
+本次是 **v3.0.20 正式版（Release）**，在 v3.0.18 基础上完善 Windows 更新界面、独立更新器和主程序启动反馈。保留 3.0.18 的多平台弹幕激活、第三方下载加速和完整性校验能力。
 
 ## 更新内容
 
@@ -15,8 +15,8 @@
 
 本次生成 Windows Tk 和 Web Portable x64 完整便携包、各自的增量资源、逐文件清单、SHA-256 文件以及 `update-manifest.json`。
 
-- **Windows Tk 便携包：** [BiliPDJ-v3.0.19-Windows-Tk-Portable-x64.zip](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.19/BiliPDJ-v3.0.19-Windows-Tk-Portable-x64.zip)
-- **Web 便携包：** [BiliPDJ-v3.0.19-Web-Portable-x64.zip](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.19/BiliPDJ-v3.0.19-Web-Portable-x64.zip)
+- **Windows Tk 便携包：** [BiliPDJ-v3.0.20-Windows-Tk-Portable-x64.zip](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.20/BiliPDJ-v3.0.20-Windows-Tk-Portable-x64.zip)
+- **Web 便携包：** [BiliPDJ-v3.0.20-Web-Portable-x64.zip](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.20/BiliPDJ-v3.0.20-Web-Portable-x64.zip)
 
 更新器额外使用 `Windows-Tk-files.json`、`Windows-Tk-Incremental-x64.pack`、`Web-files.json`、`Web-Incremental-x64.pack`、`update-manifest.json`、以及 `*.sha256`。**普通用户无需手动下载**这些增量和清单文件。
 
@@ -28,4 +28,4 @@
 
 ## 发布状态
 
-**正式版（Release，非 Pre-release）**。标签：`v3.0.19`，不带测试或预发行后缀。
+**正式版（Release，非 Pre-release）**。标签：`v3.0.20`，不带测试或预发行后缀。
