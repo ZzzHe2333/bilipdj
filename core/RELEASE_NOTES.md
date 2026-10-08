@@ -1,31 +1,30 @@
-# 弹幕排队姬 v3.0.20 正式版
+# 弹幕排队姬 v3.0.21 正式版
 
-本次是 **v3.0.20 正式版（Release）**，在 v3.0.18 基础上完善 Windows 更新界面、独立更新器和主程序启动反馈。保留 3.0.18 的多平台弹幕激活、第三方下载加速和完整性校验能力。
+本版基于 **v3.0.20 正式版**，合并 **PR #295**：参考 [linux-do/cdk](https://github.com/linux-do/cdk) 的设计语言，对 BiliPDJ **Web 管理界面**进行外观改版。业务功能和对外接口保持不变。
 
-## 更新内容
+## 本次更新
 
-- **更新页面交互调整（#288）**：精简版本/来源等重复提示，将当前版本号移动到“软件更新”标题右侧，并将 GitHub 官方 / GH-Proxy 下载线路设置移动到更新设置区域。
-- **GitHub 不可达时的可选加速（#288）**：官方版本查询失败时可选择经第三方读取最新正式版的更新清单；官方资源网络下载失败时可确认切换 GH-Proxy 重试。使用第三方来源均需用户明确同意。第三方清单缺少独立的发布者签名，只适用于了解并接受该风险的用户；文件仍进行原有 SHA-256 验证及下载路径校验。
-- **独立更新器可继续操作（#288）**：主程序未及时关闭、等待超时后弹出置顶提醒，提供“继续更新”按钮，关闭主程序后可重新检查并继续安装已下载的更新包，无需重新发起下载。维持旧有备份/回滚机制。
-- **启动进度小窗（#289）**：Windows 版双击主程序后，在加载重量级服务与图形模块之前显示原生小型启动窗口、阶段状态和活动进度条；主窗口就绪后自动关闭。后台进程与自检模式不显示。
-- **更新软件二级标签页（#290）**：“版本更新”用于检查、版本选择、全量/增量安装、进度和更新说明；“更新设置”用于 GitHub/GH-Proxy 线路、系统/第三方代理、连接测试及预留设置。两页分别滚动，功能独立。
-- **此前功能保留（#283、#284、#285、#286）**：Bilibili、抖音、虎牙、YouTube、Twitch 多平台弹幕 Relay 激活配置，更新包加速与失败回退以及检查更新时的流光反馈。
+- **Web 控制台视觉重做（#294，PR #295）**：更新顶部品牌区、侧边导航与分组、页面标题、卡片、按钮、输入框、标签页、表格和运行状态等控件，采用中性配色、圆角及轻量阴影。
+- **管理子页面统一**：账号连接与备份配置、扫码登录、插件动态配置页面适配同一风格，包含响应式布局、系统深浅色偏好与减少动态效果设置。
+- **功能与展示兼容**：保留原有控制台导航、表单 ID、JavaScript 业务行为、Server API 和主题自定义能力；`/index` OBS 透明队列页面及其展示样式不变。
+- **不引入额外前端运行依赖**：继续使用 Web 原生 HTML / CSS / JavaScript，不引入 Next.js/React。
+- **此前功能继续保留**：Windows Tk 软件更新/第三方可选下载加速与 SHA-256 校验、独立更新器与启动进度窗口、多平台弹幕 Relay、礼物插队、队列管理及 WebDAV/本地/SMB 设置备份。
 
 ## 发行包及更新资源
 
-本次生成 Windows Tk 和 Web Portable x64 完整便携包、各自的增量资源、逐文件清单、SHA-256 文件以及 `update-manifest.json`。
+本次发布以下 x64 便携包，以及各自逐文件清单、差量资源和 SHA-256 校验文件：
 
-- **Windows Tk 便携包：** [BiliPDJ-v3.0.20-Windows-Tk-Portable-x64.zip](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.20/BiliPDJ-v3.0.20-Windows-Tk-Portable-x64.zip)
-- **Web 便携包：** [BiliPDJ-v3.0.20-Web-Portable-x64.zip](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.20/BiliPDJ-v3.0.20-Web-Portable-x64.zip)
+- **Windows Tk 便携版：** [BiliPDJ-v3.0.21-Windows-Tk-Portable-x64.zip](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.21/BiliPDJ-v3.0.21-Windows-Tk-Portable-x64.zip)
+- **Web 便携版：** [BiliPDJ-v3.0.21-Web-Portable-x64.zip](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.21/BiliPDJ-v3.0.21-Web-Portable-x64.zip)
 
-更新器额外使用 `Windows-Tk-files.json`、`Windows-Tk-Incremental-x64.pack`、`Web-files.json`、`Web-Incremental-x64.pack`、`update-manifest.json`、以及 `*.sha256`。**普通用户无需手动下载**这些增量和清单文件。
+升级器使用的其他文件包括 `Windows-Tk-files.json`、`Windows-Tk-Incremental-x64.pack`、`Web-files.json`、`Web-Incremental-x64.pack`、`update-manifest.json` 及对应 `*.sha256`。**普通用户无需手动下载**这些增量清单与校验资源，只需选择适用的便携包。
 
-## 已知验证范围
+## 验证与兼容
 
-- 自动测试覆盖 Windows 更新 UI、下载来源切换、超时后继续、启动窗口的 Win32 创建/关闭以及多平台模拟 Relay。
-- 真实 Windows 桌面的启动视觉体验、真实直播间并发连通性和具体网络条件下的 GH-Proxy 可用性仍以实际使用为准。
-- 更新过程保留配置、队列、插件和日志的数据保护及原有回滚机制。
+- PR #295 的 Web 页面静态功能契约检查 37/37 通过；Web Build、Server、Quality/API 等 CI 通过。发布包的最终构建和校验以本 Release 的 GitHub Actions 结果为准。
+- 本次为纯 Web 管理界面视觉更新，Windows Tk 界面和 OBS 透明展示保留原有样式。
+- 真实直播间互动、不同浏览器和操作系统的视觉细节仍以实际环境为准。
 
 ## 发布状态
 
-**正式版（Release，非 Pre-release）**。标签：`v3.0.20`，不带测试或预发行后缀。
+**正式版（Release，非 Pre-release）**。标签：`v3.0.21`，补丁号从 3.0.20 更新到 3.0.21，不带测试版后缀。
