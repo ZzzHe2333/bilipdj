@@ -25,3 +25,32 @@ input,select,textarea,.url-box{background:var(--input,#08121f)}.log-output,.json
 
 @media(max-width:900px){.issue79-editor-grid{grid-template-columns:repeat(2,minmax(140px,1fr))}.issue79-theme-swatches{grid-template-columns:repeat(2,minmax(130px,1fr))}.queue-add.issue79-two-fields{grid-template-columns:1fr 1fr 90px}.queue-add.issue79-two-fields .button{width:auto}}
 @media(max-width:620px){.issue79-editor-grid,.issue79-theme-swatches,.issue79-platform-grid{grid-template-columns:1fr}.issue79-editor-grid .issue79-wide{grid-column:auto}.queue-add.issue79-two-fields{grid-template-columns:1fr}}
+
+/* Livestream-first queue affordances: semantically labeled statuses */
+.live-platform-status { display:flex; gap:7px; align-items:center; flex-wrap:wrap; }
+.platform-chip { font-size:12px; font-weight:700; border:1px solid var(--line); border-radius:999px; padding:7px 10px; white-space:nowrap; }
+.platform-chip.connected { border-color:#15945f; color:#48d69d; }
+.platform-chip.disconnected { border-color:#bb4759; color:#ff8594; }
+.platform-chip.reconnecting { border-color:#a88641; color:#e9c57b; }
+.platform-chip.disabled,.platform-chip.checking { color:var(--muted); }
+.sidebar-low-frequency { display:flex; flex-direction:column; gap:6px; margin-top:auto; border-top:1px solid var(--line); padding-top:14px; }
+.queue-live-hero { display:flex; justify-content:space-between; align-items:center; gap:24px; border:1px solid var(--line); border-radius:14px; background:var(--panel2); padding:22px 26px; margin-bottom:16px; }
+.queue-live-current { display:flex; flex-direction:column; min-width:0; gap:8px; flex:1; }
+.queue-live-kicker { color:#6fe6b2; font-size:13px; font-weight:800; }
+#queue-current-name { font-size:clamp(27px,3vw,42px); line-height:1.18; overflow-wrap:anywhere; }
+.queue-current-detail { color:var(--muted); overflow-wrap:anywhere; }
+.queue-next-box { display:flex; flex-direction:column; align-items:center; gap:6px; }
+.queue-next-box small { font-size:11px; color:var(--muted); }
+.queue-next-button { min-width:195px; min-height:66px; justify-content:center; font-size:22px; background:var(--accent); color:white; }
+.queue-next-button:disabled { opacity:.48; cursor:not-allowed; }
+.queue-controls-tip { color:var(--muted); font-size:12px; margin:2px 0 12px; }
+.queue-row-active { background:rgba(25,156,114,.09); }
+.queue-drag-handle { cursor:grab; color:var(--muted); font-size:18px; user-select:none; }
+.queue-state-label { display:inline-block; font-size:11px; border-radius:6px; padding:3px 7px; margin-left:9px; font-weight:700; }
+.queue-state-label.in-progress { background:rgba(37,183,116,.14); color:#62dcac; }
+.queue-state-label.waiting { background:rgba(111,139,175,.13); color:var(--muted); }
+:root[data-theme="light"] .platform-chip.connected,:root[data-theme="light"] .queue-live-kicker,:root[data-theme="light"] .queue-state-label.in-progress { color:#08774f; }
+:root[data-theme="light"] .platform-chip.disconnected { color:#a12439; }
+:root[data-theme="light"] .platform-chip.reconnecting { color:#875711; }
+@media(max-width:1050px) { .topbar { height:auto; min-height:68px; flex-wrap:wrap; padding:12px 18px; } .live-platform-status { order:3; width:100%; } .queue-live-hero { flex-wrap:wrap; } }
+@media(max-width:700px) { .queue-next-box { width:100%; align-items:stretch; } .queue-next-button { width:100%; } .queue-live-hero { padding:18px; } }

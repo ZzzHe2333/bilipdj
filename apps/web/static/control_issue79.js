@@ -91,10 +91,18 @@
         username.value = '';
         content.value = '';
         await renderQueueDetailed();
+        username.focus();
       } catch (error) {
         setStatus('queue-status', `新增失败：${error.message}`, false);
       }
     }, true);
+    for (const field of [username, content, $('queue-after')]) {
+      field?.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' || event.isComposing || event.shiftKey || event.ctrlKey || event.metaKey) return;
+        event.preventDefault();
+        insert?.click();
+      });
+    }
   }
 
   async function renderQueueDetailed() {
@@ -116,7 +124,7 @@
         const username = String(entry.id ?? entry.username ?? '').trim();
         const content = String(entry.content ?? '').trim();
         const last = String(entry.last_operation_at ?? entry.updated_at ?? '');
-        return `<tr><td>${i + 1}</td><td><strong>${esc(username)}</strong></td><td>${esc(content || '—')}</td><td class="muted">${esc(last)}</td><td class="actions"><button class="button mini ghost" data-q="up" data-i="${i + 1}">↑</button> <button class="button mini ghost" data-q="down" data-i="${i + 1}">↓</button> <button class="button mini ghost" data-issue79-edit="${i + 1}" data-username="${esc(username)}" data-content="${esc(content)}">编辑</button> <button class="button mini danger" data-q="delete" data-i="${i + 1}">删除</button></td></tr>`;
+        return `<tr draggable="true" data-queue-row="${i + 1}" class="${i === 0 ? 'queue-row-active' : 'queue-row-waiting'}"><td><span class="queue-drag-handle" title="拖动排序">⇅</span> ${i + 1}</td><td><strong class="queue-name">${esc(username)}</strong><span class="queue-state-label ${i === 0 ? 'in-progress' : 'waiting'}">${i === 0 ? '进行中' : '等待中'}</span></td><td>${esc(content || '—')}</td><td class="muted">${esc(last)}</td><td class="actions">${i === 0 ? '<button class="button mini" data-q="done" data-i="1">完成</button>' : ''} <button class="button mini ghost" data-q="top" data-i="${i + 1}">置顶</button> <button class="button mini ghost" data-q="up" data-i="${i + 1}">↑</button> <button class="button mini ghost" data-q="down" data-i="${i + 1}">↓</button> <button class="button mini ghost" data-issue79-edit="${i + 1}" data-username="${esc(username)}" data-content="${esc(content)}">编辑</button> <button class="button mini danger" data-q="delete" data-i="${i + 1}">删除</button></td></tr>`;
       }).join('') || '<tr><td colspan="5" class="muted">当前队列为空</td></tr>';
       setStatus('queue-status', `当前 ${Number(payload.size ?? entries.length)} 人`);
     } catch (error) {
@@ -128,6 +136,40 @@
 
   function installQueueObserver() {
     const body = $('queue-body'); if (!body) return;
+    let dragFrom = 0;
+    body.addEventListener('dragstart', event => {
+      const row = event.target.closest?.('[data-queue-row]');
+      if (!row) return;
+      dragFrom = Number(row.dataset.queueRow);
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', String(dragFrom));
+    });
+    body.addEventListener('dragover', event => {
+      if (!dragFrom || !event.target.closest?.('[data-queue-row]')) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+    });
+    body.addEventListener('drop', async event => {
+      const row = event.target.closest?.('[data-queue-row]');
+      if (!row || !dragFrom) return;
+      event.preventDefault();
+      const from = dragFrom, to = Number(row.dataset.queueRow);
+      dragFrom = 0;
+      if (from === to) return;
+      try {
+        const snapshot = await api('/api/queue/state');
+        const size = Number(snapshot.size ?? (snapshot.entries || snapshot.queue || []).length);
+        if (from < 1 || to < 1 || from > size || to > size) return;
+        const direction = to < from ? 'up' : 'down';
+        let at = from;
+        while (at !== to) { await post('/api/queue/move', { index: at, direction }); at += direction === 'up' ? -1 : 1; }
+        await renderQueueDetailed();
+      } catch (error) {
+        setStatus('queue-status', '拖动排序失败：' + error.message, false);
+        await renderQueueDetailed();
+      }
+    });
+    body.addEventListener('dragend', () => { dragFrom = 0; });
     body.addEventListener('click', async event => {
       const button = event.target.closest('[data-issue79-edit]');
       if (!button) return;

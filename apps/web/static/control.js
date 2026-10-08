@@ -1,7 +1,7 @@
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
-  const state = { view: 'logs', logTimer: 0, perfTimer: 0, meta: null, queue: null };
+  const state = { view: 'queue', logTimer: 0, queueTimer: 0, perfTimer: 0, headerTimer: 0, meta: null, queue: null, moving: false };
 
   async function json(path, options = {}) {
     const response = await fetch(path, { cache: 'no-store', ...options });
@@ -39,7 +39,7 @@
     document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === `view-${name}`));
     stopTimers();
     if (name === 'logs') { refreshLogs(); state.logTimer = window.setInterval(refreshLogs, 2500); }
-    if (name === 'queue') refreshQueueAll();
+    if (name === 'queue') { refreshQueueAll(); state.queueTimer = window.setInterval(refreshQueue, 2600); }
     if (name === 'settings') loadSettingsBundle();
     if (name === 'permissions') loadPermissions();
     if (name === 'performance') { refreshPerformance(); state.perfTimer = window.setInterval(refreshPerformance, 2500); }
@@ -47,6 +47,7 @@
   }
   function stopTimers() {
     if (state.logTimer) clearInterval(state.logTimer); state.logTimer = 0;
+    if (state.queueTimer) clearInterval(state.queueTimer); state.queueTimer = 0;
     if (state.perfTimer) clearInterval(state.perfTimer); state.perfTimer = 0;
   }
 
@@ -59,8 +60,33 @@
       const connected = Boolean(runtime.danmu_connected || runtime.connected || runtime.relay_connected);
       const room = runtime.roomid || runtime.room_id || '';
       $('health-text').textContent = `${health.service || 'bilipdj'} 已连接${room ? ` · 房间 ${room}` : ''}${connected ? ' · 弹幕在线' : ''}`;
+      await refreshPlatformConnections();
     } catch (error) {
       $('health-dot').className = 'dot bad'; $('health-text').textContent = `后端连接异常：${error.message}`;
+      for (const platform of ['bilibili', 'douyin']) setPlatformStatus(platform, '断开', 'disconnected');
+    }
+  }
+
+  function setPlatformStatus(platform, label, status) {
+    const node = $('platform-status-' + platform);
+    if (!node) return;
+    node.className = 'platform-chip ' + status;
+    node.textContent = (platform === 'bilibili' ? 'B站' : '抖音') + ' · ' + label;
+  }
+  async function refreshPlatformConnections() {
+    try {
+      const result = await json('/api/platforms/active');
+      const active = Array.isArray(result.active) ? result.active : [];
+      const platforms = result.runtime?.platforms || {};
+      for (const platform of ['bilibili','douyin']) {
+        const detail = platforms[platform] || {};
+        if (!active.includes(platform)) { setPlatformStatus(platform, '未启用', 'disabled'); continue; }
+        if (detail.connected) { setPlatformStatus(platform, '已连接', 'connected'); continue; }
+        const reason = detail.last_disconnect_reason || detail.error || '';
+        setPlatformStatus(platform, reason ? '断开' : '重连中', reason ? 'disconnected' : 'reconnecting');
+      }
+    } catch (_) {
+      for (const platform of ['bilibili','douyin']) setPlatformStatus(platform, '状态未知', 'checking');
     }
   }
 
@@ -93,6 +119,7 @@
     try {
       const payload = await json('/api/queue/state'); state.queue = payload;
       const entries = Array.isArray(payload.entries) && payload.entries.length ? payload.entries : (payload.queue || []).map(content => ({ content }));
+      refreshCurrentQueue(entries);
       $('queue-body').innerHTML = entries.map((entry, i) => {
         const content = entry.content ?? entry.entry ?? entry.text ?? payload.queue?.[i] ?? '';
         const last = entry.last_operation_at || entry.updated_at || '';
@@ -101,6 +128,49 @@
       message('queue-status', `当前 ${Number(payload.size ?? entries.length)} 人`);
     } catch (error) { message('queue-status', `读取队列失败：${error.message}`, false); }
   }
+  function refreshCurrentQueue(entries) {
+    const current = Array.isArray(entries) ? entries[0] : null;
+    const name = current?.id ?? current?.username ?? current?.content ?? current?.entry ?? '队列为空';
+    const detail = current?.content && current?.id ? current.content : '';
+    if ($('queue-current-name')) $('queue-current-name').textContent = String(name);
+    if ($('queue-current-detail')) $('queue-current-detail').textContent = String(detail || (current ? '下一个操作：完成当前项并进入下一位' : '等待观众加入队列'));
+    if ($('queue-next')) $('queue-next').disabled = !current || state.moving;
+  }
+
+  async function completeCurrent() {
+    if (state.moving) return;
+    state.moving = true;
+    if ($('queue-next')) $('queue-next').disabled = true;
+    try {
+      // Read fresh state immediately before a destructive operation.
+      const snapshot = await json('/api/queue/state');
+      if (!Number(snapshot.size ?? (snapshot.entries || snapshot.queue || []).length)) {
+        message('queue-status', '当前队列为空。'); return;
+      }
+      await post('/api/queue/delete', { index: 1 });
+      await refreshQueue();
+      message('queue-status', '已完成队首项目，已切换到下一位。');
+    } catch (error) { message('queue-status', '下一位失败：' + error.message, false); }
+    finally { state.moving = false; if ($('queue-next')) $('queue-next').disabled = !Number(state.queue?.size ?? (state.queue?.entries || state.queue?.queue || []).length); }
+  }
+  async function moveQueueItem(from, to) {
+    if (state.moving || from === to) return;
+    const snap = await json('/api/queue/state');
+    const size = Number(snap.size ?? (snap.entries || snap.queue || []).length);
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from < 1 || to < 1 || from > size || to > size) return;
+    state.moving = true;
+    try {
+      const direction = from > to ? 'up' : 'down';
+      let current = from;
+      while (current !== to) {
+        await post('/api/queue/move', { index: current, direction });
+        current += direction === 'up' ? -1 : 1;
+      }
+      await refreshQueue();
+    } catch (error) { message('queue-status', '排序失败：' + error.message, false); await refreshQueue(); }
+    finally { state.moving = false; }
+  }
+
   async function queueAction(path, payload) {
     try { await post(path, payload); await refreshQueue(); }
     catch (error) { message('queue-status', `操作失败：${error.message}`, false); }
@@ -252,9 +322,18 @@
   $('log-refresh').addEventListener('click', refreshLogs); $('log-kind').addEventListener('change', refreshLogs); $('log-search').addEventListener('input', refreshLogs); $('log-clear').addEventListener('click', () => { $('log-output').textContent = ''; });
   $('queue-body').addEventListener('click', event => {
     const btn = event.target.closest('[data-q]'); if (!btn) return; const index = Number(btn.dataset.i); const action = btn.dataset.q;
+    if (action === 'done' && index === 1) return completeCurrent();
+    if (action === 'top') return moveQueueItem(index, 1);
     if (action === 'delete') return queueAction('/api/queue/delete', { index });
     if (action === 'up' || action === 'down') return queueAction('/api/queue/move', { index, direction: action });
     if (action === 'edit') { const content = prompt('修改排队内容', btn.dataset.content || ''); if (content !== null) queueAction('/api/queue/update', { index, content }); }
+  });
+  $('queue-next').addEventListener('click', completeCurrent);
+  document.addEventListener('keydown', event => {
+    if (state.view !== 'queue' || event.repeat || event.key.toLowerCase() !== 'n' || !event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (event.target?.closest?.('input,select,textarea,[contenteditable="true"]')) return;
+    event.preventDefault();
+    void completeCurrent();
   });
   $('queue-insert').addEventListener('click', () => queueAction('/api/queue/insert', { after: Number($('queue-after').value || 0), entry: $('queue-entry').value.trim() }));
   $('queue-clear').addEventListener('click', () => { if (confirm('确认清空当前队列？')) queueAction('/api/queue/clear', {}); });
@@ -272,6 +351,6 @@
   $('copy-overlay').addEventListener('click', async () => { try { await navigator.clipboard.writeText(`${location.origin}/index`); $('copy-overlay').textContent = '已复制'; setTimeout(() => $('copy-overlay').textContent = '复制 OBS 地址', 1200); } catch (_) { prompt('复制此地址', `${location.origin}/index`); } });
   $('overlay-url').textContent = `${location.origin}/index`;
 
-  window.addEventListener('beforeunload', stopTimers);
-  refreshHeader(); switchView('logs');
+  window.addEventListener('beforeunload', () => { stopTimers(); if (state.headerTimer) clearInterval(state.headerTimer); });
+  refreshHeader(); state.headerTimer = window.setInterval(refreshHeader, 4500); switchView('queue');
 })();

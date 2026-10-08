@@ -13,23 +13,29 @@
   <header class="topbar">
     <div class="brand"><span class="brand-mark" aria-hidden="true">B</span><div class="brand-copy"><strong>弹幕排队姬</strong><span id="version">Web 控制台</span></div></div>
     <div class="health"><span id="health-dot" class="dot"></span><span id="health-text">正在连接后端…</span></div>
+    <div id="live-platform-status" class="live-platform-status" aria-live="polite" aria-label="平台连接状态">
+      <span id="platform-status-bilibili" class="platform-chip checking" role="status">B站 · 检查中</span>
+      <span id="platform-status-douyin" class="platform-chip checking" role="status">抖音 · 检查中</span>
+    </div>
     <div class="top-actions"><a class="button ghost" href="/index" target="_blank">队列看板</a><button id="refresh-all" class="button">刷新状态</button></div>
   </header>
   <div class="layout">
     <nav class="sidebar" aria-label="控制台导航">
       <div class="sidebar-label" aria-hidden="true">工作空间</div>
-      <button class="nav active" data-view="logs">运行日志</button>
-      <button class="nav" data-view="queue">当前排队</button>
+      <button class="nav active" data-view="queue">当前排队</button>
+      <button class="nav" data-view="logs">运行日志</button>
       <button class="nav" data-view="settings">设置</button>
       <button class="nav" data-view="overlay">透明窗口 / OBS</button>
       <button class="nav" data-view="permissions">权限</button>
-      <div class="sidebar-label" aria-hidden="true">系统</div>
       <button class="nav" data-view="performance">性能</button>
-      <button class="nav" data-view="update">更新软件</button>
-      <button class="nav" data-view="about">关于</button>
+      <div class="sidebar-low-frequency">
+        <div class="sidebar-label" aria-hidden="true">帮助与系统</div>
+        <button class="nav" data-view="update">更新软件</button>
+        <button class="nav" data-view="about">关于项目</button>
+      </div>
     </nav>
     <main class="content">
-      <section class="view active" id="view-logs">
+      <section class="view" id="view-logs">
         <div class="page-head"><div><h1>运行日志</h1><p>读取后端最近日志，不修改日志文件。</p></div></div>
         <div class="toolbar">
           <select id="log-kind"><option value="all">全部</option><option value="common">普通</option><option value="error">错误</option><option value="update">更新</option></select>
@@ -41,11 +47,15 @@
         <pre id="log-output" class="log-output">正在读取日志…</pre>
       </section>
 
-      <section class="view" id="view-queue">
+      <section class="view active" id="view-queue">
         <div class="page-head"><div><h1>当前排队</h1><p>队列数据和操作仍由 Server 统一处理。</p></div><div class="toolbar compact"><select id="queue-slot"></select><button id="queue-switch" class="button">切换槽位</button><button id="queue-reload" class="button ghost">从存档重载</button></div></div>
+        <div class="queue-live-hero">
+          <div class="queue-live-current"><span class="queue-live-kicker">正在处理 · 队列第 1 位</span><strong id="queue-current-name" aria-live="polite">正在加载队列…</strong><span id="queue-current-detail" class="queue-current-detail"></span></div>
+          <div class="queue-next-box"><button id="queue-next" type="button" class="button queue-next-button" title="快捷键：Alt + N">下一位 <span aria-hidden="true">→</span></button><small>快捷键 Alt + N · 仅在队列页有效</small></div>
+        </div>
         <div class="card">
           <div class="queue-add"><input id="queue-entry" placeholder="新增排队内容"><input id="queue-after" type="number" min="0" value="0" title="插入在第几项之后，0=队首"><button id="queue-insert" class="button">插入</button><button id="queue-clear" class="button danger">清空队列</button></div>
-          <div class="table-wrap"><table><thead><tr><th>#</th><th>内容</th><th>最近操作</th><th>操作</th></tr></thead><tbody id="queue-body"></tbody></table></div>
+          <p class="queue-controls-tip">拖动行左侧的 ⇅ 可以调整顺序；也可用行内的置顶、上下移动和移除。操作直接同步到本地 Server。</p><div class="table-wrap"><table><thead><tr><th>#</th><th>内容</th><th>最近操作</th><th>操作</th></tr></thead><tbody id="queue-body"></tbody></table></div>
           <div id="queue-status" class="status"></div>
         </div>
       </section>
