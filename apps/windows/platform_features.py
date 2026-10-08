@@ -49,28 +49,10 @@ def _build_about_project(panel: Any, frame: Any, module: Any) -> None:
 
 
 def _build_support_page(panel: Any, frame: Any, module: Any) -> None:
-    _clear_children(frame)
-    frame.columnconfigure(0, weight=1)
-    try:
-        from .support_us import SUPPORT_COPY, SUPPORT_URL, _make_qr_photo
-    except Exception:  # pragma: no cover
-        SUPPORT_COPY = "项目免费开源使用，感谢支持。"
-        SUPPORT_URL = REPOSITORY_URL
-        _make_qr_photo = None
+    # Keep the legacy navigation patch consistent with the canonical donation-only page.
+    from .support_us import _render_support_content
 
-    card = module.ttk.Frame(frame, padding=(36, 28))
-    card.grid(row=0, column=0, sticky="nsew")
-    card.columnconfigure(0, weight=1)
-    module.ttk.Label(card, text="支持我们", font=("Microsoft YaHei UI", 18, "bold")).grid(row=0, column=0, pady=(0, 10))
-    module.ttk.Label(card, text=SUPPORT_COPY, justify="center", wraplength=700).grid(row=1, column=0, pady=(0, 18))
-    if callable(_make_qr_photo):
-        try:
-            photo = _make_qr_photo(panel.root, size=220)
-            panel._platform_support_qr = photo
-            module.ttk.Label(card, image=photo).grid(row=2, column=0, pady=(0, 16))
-        except Exception:
-            pass
-    module.ttk.Button(card, text="打开支持页面", command=lambda: webbrowser.open(SUPPORT_URL)).grid(row=3, column=0, ipadx=16, ipady=4)
+    _render_support_content(panel, frame, module)
 
 
 def _clean_nav_label(text: Any) -> str:
