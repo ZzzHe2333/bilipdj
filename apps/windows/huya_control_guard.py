@@ -66,6 +66,10 @@ def _sync_huya_var_from_status(panel: Any) -> None:
         text = str(status_var.get() or "")
     except Exception:
         return
+    active_ids = getattr(panel, "_platform_active_ids", None)
+    if isinstance(active_ids, (set, frozenset, list, tuple)):
+        vars_map["huya"].set("huya" in active_ids)
+        return
     match = re.search(r"已激活：([^；;]+)", text)
     if not match:
         return
@@ -93,9 +97,9 @@ def _install_huya_active_checkbox(panel: Any, module: Any) -> None:
                 text = str(widget.cget("text") or "")
             except Exception:
                 continue
-            if "虎牙" in text and "预留" in text:
+            if "快手" in text and "预留" in text:
                 try:
-                    widget.configure(text="快手 / 斗鱼 / 视频号：当前仅预留配置，尚未接入弹幕流。")
+                    widget.configure(text="快手 / 斗鱼 / 视频号：当前仅预留配置，尚未接入弹幕流。红色小电视 / 紫色老鼠须先配置直播间。")
                     widget.grid_configure(row=3, column=0, sticky="w", pady=(8, 0))
                 except Exception:
                     pass

@@ -221,7 +221,7 @@ def _install_issue79_plugin_bridge(server_module: Any, issue79_module: Any, regi
 
     def normalize_active_platforms(_module: Any, config: Any) -> tuple[str, ...]:
         cfg = config if isinstance(config, dict) else {}
-        supported = set(registry.platform_ids())
+        supported = {plugin.platform for plugin in registry.list_plugins() if plugin.available}
         raw = cfg.get("active_platforms")
         if isinstance(raw, (list, tuple)):
             result: list[str] = []

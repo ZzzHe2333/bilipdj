@@ -257,10 +257,17 @@ def _install_active_checkbox(panel: Any, module: Any) -> None:
                 text = str(status_var.get() or "")
             except Exception:
                 return
-            match = re.search(r"已激活：([^；;]+)", text)
-            if match:
-                raw = match.group(1).strip()
-                active = set() if raw in {"", "无"} else {item.strip().lower() for item in re.split(r"[,，+]+", raw) if item.strip()}
+            active_ids = getattr(panel, "_platform_active_ids", None)
+            if isinstance(active_ids, (set, frozenset, list, tuple)):
+                active = set(active_ids)
+            else:
+                match = re.search(r"已激活：([^；;]+)", text)
+                if match:
+                    raw = match.group(1).strip()
+                    active = set() if raw in {"", "无"} else {item.strip().lower() for item in re.split(r"[,，+]+", raw) if item.strip()}
+                else:
+                    active = None
+            if active is not None:
                 try:
                     vars_map["twitch"].set("twitch" in active)
                 except Exception:

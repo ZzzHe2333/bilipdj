@@ -114,6 +114,50 @@ def _platform_request(panel: Any, method: str = "GET", payload: dict[str, Any] |
     return result if isinstance(result, dict) else {}
 
 
+def _registered_active_plugin_specs(payload: dict[str, Any]) -> list[tuple[str, str]]:
+    """Use the backend's actual available relay plugins, not a fixed checkbox list."""
+    raw_plugins = payload.get("plugins", []) if isinstance(payload, dict) else []
+    plugins = {
+        str(item.get("platform", "") or "").strip().lower(): item
+        for item in raw_plugins if isinstance(item, dict) and item.get("platform")
+    } if isinstance(raw_plugins, list) else {}
+    raw_supported = payload.get("supported", []) if isinstance(payload, dict) else []
+    if not isinstance(raw_supported, (list, tuple)):
+        raw_supported = []
+    names = raw_supported or list(plugins) or ["bilibili", "douyin"]
+    result: list[tuple[str, str]] = []
+    for value in names:
+        platform = str(value or "").strip().lower()
+        if not platform or any(key == platform for key, _ in result):
+            continue
+        info = plugins.get(platform)
+        if info is not None and not bool(info.get("available", True)):
+            continue
+        label = str(info.get("name", "") or platform) if info is not None else platform
+        label = label.removesuffix("获取弹幕插件").strip() or platform
+        result.append((platform, label))
+    return result
+
+
+def _sync_active_plugin_controls(panel: Any, module: Any, choices: Any, vars_map: dict[str, Any], payload: dict[str, Any]) -> None:
+    """Add newly registered sources while leaving gated platform widgets alone."""
+    specs = _registered_active_plugin_specs(payload)
+    panel._platform_supported = {platform for platform, _ in specs}
+    for platform, label in specs:
+        if platform in vars_map:
+            continue
+        # YouTube/Twitch are exposed by their own Windows guards only after a
+        # validated room/channel is configured. Never bypass that gate.
+        if platform in {"youtube", "twitch"}:
+            continue
+        vars_map[platform] = module.tk.BooleanVar(value=False)
+        row = int(getattr(panel, "_active_plugin_extra_row", 6))
+        module.ttk.Checkbutton(
+            choices, text=f"{label}（一个直播间）", variable=vars_map[platform]
+        ).grid(row=row, column=0, sticky="w", pady=5)
+        panel._active_plugin_extra_row = row + 1
+
+
 def _install_active_platform_tab(panel: Any, module: Any) -> None:
     notebook = getattr(panel, "settings_notebook", None)
     if notebook is None or bool(getattr(panel, "_platform_features_tab_installed", False)):
@@ -150,7 +194,7 @@ def _install_active_platform_tab(panel: Any, module: Any) -> None:
     choices.grid(row=2, column=0, sticky="ew")
     module.ttk.Checkbutton(choices, text="Bilibili（一个直播间）", variable=vars_map["bilibili"]).grid(row=0, column=0, sticky="w", pady=5)
     module.ttk.Checkbutton(choices, text="抖音（一个直播间）", variable=vars_map["douyin"]).grid(row=1, column=0, sticky="w", pady=5)
-    module.ttk.Label(choices, text="虎牙 / 快手 / 斗鱼 / 视频号：当前仅预留配置，尚未接入弹幕流。", wraplength=720).grid(row=2, column=0, sticky="w", pady=(8, 0))
+    module.ttk.Label(choices, text="虎牙可接入弹幕；快手 / 斗鱼 / 视频号仍为预留配置。红色小电视、紫色老鼠需先完成直播间配置才能激活。", wraplength=720).grid(row=2, column=0, sticky="w", pady=(8, 0))
 
     status_var = module.tk.StringVar(value="尚未读取后端状态")
     panel._platform_status_var = status_var
@@ -160,9 +204,13 @@ def _install_active_platform_tab(panel: Any, module: Any) -> None:
 
     def apply_payload(payload: dict[str, Any]) -> None:
         active = payload.get("active", []) if isinstance(payload, dict) else []
-        active_set = {str(value) for value in active} if isinstance(active, list) else set()
-        vars_map["bilibili"].set("bilibili" in active_set)
-        vars_map["douyin"].set("douyin" in active_set)
+        active_set = {str(value).strip().lower() for value in active} if isinstance(active, list) else set()
+        _sync_active_plugin_controls(panel, module, choices, vars_map, payload)
+        # The status text may be localized by platform adapters. Keep a
+        # structured snapshot so aliases cannot silently uncheck other relays.
+        panel._platform_active_ids = frozenset(active_set)
+        for platform, variable in vars_map.items():
+            variable.set(platform in active_set)
         runtime = payload.get("runtime", {}) if isinstance(payload, dict) else {}
         platform_states = runtime.get("platforms", {}) if isinstance(runtime, dict) else {}
         connected = [name for name, state in platform_states.items() if isinstance(state, dict) and state.get("connected")]
@@ -184,7 +232,10 @@ def _install_active_platform_tab(panel: Any, module: Any) -> None:
         threading.Thread(target=worker, name="bilipdj-platform-refresh", daemon=True).start()
 
     def save() -> None:
-        active = [name for name, var in vars_map.items() if bool(var.get())]
+        supported = getattr(panel, "_platform_supported", None)
+        if not isinstance(supported, set):
+            supported = set(vars_map)
+        active = [name for name, var in vars_map.items() if name in supported and bool(var.get())]
         status_var.set("正在保存并重连弹幕流……")
 
         def worker() -> None:

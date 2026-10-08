@@ -390,11 +390,19 @@ def install_issue79_guard(server_module: Any) -> bool:
                     return
                 payload = _read_json_body(self)
                 raw = payload.get("active", [])
+                registry = getattr(server_module, "danmu_plugin_registry", None)
+                allowed = set(SUPPORTED_ACTIVE_PLATFORMS)
+                if registry is not None and hasattr(registry, "list_plugins"):
+                    allowed = {
+                        str(plugin.platform).strip().lower()
+                        for plugin in registry.list_plugins()
+                        if bool(getattr(plugin, "available", False))
+                    }
                 active: list[str] = []
                 if isinstance(raw, (list, tuple)):
                     for value in raw:
                         name = str(value or "").strip().lower()
-                        if name in SUPPORTED_ACTIVE_PLATFORMS and name not in active:
+                        if name in allowed and name not in active:
                             active.append(name)
                 # Do not rewrite the parameter-editor selection (platform) or
                 # per-platform connection details when toggling active relays.
