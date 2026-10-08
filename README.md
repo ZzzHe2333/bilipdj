@@ -47,6 +47,22 @@ Server 是唯一业务状态源，Windows 客户端、Web 控制台、OBS 展示
 
 每个发行包都附带 `.sha256` 与 `update-manifest.json`。客户端更新时会先读取 manifest 拿到准确的包名、下载地址、大小和 SHA-256 再下载校验，不会靠猜版本号拼文件名。`Windows-Tk-files.json` 与 `Windows-Tk-Incremental-x64.pack` 是内置增量更新器使用的资源，普通用户无需手动下载。
 
+## 🐳 Docker：以 Web 控制台为操作界面
+
+Linux / Ubuntu / Docker Desktop 用户可直接部署与 Web 便携版共用的 `apps/web/static/` 和 `apps/server/`，无需 Windows Tk，也不单独维护另一套 Web UI。
+
+```bash
+git clone https://github.com/ZzzHe2333/bilipdj.git
+cd bilipdj
+mkdir -p data
+docker compose up -d --build
+docker compose ps
+```
+
+默认只在本机监听 `127.0.0.1:9816`，浏览器访问 **[Web 控制台](http://127.0.0.1:9816/control)**，平台配置为 `/config`，OBS 浏览器源为 `http://127.0.0.1:9816/index`。队列、设置、主题、插件与日志持久化在项目 `./data`，重建容器不删除。需要改宿主机端口可设置 `BILIPDJ_HOST_PORT`；容器内端口仍为 `9816`。
+
+**注意：** Web 管理 API 默认只允许本机访问，不可直接把管理端口开放到公网；远程管理可通过 SSH 端口转发在客户端使用 `localhost`。Docker 版按容器镜像/源码更新，**不要在容器里执行 Windows Web Portable 的独立更新器**。详细部署、升级、数据迁移与安全边界见 [Docker 使用说明](./docs/DOCKER.md)。
+
 ## 🧩 功能一览
 
 - 🎨 Windows / Web 共用同一套 **BiliPDJ Aurora** 主题，配置一次两端同步，还能互相导入 / 导出「主题 + OBS 样式」配置文件

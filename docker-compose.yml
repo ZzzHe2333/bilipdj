@@ -5,10 +5,19 @@ services:
       dockerfile: apps/server/Dockerfile
     restart: unless-stopped
     init: true
+    # Keep the legacy ./data bind mount intact so existing Docker installs
+    # never silently switch to an empty Docker-managed volume.
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,size=128m
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    stop_grace_period: 30s
     security_opt:
       - no-new-privileges:true
     ports:
-      - "127.0.0.1:9816:9816"
+      - "127.0.0.1:${BILIPDJ_HOST_PORT:-9816}:9816"
     environment:
       BILIPDJ_DATA_DIR: /data
       BILIPDJ_DOCKER: "1"

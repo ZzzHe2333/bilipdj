@@ -39,7 +39,9 @@ python -m apps.server.main --web-dir apps/web/dist
 
 ## Docker
 
-推荐从仓库根目录直接使用 Compose：
+容器化模式默认以 **Web 控制台** 为主界面，使用同一套 `apps/web/static` 与 Server HTTP/WS 接口；不提供 Windows Tk 窗口。详细部署、升级和安全指南见 [docs/DOCKER.md](../../docs/DOCKER.md)。
+
+推荐从仓库根目录直接使用 Compose（先执行 `mkdir -p data` 以保证绑定的数据目录位于宿主机，避免 Docker 自动创建 root-owned 的空目录）：
 
 ```bash
 docker compose up -d --build
@@ -61,7 +63,7 @@ BILIPDJ_DOCKER=1
 BILIPDJ_DOCKER_TRUSTED_CIDRS=auto
 ```
 
-配置、主题、日志、队列/黑名单存档、`key/` 更新元数据、插件与插件私有数据会写入持久化数据目录；删除或重建容器不会删除 `./data` 中的用户数据。
+配置、主题、日志、队列/黑名单存档、`key/` 更新元数据、插件与插件私有数据会写入持久化数据目录；删除或重建容器不会删除 `./data` 中的用户数据。原有绑定目录 `./data` **保留不迁移**，防止既有安装误指向空数据卷。容器根文件系统默认只读，临时数据仅写入独立 `/tmp`，持久状态统一写入 `/data`。镜像仅安装 Server/Web 依赖，不包含 Tk 托盘依赖和 Windows 应用源码。
 
 为了保持管理 API 的本地安全边界，Compose 默认只发布：
 
@@ -76,6 +78,8 @@ BILIPDJ_DOCKER_TRUSTED_CIDRS=172.30.0.1/32
 ```
 
 即使来源 IP 位于受信任网关范围，现有管理请求仍继续执行 loopback `Host` 与同源 `Origin/Referer` 检查。不要为了远程管理直接把 Compose 端口改成 `0.0.0.0:9816:9816`；当前 local-only API 的设计目标仍是本机管理，而不是公网鉴权。
+
+Docker 版在 Web“更新软件”页可以检查 GitHub 最新正式版，但不会使用 Web Portable 的 EXE 更新器自修改容器。更新方式是先备份 `./data`，更新仓库代码或镜像，再执行 `docker compose up -d --build`。不要删除 `./data`；也不要把容器里的 `/app` 当作持久数据路径。
 
 容器和 Compose 都使用现有 `/health` 接口做 healthcheck。查看状态：
 
