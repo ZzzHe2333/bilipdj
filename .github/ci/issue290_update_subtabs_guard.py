@@ -51,6 +51,12 @@ class FakeWidget:
     def place(self, **kwargs):
         pass
 
+    def delete(self, *args, **kwargs):
+        pass
+
+    def insert(self, *args, **kwargs):
+        pass
+
     def bind(self, *args, **kwargs):
         pass
 
