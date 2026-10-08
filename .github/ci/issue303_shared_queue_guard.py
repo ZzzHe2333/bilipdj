@@ -68,7 +68,9 @@ def check_shared_archive(server):
             qm.load_kaiguan(server.DEFAULT_KAIGUAN)
 
             # Identical screen names in distinct platforms are separate users.
+            print("[issue303] Bilibili first join", flush=True)
             send(qm, "bilibili", "同名", "排队", "b:100")
+            print("[issue303] Douyin first join", flush=True)
             send(qm, "douyin", "同名", "排队", "dy:100")
             assert qm.get_queue() == ["同名", "同名"], qm.get_queue()
             sources = [item["platform"] for item in qm.get_queue_entries()]
@@ -104,6 +106,7 @@ def check_shared_archive(server):
             assert not (root / "core/cd/queue_archive_slot_1.csv").exists()
             assert hub.events[-1]["queue"] == qm.get_queue()
 
+            print("[issue303] first archive ready", flush=True)
             # Restoring in a fresh QueueManager must preserve the source of each row.
             restored = server.QueueManager(Hub(), archive, logging.getLogger("issue303-restore"))
             restored.restore_from_archive()
@@ -121,6 +124,7 @@ def check_shared_archive(server):
             assert len(parsed) == 2
             assert all(item.get("platform") == "" for item in parsed), parsed
 
+            print("[issue303] restored+legacy", flush=True)
             # Real multi-relay manager uses one queue_manager and one slot.
             issue79 = importlib.import_module("apps.server.issue79_guard")
             class FakeRelay:
@@ -148,6 +152,7 @@ def check_shared_archive(server):
             assert [e["platform"] for e in entries[-2:]] == ["bilibili", "douyin"]
             assert server.read_queue_archive_entries(path) == entries
 
+            print("[issue303] multi relay ready", flush=True)
             # Concurrent arrivals must not overwrite a more recent snapshot.
             barrier = threading.Barrier(2)
             errors = []
@@ -165,6 +170,7 @@ def check_shared_archive(server):
             assert qm.get_queue_entries() == server.read_queue_archive_entries(path)
             assert len(qm.get_queue()) == len(entries) + 10
 
+            print("[issue303] concurrent rows complete", flush=True)
             qm.clear_queue()
             assert server.read_queue_archive_entries(path) == []
             assert all(len(getattr(qm, field)) == 0 for field in ("_persons", "_entry_timestamps", "_entry_platforms"))
@@ -183,7 +189,10 @@ def check_ui_routes():
 
 
 def main():
+    import faulthandler
+    faulthandler.dump_traceback_later(20, repeat=True)
     server = importlib.import_module("apps.server.server")
+    print("[issue303] server imported; starting unified queue", flush=True)
     check_shared_archive(server)
     check_ui_routes()
     print("issue #303 unified multi-platform queue and archive: OK")
