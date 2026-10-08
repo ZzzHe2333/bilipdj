@@ -15,6 +15,7 @@
 | [UPDATE.md](./UPDATE.md) | 历史更新日志 |
 | [RELEASE_NOTES.md](./RELEASE_NOTES.md) | 当前版本发行说明，GitHub Release 工作流直接读取 |
 | [CONTRIBUTORS.md](./CONTRIBUTORS.md) | 项目维护者与贡献说明 |
+| [双 UI 维护规范](../docs/DUAL_UI_MAINTENANCE.md) | Windows Tk 与 Web 共存架构、功能同步及验收约定 |
 | [ai.md](./ai.md) | AI / 自动化工具的仓库结构、边界与修改流程 |
 
 ## 主要入口
