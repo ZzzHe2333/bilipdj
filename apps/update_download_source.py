@@ -57,9 +57,11 @@ def is_github_release_download_url(url: str) -> bool:
     parts = parsed.path.split("/")
     return (
         len(parts) == 7
-        and bool(parts[1]) and bool(parts[2])
-        and parts[3:5] == ["releases", "download"]
-        and bool(parts[5]) and bool(parts[6])
+        and bool(parts[1]) and bool(parts[2]) and bool(parts[6])
+        and (
+            (parts[3:5] == ["releases", "download"] and bool(parts[5]))
+            or parts[3:6] == ["releases", "latest", "download"]
+        )
     )
 
 
