@@ -136,3 +136,46 @@ h1 span { background: linear-gradient(95deg, #9fa5ff 0%, #61dcff 85%); -webkit-b
   .footer { flex-direction: column; }
   .footer div { flex-wrap: wrap; }
 }
+
+/* Landing page improvements: source-backed downloads, onboarding and accessible theme */
+.theme-toggle { border:1px solid var(--line); background:var(--panel); border-radius:10px; padding:9px 12px; color:var(--text); cursor:pointer; font:inherit; font-size:13px; }
+.theme-toggle:focus-visible,.url-copy button:focus-visible,a:focus-visible,summary:focus-visible { outline:3px solid var(--brand); outline-offset:3px; }
+.onboarding-grid,.download-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
+.onboarding-step,.download-card { background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:25px; min-width:0; }
+.onboarding-step h3,.download-card h3 { margin:15px 0 10px; font-size:21px; }
+.onboarding-step p,.download-card p { color:var(--muted); line-height:1.75; }
+.step-number { color:var(--brand); font-size:13px; font-weight:800; letter-spacing:.1em; }
+.url-copy { display:flex; align-items:center; gap:7px; background:var(--panel-strong); padding:10px; border-radius:11px; flex-wrap:wrap; }
+.url-copy code { flex:1 1 210px; font-size:12px; overflow-wrap:anywhere; }
+.url-copy button { border:1px solid var(--line); color:var(--text); border-radius:8px; background:var(--panel); padding:8px 10px; cursor:pointer; }
+.download-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.download-card { display:flex; flex-direction:column; gap:4px; }
+.download-card h3 { margin:8px 0 2px; }
+.download-type { color:var(--brand); font-size:13px; font-weight:800; }
+.download-card .download-meta { margin-top:auto; font-variant-numeric:tabular-nums; min-height:28px; }
+.download-button { margin-top:10px; width:max-content; max-width:100%; }
+.download-safety { padding:18px 20px; border-radius:14px; border:1px solid rgba(202,150,42,.45); background:var(--panel); color:var(--text); line-height:1.8; margin-top:18px; }
+.guide-links { display:flex; flex-wrap:wrap; gap:22px; padding-top:12px; color:var(--brand); }
+.faq-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.faq-list details { border:1px solid var(--line); background:var(--panel); border-radius:14px; padding:20px; }
+.faq-list summary { color:var(--text); font-weight:700; cursor:pointer; }
+.faq-list p { color:var(--muted); line-height:1.8; margin-bottom:0; }
+:root[data-theme="light"] { color-scheme:light; --bg:#f6f7fc; --panel:#ffffff; --panel-strong:#edf1fa; --text:#162239; --muted:#47546b; --line:#cbd4e4; --brand:#3949bf; --brand-2:#087398; --ok:#087950; --shadow:0 14px 44px rgba(31,55,90,.12); }
+:root[data-theme="light"] body { background:linear-gradient(180deg,#f4f7ff,var(--bg)); }
+:root[data-theme="light"] .nav-wrap { background:rgba(248,250,255,.95);border-bottom-color:#cbd4e4; }
+:root[data-theme="light"] .nav-links,:root[data-theme="light"] .eyebrow,:root[data-theme="light"] .hero-text { color:#42516a; }
+:root[data-theme="light"] .nav-links a:hover { color:#263ca0; }
+:root[data-theme="light"] .hero-panel,:root[data-theme="light"] .architecture-card,:root[data-theme="light"] .cta-card { background:#ffffff; }
+:root[data-theme="light"] .window-bar,:root[data-theme="light"] .queue-head,:root[data-theme="light"] .queue-row strong,:root[data-theme="light"] .node { color:#24324b; }
+:root[data-theme="light"] .queue-row,:root[data-theme="light"] .feature-card,:root[data-theme="light"] .metrics,:root[data-theme="light"] .node { background:#f8faff; }
+:root[data-theme="light"] .node.server,:root[data-theme="light"] .queue-row.active { background:#e9edff; }
+:root[data-theme="light"] .queue-row small,:root[data-theme="light"] .queue-row em,:root[data-theme="light"] .flow-strip,:root[data-theme="light"] .arrow { color:#52617a; }
+:root[data-theme="light"] .flow-strip span,:root[data-theme="light"] .node small,:root[data-theme="light"] .footer { color:#44536b; }
+:root[data-theme="light"] .button.secondary { color:#283d9b; background:#eef2ff; border-color:#a5b4ec; }
+:root[data-theme="light"] .brand-mark,:root[data-theme="light"] .button.primary { color:#ffffff; }
+:root[data-theme="light"] .section-heading > span,:root[data-theme="light"] .eyebrow.plain { color:#384aab; }
+:root[data-theme="light"] .platform.on,:root[data-theme="light"] .live-pill { color:#087950; }
+:root[data-theme="light"] .security strong { color:#86530b; }
+@media(max-width:900px){ .onboarding-grid { grid-template-columns:1fr; } .faq-list { grid-template-columns:1fr; } }
+@media(max-width:620px){ .download-grid { grid-template-columns:1fr; } .download-button { width:100%; } .theme-toggle { font-size:12px; } }
+@media(prefers-reduced-motion:reduce){ *,*::before,*::after { scroll-behavior:auto!important; transition:none!important; } }

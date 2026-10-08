@@ -38,8 +38,12 @@ Server 是唯一业务状态源，Windows 客户端、Web 控制台、OBS 展示
 
 | 版本 | 发行包 | 启动方式 | 说明 |
 |---|---|---|---|
-| 🖥️ Tk Windows 便携版 | [下载 `BiliPDJ-v3.0.12-Windows-Tk-Portable-x64.zip`](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.12/BiliPDJ-v3.0.12-Windows-Tk-Portable-x64.zip) | 解压后双击 `main.exe` | 普通 Windows 用户请选择这个包 |
-| 🌐 Web 便携版 | [下载 `BiliPDJ-v3.0.12-Web-Portable-x64.zip`](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.12/BiliPDJ-v3.0.12-Web-Portable-x64.zip) | 解压后双击 `BiliPDJ-Web.exe` | 启动内置后端服务器，就绪后自动打开 Web 控制台 |
+| 🖥️ Tk Windows 便携版 | [下载最新正式版（选择 Windows Tk Portable）](https://github.com/ZzzHe2333/bilipdj/releases/latest) | 解压后双击 `main.exe` | 普通 Windows 用户请选择这个包 |
+| 🌐 Web 便携版 | [下载最新正式版（选择 Web Portable）](https://github.com/ZzzHe2333/bilipdj/releases/latest) | 解压后双击 `BiliPDJ-Web.exe` | 启动内置后端服务器，就绪后自动打开 Web 控制台 |
+
+**始终从 [latest 正式发行页](https://github.com/ZzzHe2333/bilipdj/releases/latest) 下载**，不要使用历史版 ZIP 链接。下载时根据发行资产名称选择 `Windows-Tk-Portable-x64.zip` 或 `Web-Portable-x64.zip`。
+
+**OBS 三步上手：** 下载并解压 → 在 Windows 客户端的“平台参数”填直播间号并启动服务 → OBS 新增“浏览器源”，地址为 `http://127.0.0.1:9816/index`，宽高可从 **800 × 600** 开始按画面调整。默认管理服务只应通过本机访问，不应直接暴露公网。
 
 每个发行包都附带 `.sha256` 与 `update-manifest.json`。客户端更新时会先读取 manifest 拿到准确的包名、下载地址、大小和 SHA-256 再下载校验，不会靠猜版本号拼文件名。`Windows-Tk-files.json` 与 `Windows-Tk-Incremental-x64.pack` 是内置增量更新器使用的资源，普通用户无需手动下载。
 

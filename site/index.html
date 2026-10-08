@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0b1020">
+  <meta name="color-scheme" content="dark light">
   <meta name="description" content="BiliPDJ：面向直播间的本地化弹幕排队、权限控制、队列存档与 OBS 展示工具。">
   <meta property="og:title" content="BiliPDJ · 弹幕排队姬">
   <meta property="og:description" content="本地运行、实时排队、OBS 展示、多端共用一套 Server 状态。">
@@ -25,7 +26,9 @@
       <div class="nav-links">
         <a href="#features">功能</a>
         <a href="#architecture">架构</a>
-        <a href="#start">开始使用</a>
+        <a href="#steps">三步上手</a>
+        <a href="#start">下载</a>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换浅色主题" aria-pressed="false">浅色模式</button>
         <a href="https://github.com/ZzzHe2333/bilipdj" target="_blank" rel="noreferrer">GitHub</a>
       </div>
     </nav>
@@ -48,10 +51,10 @@
         </div>
       </div>
 
-      <div class="hero-panel" aria-label="BiliPDJ 工作流示意">
+      <div class="hero-panel" aria-label="BiliPDJ 工作流示意（非实际直播截图）">
         <div class="window-bar"><span></span><span></span><span></span><strong>bilipdj / live queue</strong></div>
         <div class="queue-card">
-          <div class="queue-head"><span>实时队列</span><span class="live-pill">LIVE</span></div>
+          <div class="queue-head"><span>队列操作示意 · 非真实截图</span><span class="live-pill">DEMO</span></div>
           <div class="queue-row"><b>01</b><div><strong>观众 A</strong><small>已加入队列 · Bilibili</small></div><em>等待</em></div>
           <div class="queue-row"><b>02</b><div><strong>观众 B</strong><small>管理员手动加入</small></div><em>等待</em></div>
           <div class="queue-row active"><b>03</b><div><strong>观众 C</strong><small>当前处理</small></div><em>进行中</em></div>
@@ -108,22 +111,35 @@
       </div>
     </section>
 
-    <section id="start" class="section container">
-      <div class="cta-card">
-        <div>
-          <span class="eyebrow plain">GET STARTED</span>
-          <h2>直接下载便携版即可开始。</h2>
-          <p>普通 Windows 用户无需单独配置 Python。需要二次开发时，也可以直接从源码启动 Server、Windows 或 Web。</p>
-        </div>
-        <div class="cta-actions">
-          <a class="button primary" href="https://github.com/ZzzHe2333/bilipdj/releases" target="_blank" rel="noreferrer">前往 Releases</a>
-          <a class="button secondary" href="https://github.com/ZzzHe2333/bilipdj/blob/now/core/GUIDE.md" target="_blank" rel="noreferrer">阅读使用教程</a>
-          <a class="text-link" href="https://github.com/ZzzHe2333/bilipdj/issues" target="_blank" rel="noreferrer">遇到问题？提交 Issue →</a>
-        </div>
+    <section id="steps" class="section container">
+      <div class="section-heading"><span>GET STARTED · 3 STEPS</span><h2>从下载到 OBS，三步开播。</h2><p class="muted">所有操作在本机进行，无需部署公网服务器。先运行程序并连接直播间，再添加 OBS 浏览器源。</p></div>
+      <div class="onboarding-grid">
+        <article class="onboarding-step"><span class="step-number">01</span><h3>下载并解压</h3><p>Windows 主播使用 Tk 便携版，解压后启动 <code>main.exe</code>；更习惯浏览器管理的用户选择 Web Portable，启动 <code>BiliPDJ-Web.exe</code>。</p></article>
+        <article class="onboarding-step"><span class="step-number">02</span><h3>填写直播间号</h3><p>打开“设置 → 平台参数”，填写 B 站直播间号或抖音 Live ID，保存并启动服务；可在“激活平台”选择要监听的平台。</p></article>
+        <article class="onboarding-step"><span class="step-number">03</span><h3>OBS 添加浏览器源</h3><p>OBS → 来源 → 浏览器，粘贴下方本地地址。推荐从 <strong>800 × 600</strong> 开始设置宽高，再根据直播布局调整。</p><div class="url-copy"><code id="obs-url">http://127.0.0.1:9816/index</code><button id="copy-obs" type="button">复制地址</button></div></article>
       </div>
     </section>
 
-    <section class="security container">
+    <section id="start" class="section container">
+      <div class="section-heading"><span>DOWNLOAD</span><h2>根据你的使用方式选择便携版。</h2><p class="muted">当前版本与压缩包大小取自 GitHub 最新正式 Release，读取失败时回退到最新发行页，不会提供过期版本的直链。</p></div>
+      <div class="download-grid">
+        <article class="download-card"><span class="download-type">Windows 客户端</span><h3>Tk 便携版</h3><p>适合普通 Windows 主播：直接双击运行，管理平台、队列、设置与 OBS 展示。</p><p class="download-meta" id="windows-meta" aria-live="polite">正在获取最新版本与包大小…</p><a class="button primary download-button" id="windows-download" href="https://github.com/ZzzHe2333/bilipdj/releases/latest" target="_blank" rel="noopener noreferrer">下载 Windows 客户端（最新正式版）</a></article>
+        <article class="download-card"><span class="download-type">Web 控制台</span><h3>Web Portable</h3><p>适合偏好浏览器操作的主播：本机启动服务后，在浏览器里管理队列与配置。</p><p class="download-meta" id="web-meta" aria-live="polite">正在获取最新版本与包大小…</p><a class="button secondary download-button" id="web-download" href="https://github.com/ZzzHe2333/bilipdj/releases/latest" target="_blank" rel="noopener noreferrer">下载 Web 便携版（最新正式版）</a></article>
+      </div>
+      <p class="download-safety"><strong>本地使用提醒：</strong>管理地址默认为 <code>127.0.0.1:9816</code>。配置中可能含 Cookie 等凭据，不要将管理端口映射到公网，也不要公开配置文件或二维码登录信息。</p>
+      <div class="guide-links"><a href="https://github.com/ZzzHe2333/bilipdj/blob/now/core/GUIDE.md" target="_blank" rel="noopener noreferrer">完整教程</a><a href="https://github.com/ZzzHe2333/bilipdj/releases/latest" target="_blank" rel="noopener noreferrer">查看最新 Release</a><a href="https://github.com/ZzzHe2333/bilipdj/issues" target="_blank" rel="noopener noreferrer">问题反馈</a></div>
+    </section>
+    <section id="faq" class="section container faq-section">
+      <div class="section-heading"><span>FAQ</span><h2>常见问题。</h2></div>
+      <div class="faq-list">
+        <details><summary>OBS 背景如何透明？</summary><p>使用 <code>http://127.0.0.1:9816/index</code> 作为 OBS 浏览器源，不要添加为普通屏幕捕获；展示层可配置文字、描边和背景样式。实际透明效果取决于队列展示样式。</p></details>
+        <details><summary>数据和配置存在哪里？</summary><p>默认保存在本机的程序运行数据目录，包含队列存档、配置与日志。备份文件与源程序分开管理；升级之前建议保留原有运行目录。</p></details>
+        <details><summary>为什么不能把管理端口直接暴露公网？</summary><p>本地管理接口用于受信任环境，配置可能含 Cookie 或其他凭据。路由器端口映射并不等于完成身份认证；远程访问应通过 VPN 或额外具备认证与访问控制的网关。</p></details>
+        <details><summary>两个发行包都需要下载吗？</summary><p>不需要。普通 Windows 使用 Tk 便携版；偏好浏览器控制台选择 Web Portable。两种客户端遵循同一套 Server 业务状态设计。</p></details>
+      </div>
+    </section>
+
+    <section class="security container" aria-label="安全注意事项">
       <strong>安全提示</strong>
       <p>Cookie、SESSDATA、bili_jct 等登录凭据不应上传到公开仓库或暴露到公网。默认本地管理服务不应直接作为公网服务使用。</p>
     </section>
