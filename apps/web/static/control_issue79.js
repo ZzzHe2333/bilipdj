@@ -118,14 +118,16 @@
             return split < 0 ? { id: text, content: '' } : { id: text.slice(0, split), content: text.slice(split + 1) };
           });
       const header = body.closest('table')?.querySelector('thead tr');
-      if (header) header.innerHTML = '<th>#</th><th>用户名</th><th>内容</th><th>最近操作</th><th>操作</th>';
+      if (header) header.innerHTML = '<th>#</th><th>用户名</th><th>来源平台</th><th>内容</th><th>最近操作</th><th>操作</th>';
       if (queueObserver) queueObserver.disconnect();
       body.innerHTML = entries.map((entry, i) => {
         const username = String(entry.id ?? entry.username ?? '').trim();
         const content = String(entry.content ?? '').trim();
         const last = String(entry.last_operation_at ?? entry.updated_at ?? '');
-        return `<tr draggable="true" data-queue-row="${i + 1}" class="${i === 0 ? 'queue-row-active' : 'queue-row-waiting'}"><td><span class="queue-drag-handle" title="拖动排序">⇅</span> ${i + 1}</td><td><strong class="queue-name">${esc(username)}</strong><span class="queue-state-label ${i === 0 ? 'in-progress' : 'waiting'}">${i === 0 ? '进行中' : '等待中'}</span></td><td>${esc(content || '—')}</td><td class="muted">${esc(last)}</td><td class="actions">${i === 0 ? '<button class="button mini" data-q="done" data-i="1">完成</button>' : ''} <button class="button mini ghost" data-q="top" data-i="${i + 1}">置顶</button> <button class="button mini ghost" data-q="up" data-i="${i + 1}">↑</button> <button class="button mini ghost" data-q="down" data-i="${i + 1}">↓</button> <button class="button mini ghost" data-issue79-edit="${i + 1}" data-username="${esc(username)}" data-content="${esc(content)}">编辑</button> <button class="button mini danger" data-q="delete" data-i="${i + 1}">删除</button></td></tr>`;
-      }).join('') || '<tr><td colspan="5" class="muted">当前队列为空</td></tr>';
+        const platform = String(entry.platform || '').trim().toLowerCase();
+        const source = ({bilibili:'B站',douyin:'抖音',huya:'虎牙',kuaishou:'快手',youtube:'YouTube',twitch:'Twitch',manual:'手动'})[platform] || platform || '历史未知';
+        return `<tr draggable="true" data-queue-row="${i + 1}" class="${i === 0 ? 'queue-row-active' : 'queue-row-waiting'}"><td><span class="queue-drag-handle" title="拖动排序">⇅</span> ${i + 1}</td><td><strong class="queue-name">${esc(username)}</strong><span class="queue-state-label ${i === 0 ? 'in-progress' : 'waiting'}">${i === 0 ? '进行中' : '等待中'}</span></td><td class="muted">${esc(source)}</td><td>${esc(content || '—')}</td><td class="muted">${esc(last)}</td><td class="actions">${i === 0 ? '<button class="button mini" data-q="done" data-i="1">完成</button>' : ''} <button class="button mini ghost" data-q="top" data-i="${i + 1}">置顶</button> <button class="button mini ghost" data-q="up" data-i="${i + 1}">↑</button> <button class="button mini ghost" data-q="down" data-i="${i + 1}">↓</button> <button class="button mini ghost" data-issue79-edit="${i + 1}" data-username="${esc(username)}" data-content="${esc(content)}">编辑</button> <button class="button mini danger" data-q="delete" data-i="${i + 1}">删除</button></td></tr>`;
+      }).join('') || '<tr><td colspan="6" class="muted">当前队列为空</td></tr>';
       setStatus('queue-status', `当前 ${Number(payload.size ?? entries.length)} 人`);
     } catch (error) {
       setStatus('queue-status', `读取队列失败：${error.message}`, false);

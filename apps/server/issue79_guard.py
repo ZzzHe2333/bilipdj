@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import threading
 import urllib.request
 from http import HTTPStatus
@@ -439,7 +440,10 @@ def install_issue79_guard(server_module: Any) -> bool:
                 if qm is None:
                     self._write_json({"status": "error", "message": "queue_manager not ready"}, status=503)
                     return
-                current = qm.insert_item(max(0, after), entry)
+                source = str(payload.get("platform", "manual") or "manual").strip().lower()
+                if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{1,39}", source):
+                    source = "manual"
+                current = qm.insert_item(max(0, after), entry, platform=source)
                 entries = qm.get_queue_entries()
                 self._write_json({"status": "ok", "queue": current, "entries": entries, "size": len(current)})
                 return

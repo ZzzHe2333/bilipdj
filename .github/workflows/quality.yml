@@ -100,6 +100,9 @@ jobs:
         run: python .github/ci/issue262_six_bug_and_scripts_guard.py
       - name: Validate persistent multi-platform danmu activation
         run: python .github/ci/issue283_multi_platform_guard.py
+      - name: Validate unified multi-platform queue and archives
+        timeout-minutes: 3
+        run: timeout --signal=SIGINT --kill-after=5s 90s python -u .github/ci/issue303_shared_queue_guard.py
       - name: Validate gh-proxy update download fallbacks
         run: python .github/ci/issue285_gh_proxy_update_guard.py
       - name: Validate update page cleanup and updater resume
