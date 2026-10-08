@@ -24,6 +24,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from apps.versioning import same_release_version
+from apps.update_download_source import official_url_from_accelerated
 
 WEB_PACKAGE_KEY = "web-portable-x64"
 MAX_ARCHIVE_MEMBERS = 20_000
@@ -309,53 +310,74 @@ def _bundle_html() -> Path:
     return candidates[0]
 
 
-def _download(url: str, target: Path, *, expected_size: int, state: ProgressState, start_pct: int, end_pct: int, label: str) -> None:
+def _download(
+    url: str, target: Path, *, expected_size: int, state: ProgressState,
+    start_pct: int, end_pct: int, label: str, expected_sha256: str = "",
+) -> None:
+    """Download a hash-pinned asset; fall back to GitHub after proxy failure."""
     target.parent.mkdir(parents=True, exist_ok=True)
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/octet-stream"})
-    downloaded = 0
-    started = time.monotonic()
-    try:
-        with urllib.request.urlopen(req, timeout=45) as response, target.open("wb") as handle:
-            total = int(response.headers.get("Content-Length", "0") or 0) or int(expected_size or 0)
-            while True:
-                chunk = response.read(1024 * 256)
-                if not chunk:
-                    break
-                handle.write(chunk)
-                downloaded += len(chunk)
-                elapsed = max(0.001, time.monotonic() - started)
-                ratio = downloaded / total if total > 0 else 0
-                state.set(stage="downloading", percent=start_pct + int((end_pct - start_pct) * min(1.0, ratio)),
-                          current_file=label, downloaded=downloaded, total=total, speed=int(downloaded / elapsed),
-                          message=f"正在下载 {label}")
-    except urllib.error.HTTPError as exc:
-        raise WebUpdaterError(f"下载 {label} 失败：HTTP {exc.code}") from exc
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise WebUpdaterError(f"下载 {label} 失败：{exc}") from exc
-    if expected_size > 0 and downloaded != expected_size:
-        raise WebUpdaterError(f"{label} 下载大小不一致：预期 {expected_size}，实际 {downloaded}")
+    official = official_url_from_accelerated(url)
+    candidates = (url, official) if official != url else (url,)
+    last_error: Exception | None = None
+    for index, candidate in enumerate(candidates):
+        downloaded = 0
+        started = time.monotonic()
+        try:
+            req = urllib.request.Request(candidate, headers={"User-Agent": USER_AGENT, "Accept": "application/octet-stream"})
+            with urllib.request.urlopen(req, timeout=45) as response, target.open("wb") as handle:
+                mime = str(response.headers.get("Content-Type", "") or "").lower()
+                if "text/html" in mime:
+                    raise WebUpdaterError(f"{label} 返回了网页而不是更新资源")
+                total = int(response.headers.get("Content-Length", "0") or 0) or int(expected_size or 0)
+                while True:
+                    chunk = response.read(1024 * 256)
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+                    downloaded += len(chunk)
+                    elapsed = max(0.001, time.monotonic() - started)
+                    ratio = downloaded / total if total > 0 else 0
+                    state.set(stage="downloading", percent=start_pct + int((end_pct - start_pct) * min(1.0, ratio)),
+                              current_file=label, downloaded=downloaded, total=total, speed=int(downloaded / elapsed),
+                              message=f"正在下载 {label}" + ("（代理失败后尝试 GitHub 官方）" if index else ""))
+            if expected_size > 0 and downloaded != expected_size:
+                raise WebUpdaterError(f"{label} 下载大小不一致：预期 {expected_size}，实际 {downloaded}")
+            if expected_sha256 and _sha256(target).lower() != expected_sha256.strip().lower():
+                raise WebUpdaterError(f"{label} SHA-256 校验失败")
+            return
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, ValueError, WebUpdaterError) as exc:
+            last_error = exc
+            target.unlink(missing_ok=True)
+            if index + 1 < len(candidates):
+                state.set(message=f"第三方加速下载失败（{exc}），正在尝试 GitHub 官方…")
+    raise WebUpdaterError(f"下载 {label} 失败：{last_error}")
 
 
-def _download_range(url: str, offset: int, size: int) -> bytes:
+def _download_range(url: str, offset: int, size: int, *, expected_sha256: str = "") -> bytes:
+    """Validate HTTP 206 and chunk integrity before considering a fallback."""
     if size == 0:
         return b""
     end = offset + size - 1
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/octet-stream", "Range": f"bytes={offset}-{end}"})
-    try:
-        with urllib.request.urlopen(req, timeout=45) as response:
-            status = int(getattr(response, "status", 200) or 200)
-            crange = str(response.headers.get("Content-Range", "") or "")
-            if status != 206 or not crange.lower().startswith(f"bytes {offset}-{end}/".lower()):
-                raise WebUpdaterError("CDN/代理不支持可靠的 HTTP Range 增量下载，请改用全量更新")
-            data = response.read(size + 1)
-    except urllib.error.HTTPError as exc:
-        raise WebUpdaterError(f"增量 Range 下载失败：HTTP {exc.code}") from exc
-    except (urllib.error.URLError, TimeoutError) as exc:
-        raise WebUpdaterError(f"增量 Range 下载失败：{exc}") from exc
-    if len(data) != size:
-        raise WebUpdaterError("增量 Range 返回长度不匹配")
-    return data
-
+    official = official_url_from_accelerated(url)
+    candidates = (url, official) if official != url else (url,)
+    last_error: Exception | None = None
+    for candidate in candidates:
+        try:
+            req = urllib.request.Request(candidate, headers={"User-Agent": USER_AGENT, "Accept": "application/octet-stream", "Range": f"bytes={offset}-{end}"})
+            with urllib.request.urlopen(req, timeout=45) as response:
+                status = int(getattr(response, "status", 200) or 200)
+                crange = str(response.headers.get("Content-Range", "") or "")
+                if status != 206 or not crange.lower().startswith(f"bytes {offset}-{end}/".lower()):
+                    raise WebUpdaterError("CDN/代理不支持可靠的 HTTP Range 增量下载，请改用全量更新")
+                data = response.read(size + 1)
+            if len(data) != size:
+                raise WebUpdaterError("增量 Range 返回长度不匹配")
+            if expected_sha256 and hashlib.sha256(data).hexdigest().lower() != expected_sha256.strip().lower():
+                raise WebUpdaterError("增量 Range 片段 SHA-256 校验失败")
+            return data
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, ValueError, WebUpdaterError) as exc:
+            last_error = exc
+    raise WebUpdaterError(f"增量 Range 下载失败：{last_error}")
 
 def _terminate_pid(pid: int) -> None:
     if pid <= 0 or pid == os.getpid():
@@ -463,7 +485,8 @@ def _full_update(request: dict[str, Any], state: ProgressState, work: Path) -> N
         raise WebUpdaterError("缺少 Web 完整包元数据")
     zip_path = work / str(package.get("filename", "web-update.zip"))
     _download(str(package.get("url", "")), zip_path, expected_size=int(package.get("size", 0) or 0), state=state,
-              start_pct=3, end_pct=56, label=zip_path.name)
+              start_pct=3, end_pct=56, label=zip_path.name,
+              expected_sha256=str(package.get("sha256", "")))
     state.set(stage="verifying", percent=58, message="正在校验完整更新包 SHA-256…")
     _verify(zip_path, str(package.get("sha256", "")), "完整更新包")
     staging = Path(request["app_dir"]).resolve().parent / f".{Path(request['app_dir']).name}.web-update-staging"
@@ -550,7 +573,8 @@ def _incremental_update(request: dict[str, Any], state: ProgressState, work: Pat
         raise WebUpdaterError("Web 增量资源不是 HTTP Range 格式")
     manifest_path = work / "web-files.json"
     _download(str(manifest_asset.get("url", "")), manifest_path, expected_size=int(manifest_asset.get("size", 0) or 0),
-              state=state, start_pct=3, end_pct=7, label="逐文件清单")
+              state=state, start_pct=3, end_pct=7, label="逐文件清单",
+              expected_sha256=str(manifest_asset.get("sha256", "")))
     _verify(manifest_path, str(manifest_asset.get("sha256", "")), "逐文件清单")
     files, removed = _load_file_manifest(manifest_path, request, int(pack_asset.get("size", 0) or 0))
     app_dir = Path(request["app_dir"]).resolve()
@@ -574,7 +598,8 @@ def _incremental_update(request: dict[str, Any], state: ProgressState, work: Pat
     done = 0; started = time.monotonic()
     for relative in needed:
         metadata = files[relative]
-        packed = _download_range(str(pack_asset.get("url", "")), int(metadata["offset"]), int(metadata["packed_size"]))
+        packed = _download_range(str(pack_asset.get("url", "")), int(metadata["offset"]), int(metadata["packed_size"]),
+                                 expected_sha256=str(metadata["packed_sha256"]))
         if hashlib.sha256(packed).hexdigest().lower() != str(metadata["packed_sha256"]):
             raise WebUpdaterError(f"增量片段校验失败：{relative}")
         raw = packed if metadata["compression"] == "store" else zlib.decompress(packed)

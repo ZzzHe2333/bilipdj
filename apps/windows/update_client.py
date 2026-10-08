@@ -12,6 +12,8 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+
+from apps.update_download_source import official_url_from_accelerated
 from typing import Callable
 
 GITHUB_REPOSITORY = "ZzzHe2333/bilipdj"
@@ -384,7 +386,17 @@ def prepare_release_download(
             expected_size=release.zip_asset.size,
             progress=progress,
         )
-        actual_digest = verify_sha256(zip_path, expected_digest)
+        try:
+            actual_digest = verify_sha256(zip_path, expected_digest)
+        except UpdateError:
+            # A proxy may return a full-sized HTML/error payload or corrupt ZIP.
+            # Keep the trusted manifest digest and retry only the original
+            # GitHub Release asset, then verify again before invoking the updater.
+            official_url = official_url_from_accelerated(release.zip_asset.download_url)
+            if official_url == release.zip_asset.download_url:
+                raise
+            download_file(official_url, zip_path, expected_size=release.zip_asset.size, progress=progress)
+            actual_digest = verify_sha256(zip_path, expected_digest)
         if not checksum_path.exists():
             checksum_path.write_text(f"{expected_digest}  {release.zip_asset.name}\n", encoding="ascii")
         return PreparedUpdate(

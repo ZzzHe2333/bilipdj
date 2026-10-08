@@ -39,10 +39,28 @@ def is_github_release_download_url(url: str) -> bool:
         parsed = urlsplit(text)
     except ValueError:
         return False
-    if parsed.scheme.lower() != "https" or (parsed.hostname or "").lower() != "github.com":
+    try:
+        permitted = (
+            parsed.scheme.lower() == "https"
+            and (parsed.hostname or "").lower() == "github.com"
+            and parsed.username is None
+            and parsed.password is None
+            and parsed.port is None
+            and not parsed.fragment
+        )
+    except ValueError:
         return False
-    path = parsed.path.lower()
-    return "/releases/" in path and "/download/" in path
+    if not permitted:
+        return False
+    # Only an actual GitHub release asset under /owner/repo/releases/download.
+    # A lookalike path, credentials, or nonstandard authority must never be proxied.
+    parts = parsed.path.split("/")
+    return (
+        len(parts) == 7
+        and bool(parts[1]) and bool(parts[2])
+        and parts[3:5] == ["releases", "download"]
+        and bool(parts[5]) and bool(parts[6])
+    )
 
 
 def rewrite_download_url(url: str, source: Any) -> str:
