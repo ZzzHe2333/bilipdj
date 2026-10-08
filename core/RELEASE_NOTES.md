@@ -1,30 +1,36 @@
-# 弹幕排队姬 v3.0.21 正式版
+# 弹幕排队姬 v3.0.22 正式版
 
-本版基于 **v3.0.20 正式版**，合并 **PR #295**：参考 [linux-do/cdk](https://github.com/linux-do/cdk) 的设计语言，对 BiliPDJ **Web 管理界面**进行外观改版。业务功能和对外接口保持不变。
+本版基于 **v3.0.21 正式版**，重点发布 **B站/抖音等多平台共用同一活动排队存档** 的修复（Issue [#303](https://github.com/ZzzHe2333/bilipdj/issues/303)、PR [#304](https://github.com/ZzzHe2333/bilipdj/pull/304)）。同时收录 v3.0.21 之后已合并的 Web 直播控制台、Docker 部署及双 UI 维护改进。
 
-## 本次更新
+## 主要修复：多平台统一队列和存档
 
-- **Web 控制台视觉重做（#294，PR #295）**：更新顶部品牌区、侧边导航与分组、页面标题、卡片、按钮、输入框、标签页、表格和运行状态等控件，采用中性配色、圆角及轻量阴影。
-- **管理子页面统一**：账号连接与备份配置、扫码登录、插件动态配置页面适配同一风格，包含响应式布局、系统深浅色偏好与减少动态效果设置。
-- **功能与展示兼容**：保留原有控制台导航、表单 ID、JavaScript 业务行为、Server API 和主题自定义能力；`/index` OBS 透明队列页面及其展示样式不变。
-- **不引入额外前端运行依赖**：继续使用 Web 原生 HTML / CSS / JavaScript，不引入 Next.js/React。
-- **此前功能继续保留**：Windows Tk 软件更新/第三方可选下载加速与 SHA-256 校验、独立更新器与启动进度窗口、多平台弹幕 Relay、礼物插队、队列管理及 WebDAV/本地/SMB 设置备份。
+- **真正共用一个队列、一个当前存档槽位：** 同时激活 Bilibili、抖音及其他已接入 DanmuEvent 的弹幕平台时，事件进入同一 QueueManager 和活动 CSV 存档，Web、Windows Tk、OBS 查看相同队列。
+- **存档可追溯来源：** `queue_archive_slot_N.csv` 新增第 5 列 `platform`，记录每条排队来源；人工添加标记为 `manual`。历史 2–4 列 CSV 可继续读取，缺失来源保持空值，不误认作指定平台。
+- **同名不同平台分别排队：** 对相同昵称按来源平台区分，避免误判重复或误取消。移动、编辑、删除、插队、清空、切档及恢复均保留来源。
+- **并发存档可靠性：** 独立的归档写锁协调快照读取、写盘和广播，避免多路弹幕同时操作时旧快照覆盖新存档，并修正清空竞态及回归过程中发现的锁顺序死锁。
+- **展示兼容：** Web 与 Tk 的管理队列显示来源平台，OBS 透明排队层仍只显示用户名、不增加平台前缀；Web“下一位”撤销保留原条目来源。
 
-## 发行包及更新资源
+## 本版收录的其他改进
 
-本次发布以下 x64 便携包，以及各自逐文件清单、差量资源和 SHA-256 校验文件：
+- **Web 直播控制台和 OBS 预览（#298）：** 队列优先、连接状态、快速下一位/排序、紧凑模式，以及 OBS 背景与极端数据模拟预览；保留既有 API 和双端功能契约。
+- **Web 官网与上手体验（#298）：** 最新版下载入口、操作步骤、常见问题和主题可读性改进。
+- **Docker Web 部署（#301 / PR #302）：** 使用既有 Web 界面与 Server，完善持久化、容器隔离、安全边界及 Docker Compose 验收；不单独开发第三套 UI。
+- **双 UI 维护（#299 / PR #300）：** Windows Tk 与 Web 独立保留并共同维护，服务端作为队列和配置的单一真实来源。
+- 继承 v3.0.21 的 Web 控制台视觉改版、跨平台弹幕、礼物规则、更新器与配置备份能力。
 
-- **Windows Tk 便携版：** [BiliPDJ-v3.0.21-Windows-Tk-Portable-x64.zip](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.21/BiliPDJ-v3.0.21-Windows-Tk-Portable-x64.zip)
-- **Web 便携版：** [BiliPDJ-v3.0.21-Web-Portable-x64.zip](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.21/BiliPDJ-v3.0.21-Web-Portable-x64.zip)
+## 下载及发行资源
 
-升级器使用的其他文件包括 `Windows-Tk-files.json`、`Windows-Tk-Incremental-x64.pack`、`Web-files.json`、`Web-Incremental-x64.pack`、`update-manifest.json` 及对应 `*.sha256`。**普通用户无需手动下载**这些增量清单与校验资源，只需选择适用的便携包。
+- **Windows Tk x64 便携包：** [BiliPDJ-v3.0.22-Windows-Tk-Portable-x64.zip](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.22/BiliPDJ-v3.0.22-Windows-Tk-Portable-x64.zip)
+- **Web x64 便携包：** [BiliPDJ-v3.0.22-Web-Portable-x64.zip](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.22/BiliPDJ-v3.0.22-Web-Portable-x64.zip)
 
-## 验证与兼容
+同一 Release 另附 `Windows-Tk-files.json`、`Windows-Tk-Incremental-x64.pack`、`Web-files.json`、`Web-Incremental-x64.pack`、`update-manifest.json` 及对应 `*.sha256`，供全量或增量更新使用。**普通用户无需手动下载**这些清单及增量资源，只需选择适用的便携 ZIP；升级前请保留配置及 CSV 排队存档备份。
 
-- PR #295 的 Web 页面静态功能契约检查 37/37 通过；Web Build、Server、Quality/API 等 CI 通过。发布包的最终构建和校验以本 Release 的 GitHub Actions 结果为准。
-- 本次为纯 Web 管理界面视觉更新，Windows Tk 界面和 OBS 透明展示保留原有样式。
-- 真实直播间互动、不同浏览器和操作系统的视觉细节仍以实际环境为准。
+## 验证与兼容边界
+
+- 多平台统一队列 PR #304 通过 Quality/API、Server、Web 构建、Windows Tk 与 Web Portable 构建、Docker Compose，以及模拟双平台事件、同名用户、并发入队、CSV 兼容和重启读档回归。
+- 本正式版构建的最终结果以 v3.0.22 发布工作流及 Release 资产校验为准。
+- **尚未在用户真实同时开播的 B站和抖音房间执行端到端验收**；模拟弹幕通过不等于所有网络节点、账号鉴权与直播间环境均已实测。
 
 ## 发布状态
 
-**正式版（Release，非 Pre-release）**。标签：`v3.0.21`，补丁号从 3.0.20 更新到 3.0.21，不带测试版后缀。
+**正式版（GitHub Release，不是 Pre-release）**，标签 `v3.0.22`，版本从 `3.0.21` 仅升级补丁号至 `3.0.22`。
