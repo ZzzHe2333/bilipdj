@@ -396,15 +396,15 @@ def install_issue79_guard(server_module: Any) -> bool:
                         name = str(value or "").strip().lower()
                         if name in SUPPORTED_ACTIVE_PLATFORMS and name not in active:
                             active.append(name)
-                config = server_module.load_config()
-                config["active_platforms"] = active
-                if active:
-                    config["platform"] = active[0]
-                douyin = dict(config.get("douyin", {}) or {})
-                douyin["enabled"] = "douyin" in active
-                config["douyin"] = douyin
-                server_module.save_config(config)
-                self.server.runtime_config = server_module.load_config()
+                # Do not rewrite the parameter-editor selection (platform) or
+                # per-platform connection details when toggling active relays.
+                # Read/modify/write atomically across the GUI and backend processes.
+                with server_module.config_io_transaction():
+                    config = server_module.load_config()
+                    config["active_platforms"] = active
+                    server_module.save_config(config)
+                    updated = server_module.load_config()
+                self.server.runtime_config = updated
                 server_module._ensure_danmu_relay(self.server, reconnect=True)
                 self._write_json(_platform_payload(server_module, self.server))
                 return

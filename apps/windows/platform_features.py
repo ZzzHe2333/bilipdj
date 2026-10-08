@@ -136,7 +136,7 @@ def _install_active_platform_tab(panel: Any, module: Any) -> None:
     module.ttk.Label(frame, text="激活平台", font=("Microsoft YaHei UI", 15, "bold")).grid(row=0, column=0, sticky="w")
     module.ttk.Label(
         frame,
-        text="可同时接收多个平台的弹幕并进入同一个排队系统。目前每个平台只允许配置一个直播间，不支持单个平台同时监听多个直播间。",
+        text="可同时接收多个平台的弹幕并进入同一个排队系统。“平台参数 → 当前平台”仅切换参数编辑视图，不会改变这里的激活选择。每个平台目前只允许配置一个直播间。",
         wraplength=790,
         justify="left",
     ).grid(row=1, column=0, sticky="w", pady=(6, 16))

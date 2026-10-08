@@ -291,6 +291,8 @@ def _parse_scalar(value: str) -> Any:
         return value.lower() == "true"
     if value.lower() in {"null", "none"}:
         return None
+    if value == "[]":
+        return []
     if (value.startswith('"') and value.endswith('"')) or (
         value.startswith("'") and value.endswith("'")
     ):
@@ -1466,6 +1468,20 @@ def save_config(config: dict[str, Any], *, preserve_legacy_api_schema: bool | No
     server = normalize_server_config(config.get("server", {}))
     config["server"] = server
     platform_name = _normalize_platform_name(config.get("platform", DEFAULT_PLATFORM))
+    # The selected parameter-editing platform is independent of the global
+    # list of active danmu relays.  Missing means a legacy single-platform config;
+    # an explicit empty list means no relays at all.
+    raw_active = config.get("active_platforms")
+    active_platforms_block = ""
+    if isinstance(raw_active, (list, tuple)):
+        active = list(dict.fromkeys(
+            name for value in raw_active
+            if (name := str(value or "").strip().lower()) in SUPPORTED_RUNTIME_PLATFORMS
+        ))
+        active_platforms_block = (
+            "active_platforms:\n" + "\n".join(f"  - {_yaml_quote_string(name)}" for name in active)
+            if active else "active_platforms: []"
+        )
     bilibili_cfg = config.get("bilibili", {})
     douyin_cfg = config.get("douyin", {})
     reserved_platform_cfgs = {
@@ -1592,7 +1608,7 @@ server:
   lan_listen: {'true' if bool(server.get('lan_listen', False)) else 'false'}
 
 platform: {platform_name}
-
+{active_platforms_block}
 {bilibili_section_name}:
   roomid: {_to_int(bilibili_cfg.get('roomid', 0), 0)}
   uid: {_to_int(bilibili_cfg.get('uid', 0), 0)}

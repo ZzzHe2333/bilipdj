@@ -91,6 +91,8 @@ jobs:
         run: python .github/ci/issue260_five_bug_guard.py
       - name: Validate issue 262 bug fixes and scripts decoupling
         run: python .github/ci/issue262_six_bug_and_scripts_guard.py
+      - name: Validate persistent multi-platform danmu activation
+        run: python .github/ci/issue283_multi_platform_guard.py
       - name: Validate Huya protocol framing
         run: python apps/server/huya_protocol_guard.py
       - name: Validate red TV chat parser
