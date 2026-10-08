@@ -24,20 +24,19 @@ def check_release_policy() -> None:
     assert "ncipollo/release-action" not in build, "build job must never publish a GitHub Release"
     assert "contents: write" not in build, "build job must not receive repository write permission"
 
-    # Three explicit paths: manual dispatch, version tag, or an explicitly
-    # titled release commit merged into the production branch. Ordinary
-    # branch pushes and pull requests must never publish.
+    # Only explicit dispatch, a version tag, or a release-titled push on now may publish.
+    # Ordinary pushes and pull requests remain build-only.
     expected_if = (
-        "if: >-\\n"
-        "      github.event_name == 'workflow_dispatch' ||\\n"
-        "      startsWith(github.ref, 'refs/tags/v') ||\\n"
+        "if: >-\n"
+        "      github.event_name == 'workflow_dispatch' ||\n"
+        "      startsWith(github.ref, 'refs/tags/v') ||\n"
         "      (github.event_name == 'push' && github.ref == 'refs/heads/now' "
         "&& startsWith(github.event.head_commit.message, 'release: v'))"
     )
-    assert expected_if.replace("\\\\n", "\\n") in release, "release job must use only explicitly authorized release triggers"
+    assert expected_if in release, "release job must use only explicitly authorized release triggers"
     assert "RELEASE_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}" in build
     assert 'TAG_NAME="${BASH_REMATCH[1]}"' in build
-    assert "EXPLICIT_RELEASE=true\\n            PRERELEASE=false" in build
+    assert "EXPLICIT_RELEASE=true\n            PRERELEASE=false" in build
     assert "needs: build-portable-bundles" in release, "release must consume the validated build job"
     assert "permissions:\n      contents: write" in release, "write permission must exist only inside the release job"
     assert "actions/download-artifact@v4" in release, "release job must publish validated build artifacts"
