@@ -63,12 +63,15 @@ def check_dockerfile_copy_scope() -> None:
     assert "COPY .\n" not in normalized
     assert "COPY ./ " not in normalized
     for required in (
-        "COPY requirements.txt /app/requirements.txt",
+        "COPY apps/server/requirements.txt /app/requirements.txt",
         "COPY VERSION README.md /app/",
         "COPY core /app/core",
-        "COPY apps /app/apps",
+        "COPY apps/__init__.py apps/update_download_source.py apps/update_workspace.py apps/versioning.py /app/apps/",
+        "COPY apps/server /app/apps/server",
+        "COPY apps/web/static /app/apps/web/static",
     ):
         assert required in text, f"missing expected selective copy: {required}"
+    assert "COPY apps /app/apps" not in text, "Docker should not package Windows application code"
 
 
 def check_ci_wiring() -> None:
