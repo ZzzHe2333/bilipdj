@@ -49,8 +49,11 @@ def check_update_page_policy() -> None:
     assert 'RELEASE_CHANNELS = ("发行包", "全部")' in page
     assert 'text="版本范围"' in page
     assert 'tk.StringVar(value="发行包")' in page
-    assert "最近 3 个正式 Release" in page
-    assert "最近 10 个 Release" in page
+    # The release selection limits are still enforced in release_selector,
+    # but the redundant explanatory copy was deliberately removed from UI.
+    assert "RELEASE_ONLY_LIMIT = 3" in source
+    assert "ALL_RELEASE_LIMIT = 10" in source
+    assert "最近 3 个正式 Release" not in page
     assert "_update_channel_combo" in page
     assert "_update_version_combo" in page
 
