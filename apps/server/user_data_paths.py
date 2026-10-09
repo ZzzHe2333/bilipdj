@@ -15,7 +15,7 @@ from pathlib import Path
 
 DATA_FILES = (
     "core/config.yaml", "core/quanxian.yaml", "core/kaiguan.yaml",
-    "core/blacklist.csv", "core/cd", "key", "plugins",
+    "core/blacklist.csv", "core/cd", "key", "plugins", "backup",
     "config.yaml", "quanxian.yaml", "kaiguan.yaml", "blacklist.csv",
     "update-result.json",
     "style.json", "appearance.json", "webdav_backup.json",
@@ -49,6 +49,40 @@ def preferred_root(app_dir: Path, *, platform: str | None = None, environ: dict 
         base = Path(custom).expanduser() if custom and Path(custom).expanduser().is_absolute() else user_home / ".local" / "share"
     return (base / "bilipdj").resolve()
 
+
+
+
+def preferred_state_root(app_dir: Path, *, platform: str | None = None,
+                         environ: dict | None = None, home: Path | None = None) -> Path:
+    """Large mutable data: LocalAppData on Windows, XDG data/macOS Support elsewhere."""
+    env = dict(os.environ if environ is None else environ)
+    root = preferred_root(app_dir, platform=platform, environ=env, home=home)
+    if str(env.get("BILIPDJ_DATA_DIR", "") or "").strip():
+        return root
+    plat = platform if platform is not None else sys.platform
+    if plat == "win32":
+        user_home = Path(home) if home is not None else Path.home()
+        local = Path(env["LOCALAPPDATA"]) if env.get("LOCALAPPDATA") else user_home / "AppData" / "Local"
+        return (local / "bilipdj").resolve()
+    return root
+
+
+def preferred_archive_dir(app_dir: Path, *, platform: str | None = None,
+                          environ: dict | None = None, home: Path | None = None) -> Path:
+    env = dict(os.environ if environ is None else environ)
+    root = preferred_state_root(app_dir, platform=platform, environ=env, home=home)
+    if str(env.get("BILIPDJ_DATA_DIR", "") or "").strip():
+        return root / "core" / "cd"
+    return root / "archives"
+
+
+def preferred_backup_dir(app_dir: Path, *, platform: str | None = None,
+                         environ: dict | None = None, home: Path | None = None) -> Path:
+    env = dict(os.environ if environ is None else environ)
+    root = preferred_state_root(app_dir, platform=platform, environ=env, home=home)
+    if str(env.get("BILIPDJ_DATA_DIR", "") or "").strip():
+        return root / "backup"
+    return root / "backups"
 
 
 def preferred_log_root(data_root: Path, *, platform: str | None = None, environ: dict | None = None,
@@ -123,8 +157,75 @@ def ask_preference(conflicts: list[tuple[Path, Path]]) -> str:
     raise DataConflictError("存在两份不同的 BiliPDJ 数据；无交互界面时停止迁移，不会覆盖。请在终端设置 BILIPDJ_MIGRATION_CHOICE=user 或 project 后重试。")
 
 
+def _merge_candidates(candidates, dst: Path, *, chooser=None, state_root: Path | None = None):
+    # A source fingerprint is a durable *migration history*, not a live mirror:
+    # editing the new config must not turn a previously migrated old copy into
+    # a fresh conflict every time the application restarts.
+    manifest_file = dst / ".migration-sources.json"
+    try:
+        saved_sources = json.loads(manifest_file.read_text(encoding="utf-8"))
+        if not isinstance(saved_sources, dict):
+            saved_sources = {}
+    except (OSError, ValueError):
+        saved_sources = {}
+    current_sources = dict(saved_sources)
+    manifest_keys = {
+        (src, dest): str(src) + " -> " + str(dest.relative_to(dst)) if dest.is_relative_to(dst) else str(dest)
+        for src, dest in candidates
+    }
+    source_hashes = {(src, dest): _digest(src) for src, dest in candidates}
+    conflict = [
+        (src, dest) for src, dest in candidates
+        if dest.is_file() and _digest(dest) != source_hashes[(src, dest)]
+        and saved_sources.get(manifest_keys[(src, dest)]) != source_hashes[(src, dest)]
+    ]
+    choice = chooser(conflict) if conflict and chooser else (ask_preference(conflict) if conflict else "user")
+    if choice not in ("user", "project"):
+        raise DataConflictError("用户未选择有效的迁移来源")
+    # No overwrites are allowed before the conflict choice is settled.
+    copied = 0
+    for src, dest in candidates:
+        if dest.is_symlink() or src.is_symlink():
+            continue
+        changed_source = saved_sources.get(manifest_keys[(src, dest)]) != source_hashes[(src, dest)]
+        if dest.exists():
+            if choice != "project" or not changed_source or _digest(src) == _digest(dest):
+                current_sources[manifest_keys[(src, dest)]] = source_hashes[(src, dest)]
+                continue
+            # Preserve every replaced target; never overwrite a previous
+            # migration backup with a later (different) configuration.
+            backup_base = dst if dest.is_relative_to(dst) else Path(state_root or dst)
+            backup_dir = backup_base / "migration-backup" / dest.relative_to(backup_base).parent
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            suffix = 0
+            while True:
+                backup = backup_dir / (dest.name + f".before-import-{suffix:04d}")
+                if not backup.exists():
+                    break
+                suffix += 1
+            shutil.copy2(dest, backup)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        temp = dest.with_name("." + dest.name + ".migrating")
+        try:
+            shutil.copy2(src, temp)
+            os.replace(temp, dest)
+        finally:
+            temp.unlink(missing_ok=True)
+        copied += 1
+        current_sources[manifest_keys[(src, dest)]] = source_hashes[(src, dest)]
+    if candidates:
+        manifest_file.parent.mkdir(parents=True, exist_ok=True)
+        temp = manifest_file.with_suffix(".tmp")
+        try:
+            temp.write_text(json.dumps(current_sources, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.replace(temp, manifest_file)
+        finally:
+            temp.unlink(missing_ok=True)
+    return {"copied": copied, "conflicts": len(conflict), "choice": choice}
+
+
 def migrate(app_dir: Path, destination: Path, *, chooser=None, defaults_dir: Path | None = None,
-            portable_layout: bool | None = None):
+            portable_layout: bool | None = None, state_root: Path | None = None):
     """Copy without deleting original data; stage all conflicts before writing."""
     app = Path(app_dir).resolve()
     dst = Path(destination).resolve()
@@ -155,6 +256,10 @@ def migrate(app_dir: Path, destination: Path, *, chooser=None, defaults_dir: Pat
             elif rel.parts[0] == "core" and len(rel.parts) == 2 and rel.parts[1].endswith(".json"):
                 dest_rel = Path(rel.parts[1])
             target = dst / dest_rel
+            if state_root is not None and rel_text == "core/cd":
+                target = Path(state_root) / "archives" / src_rel.relative_to(Path("core/cd"))
+            elif state_root is not None and rel_text == "backup":
+                target = Path(state_root) / "backups" / src_rel.relative_to(Path("backup"))
             if not any(previous_target == target for _, previous_target in candidates):
                 candidates.append((src, target))
     if defaults_dir:
@@ -165,69 +270,28 @@ def migrate(app_dir: Path, destination: Path, *, chooser=None, defaults_dir: Pat
                 target = dst / name
                 if src.is_file() and not src.is_symlink() and not any(t == target for _, t in candidates):
                     candidates.append((src, target))
-    # A source fingerprint is a durable *migration history*, not a live mirror:
-    # editing the new config must not turn a previously migrated old copy into
-    # a fresh conflict every time the application restarts.
-    manifest_file = dst / ".migration-sources.json"
-    try:
-        saved_sources = json.loads(manifest_file.read_text(encoding="utf-8"))
-        if not isinstance(saved_sources, dict):
-            saved_sources = {}
-    except (OSError, ValueError):
-        saved_sources = {}
-    current_sources = dict(saved_sources)
-    manifest_keys = {
-        (src, dest): str(src) + " -> " + str(dest.relative_to(dst))
-        for src, dest in candidates
-    }
-    source_hashes = {(src, dest): _digest(src) for src, dest in candidates}
-    conflict = [
-        (src, dest) for src, dest in candidates
-        if dest.is_file() and _digest(dest) != source_hashes[(src, dest)]
-        and saved_sources.get(manifest_keys[(src, dest)]) != source_hashes[(src, dest)]
-    ]
-    choice = chooser(conflict) if conflict and chooser else (ask_preference(conflict) if conflict else "user")
-    if choice not in ("user", "project"):
-        raise DataConflictError("用户未选择有效的迁移来源")
-    # No overwrites are allowed before the conflict choice is settled.
-    copied = 0
-    for src, dest in candidates:
-        if dest.is_symlink() or src.is_symlink():
-            continue
-        changed_source = saved_sources.get(manifest_keys[(src, dest)]) != source_hashes[(src, dest)]
-        if dest.exists():
-            if choice != "project" or not changed_source or _digest(src) == _digest(dest):
-                current_sources[manifest_keys[(src, dest)]] = source_hashes[(src, dest)]
-                continue
-            # Preserve every replaced target; never overwrite a previous
-            # migration backup with a later (different) configuration.
-            backup_dir = dst / "migration-backup" / dest.relative_to(dst).parent
-            backup_dir.mkdir(parents=True, exist_ok=True)
-            suffix = 0
-            while True:
-                backup = backup_dir / (dest.name + f".before-import-{suffix:04d}")
-                if not backup.exists():
-                    break
-                suffix += 1
-            shutil.copy2(dest, backup)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        temp = dest.with_name("." + dest.name + ".migrating")
-        try:
-            shutil.copy2(src, temp)
-            os.replace(temp, dest)
-        finally:
-            temp.unlink(missing_ok=True)
-        copied += 1
-        current_sources[manifest_keys[(src, dest)]] = source_hashes[(src, dest)]
-    if candidates:
-        manifest_file.parent.mkdir(parents=True, exist_ok=True)
-        temp = manifest_file.with_suffix(".tmp")
-        try:
-            temp.write_text(json.dumps(current_sources, ensure_ascii=False, indent=2), encoding="utf-8")
-            os.replace(temp, manifest_file)
-        finally:
-            temp.unlink(missing_ok=True)
-    return {"copied": copied, "conflicts": len(conflict), "choice": choice}
+    return _merge_candidates(candidates, dst, chooser=chooser, state_root=state_root)
+
+
+def migrate_legacy_local_state(data_root: Path, state_root: Path, *, chooser=None) -> dict:
+    """Copy old Roaming/core/cd and Roaming/backup files into local storage.
+
+    The live Local directory takes precedence in any two-copy conflict until
+    the user explicitly selects the former roaming copy. No files are deleted.
+    """
+    root = Path(data_root).resolve()
+    local = Path(state_root).resolve()
+    if root == local:
+        return {"copied": 0, "conflicts": 0, "choice": "same"}
+    candidates = []
+    for old, current in (("core/cd", "archives"), ("archives", "archives"),
+                         ("backup", "backups"), ("backups", "backups")):
+        prefix = Path(old)
+        for rel, source in _files(root, prefix):
+            dest = local / current / rel.relative_to(prefix)
+            if not any(other_dest == dest for _, other_dest in candidates):
+                candidates.append((source, dest))
+    return _merge_candidates(candidates, root, chooser=chooser, state_root=local)
 
 
 def promote_legacy_archive_settings(data_root: Path) -> None:
