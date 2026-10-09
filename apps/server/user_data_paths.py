@@ -123,7 +123,8 @@ def ask_preference(conflicts: list[tuple[Path, Path]]) -> str:
     raise DataConflictError("存在两份不同的 BiliPDJ 数据；无交互界面时停止迁移，不会覆盖。请在终端设置 BILIPDJ_MIGRATION_CHOICE=user 或 project 后重试。")
 
 
-def migrate(app_dir: Path, destination: Path, *, chooser=None, defaults_dir: Path | None = None):
+def migrate(app_dir: Path, destination: Path, *, chooser=None, defaults_dir: Path | None = None,
+            portable_layout: bool | None = None):
     """Copy without deleting original data; stage all conflicts before writing."""
     app = Path(app_dir).resolve()
     dst = Path(destination).resolve()
@@ -132,9 +133,18 @@ def migrate(app_dir: Path, destination: Path, *, chooser=None, defaults_dir: Pat
     if app in dst.parents or dst in app.parents:
         raise ValueError("数据目录必须与程序目录分离")
     candidates = []
-    # Source development data are under core/; frozen portable settings
-    # also live at the application root.
-    for rel_text in DATA_FILES:
+    # Source runs historically used core/* settings; PyInstaller portable
+    # builds historically used the executable's own directory. When both
+    # exist, choose the authoritative legacy location for that build type.
+    frozen = bool(getattr(sys, "frozen", False)) if portable_layout is None else portable_layout
+    sources = list(DATA_FILES)
+    if frozen:
+        portable_names = {"config.yaml", "quanxian.yaml", "kaiguan.yaml",
+                          "blacklist.csv", "style.json", "appearance.json",
+                          "webdav_backup.json", "gift_compatibility.json",
+                          "language.json"}
+        sources.sort(key=lambda name: (0 if name in portable_names else 1))
+    for rel_text in sources:
         rel = Path(rel_text)
         for src_rel, src in _files(app, rel):
             dest_rel = src_rel
