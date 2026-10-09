@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 if __package__:
-    from .user_data_paths import preferred_root, migrate, seed_client_styles
+    from .user_data_paths import preferred_root, preferred_log_root, migrate, seed_client_styles
 else:
     # Runtime layout has standalone file-loader compatibility probes.
     import importlib.util as _importlib_util
@@ -21,6 +21,7 @@ else:
     _paths = _importlib_util.module_from_spec(_spec)
     _spec.loader.exec_module(_paths)
     preferred_root = _paths.preferred_root
+    preferred_log_root = _paths.preferred_log_root
     migrate = _paths.migrate
     seed_client_styles = _paths.seed_client_styles
 
@@ -224,7 +225,7 @@ def configure_server_runtime_layout(server_module: Any) -> tuple[Path, Path]:
 
     if True:  # Desktop and Docker both use durable user data.
         server_module._YAML_DIR = data_dir
-        server_module.LOG_DIR = data_dir / "log"
+        server_module.LOG_DIR = preferred_log_root(data_dir)
         server_module.PD_DIR = core_dir / "cd"
         server_module.QUEUE_STATE_PATH = server_module.PD_DIR / "queue_archive_state.json"
         server_module.BLACKLIST_PATH = server_module.PD_DIR / "blacklist.csv"
