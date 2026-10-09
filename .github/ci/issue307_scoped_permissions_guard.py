@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import importlib
 import json
+import sys
 import tempfile
 import threading
 from pathlib import Path
 
-backend = importlib.import_module("apps.server.server")
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+backend = importlib.import_module("apps.server.server")
 PERMISSIONS = ("super_admin", "admin", "jianzhang", "member")
 
 
