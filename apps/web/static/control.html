@@ -173,6 +173,17 @@
     </main>
   </div>
 </div>
+<dialog id="storage-conflict-dialog" aria-labelledby="storage-conflict-title" class="permission-dialog">
+  <h2 id="storage-conflict-title">检测到两份 BiliPDJ 数据</h2>
+  <p>项目文件夹和系统用户目录都有存档。未选择前保持项目数据为当前来源，不会自动覆盖两份数据。</p>
+  <p id="storage-conflict-paths" class="permission-hint"></p>
+  <p>选择保存后请<strong>重启 BiliPDJ</strong>，新目录才会生效。</p>
+  <div class="toolbar">
+    <button type="button" class="button" id="storage-use-user">使用系统用户目录</button>
+    <button type="button" class="button ghost" id="storage-use-legacy">使用项目目录</button>
+  </div>
+  <div id="storage-conflict-status" role="status"></div>
+</dialog>
 <script src="support_us.js"></script>
 <script src="control.js"></script>
 <script src="issue167_control_extensions.js"></script>
