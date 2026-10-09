@@ -223,7 +223,19 @@ class SettingsBackupService:
             safety_data, _ = self.build_settings_zip()
             _atomic_write_bytes(safety_path, safety_data)
             try:
-                for name, content in restored.items():
+                # Historical ZIPs contain only unsuffixed styles. Restore those
+                # into both client-specific files unless the archive explicitly
+                # supplies a newer -win/-web variant.
+                apply_files = dict(restored)
+                for old_name in ("style.json", "appearance.json"):
+                    if old_name not in restored:
+                        continue
+                    stem = old_name.removesuffix(".json")
+                    for client in ("win", "web"):
+                        new_name = f"{stem}-{client}.json"
+                        if new_name in paths and new_name not in apply_files:
+                            apply_files[new_name] = restored[old_name]
+                for name, content in apply_files.items():
                     _atomic_write_bytes(paths[name], content)
                     written.append(name)
                 if httpd is not None:
