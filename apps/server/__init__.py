@@ -19,6 +19,7 @@ from . import style_option_guard as _style_option_guard
 from . import web_queue_layout as _web_queue_layout
 from . import websocket_performance_guard as _websocket_performance_guard
 from .runtime_layout import data_dir_overridden as _data_dir_overridden
+from .user_data_paths import preferred_log_root as _preferred_log_root
 from .runtime_layout import ensure_runtime_layout as _ensure_runtime_layout
 from .runtime_layout import resolve_data_dir as _resolve_data_dir
 
@@ -92,7 +93,7 @@ def configure_runtime_paths(module: Any = server) -> Any:
     module.BUNDLE_UI_DIR = bundled_web
     module.UI_DIR = ui_dir
     module.CONFIG_PATH = runtime_core_dir / "config.yaml"
-    module.LOG_DIR = data_dir / "log"
+    module.LOG_DIR = _preferred_log_root(data_dir)
     module.PD_DIR = runtime_core_dir / "cd"
     module.QUEUE_STATE_PATH = module.PD_DIR / "queue_archive_state.json"
     module.BLACKLIST_PATH = runtime_core_dir / "blacklist.csv"
