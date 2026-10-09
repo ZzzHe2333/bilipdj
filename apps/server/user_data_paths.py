@@ -10,6 +10,7 @@ import os
 import shutil
 import sys
 import hashlib
+import json
 from pathlib import Path
 
 DATA_FILES = (
@@ -121,7 +122,20 @@ def migrate(app_dir: Path, destination: Path, *, chooser=None, defaults_dir: Pat
                 if src.is_file() and not src.is_symlink() and not any(t == target for _, t in candidates):
                     candidates.append((src, target))
     conflict = [(a, b) for a, b in candidates if b.exists() and a.is_file() and b.is_file() and _digest(a) != _digest(b)]
-    choice = chooser(conflict) if conflict and chooser else (ask_preference(conflict) if conflict else "user")
+    # Remember an explicit decision for unchanged source/target fingerprints;
+    # do not repeatedly interrupt startup while old portable files are retained.
+    decision_file = dst / ".migration-decision.json"
+    signature = {
+        str(b.relative_to(dst)): [_digest(a), _digest(b)] for a, b in conflict
+    }
+    try:
+        previous = json.loads(decision_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        previous = {}
+    old_choice = previous.get("choice") if previous.get("signature") == signature else None
+    choice = old_choice if old_choice in ("user", "project") else (
+        chooser(conflict) if conflict and chooser else (ask_preference(conflict) if conflict else "user")
+    )
     if choice not in ("user", "project"):
         raise DataConflictError("用户未选择有效的迁移来源")
     copied = 0
@@ -143,6 +157,14 @@ def migrate(app_dir: Path, destination: Path, *, chooser=None, defaults_dir: Pat
         shutil.copy2(src, temp)
         os.replace(temp, dest)
         copied += 1
+    if conflict:
+        # Save what was chosen, along with the CURRENT fingerprints so that
+        # the decision remains valid on subsequent launches.
+        current = {str(b.relative_to(dst)): [_digest(a), _digest(b)] for a, b in conflict}
+        decision_file.parent.mkdir(parents=True, exist_ok=True)
+        temp = decision_file.with_suffix(".tmp")
+        temp.write_text(json.dumps({"choice": choice, "signature": current}, indent=2), encoding="utf-8")
+        temp.replace(decision_file)
     return {"copied": copied, "conflicts": len(conflict), "choice": choice}
 
 
