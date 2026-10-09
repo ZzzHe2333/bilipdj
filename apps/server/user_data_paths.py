@@ -281,14 +281,14 @@ def migrate_legacy_local_state(data_root: Path, state_root: Path, *, chooser=Non
     """
     root = Path(data_root).resolve()
     local = Path(state_root).resolve()
-    if root == local:
-        return {"copied": 0, "conflicts": 0, "choice": "same"}
     candidates = []
     for old, current in (("core/cd", "archives"), ("archives", "archives"),
                          ("backup", "backups"), ("backups", "backups")):
         prefix = Path(old)
         for rel, source in _files(root, prefix):
             dest = local / current / rel.relative_to(prefix)
+            if source == dest:
+                continue
             if not any(other_dest == dest for _, other_dest in candidates):
                 candidates.append((source, dest))
     return _merge_candidates(candidates, root, chooser=chooser, state_root=local)
