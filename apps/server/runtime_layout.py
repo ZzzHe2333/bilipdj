@@ -8,7 +8,21 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .user_data_paths import preferred_root, migrate, seed_client_styles
+if __package__:
+    from .user_data_paths import preferred_root, migrate, seed_client_styles
+else:
+    # Runtime layout has standalone file-loader compatibility probes.
+    import importlib.util as _importlib_util
+    _spec = _importlib_util.spec_from_file_location(
+        "bilipdj_user_data_paths_probe", Path(__file__).resolve().with_name("user_data_paths.py")
+    )
+    if _spec is None or _spec.loader is None:
+        raise ImportError("Could not load user_data_paths")
+    _paths = _importlib_util.module_from_spec(_spec)
+    _spec.loader.exec_module(_paths)
+    preferred_root = _paths.preferred_root
+    migrate = _paths.migrate
+    seed_client_styles = _paths.seed_client_styles
 
 CORE_CONFIG_FILES = ("config.yaml", "quanxian.yaml", "kaiguan.yaml")
 LEGACY_UPDATE_METADATA_FILES = ("update-result.json",)
