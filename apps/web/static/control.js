@@ -316,13 +316,13 @@
   }
   function loadSettingsBundle() { loadPlatform(); loadGifts(); loadSwitches(); loadBlacklist(); loadStyle(); loadRawConfig(); }
 
-  const permissionRoles = {super_admin: '最高管理员', admin: '管理员', jianzhang: '舰长', member: '成员'};
+  const permissionRoles = {super_admin: '最高管理员', admin: '管理员'};
   const permissionPlatforms = {bilibili: 'Bilibili', douyin: '抖音', huya: '虎牙', youtube: 'YouTube', twitch: 'Twitch'};
   let permissionRows = [], permissionBlacklist = [], editingPermission = -1;
 
   function renderPermissionRows() {
     const list = $('perm-list');
-    list.innerHTML = permissionRows.map((entry, index) => `<button type="button" class="permission-row" data-perm-edit="${index}" aria-label="编辑 ${esc(entry.id)} 的权限"><span class="permission-identity"><strong>${esc(entry.id)}</strong><small>${entry.kind === 'name' ? '历史用户名' : '平台用户 ID'}</small></span><span>${esc(permissionRoles[entry.role] || entry.role)}</span><span>${esc(entry.platforms.length ? entry.platforms.map(p => permissionPlatforms[p] || p).join(' / ') : '全平台')}</span><span>编辑 ›</span></button>`).join('') || '<div class="permission-empty">暂无用户权限，点击右上角「＋ 新增权限」。</div>';
+    list.innerHTML = permissionRows.map((entry, index) => `<button type="button" class="permission-row" data-perm-edit="${index}" aria-label="编辑 ${esc(entry.id)} 的权限"><span class="permission-identity"><strong>${esc(entry.id)}</strong><small>${entry.kind === 'name' ? '历史用户名' : '平台用户 ID'}</small></span><span>${esc(permissionRoles[entry.role] || entry.role)}</span><span>${esc(entry.platforms.length ? entry.platforms.map(p => permissionPlatforms[p] || p).join(' / ') : '全平台')}</span><span>编辑 ›</span></button>`).join('') || '<div class="permission-empty">暂无管理员，点击右上角「＋ 新增管理员」。</div>';
   }
 
   async function loadPermissions() {
@@ -331,17 +331,24 @@
       permissionRows = Array.isArray(payload.entries) ? payload.entries.map(item => ({
         id: String(item.id || ''), kind: item.kind === 'name' ? 'name' : 'id',
         role: item.role, platforms: Array.isArray(item.platforms) ? item.platforms.slice() : []
-      })) : ['super_admin','admin','jianzhang','member'].flatMap(role =>
+      })).filter(item => Object.hasOwn(permissionRoles, item.role)) : ['super_admin','admin'].flatMap(role =>
         (payload[role] || []).map(id => ({id, kind: 'name', role, platforms: []})));
       permissionBlacklist = Array.isArray(payload.blacklist) ? payload.blacklist.slice() : [];
+      // Bilibili-only guards and ordinary members keep their existing name lists.
+      // They are NEVER interpreted as multi-platform administrator entries.
+      for (const role of ['jianzhang', 'member']) {
+        const entries = Array.isArray(payload[role]) ? payload[role] : [];
+        $('perm-legacy-' + role).value = entries.join('\n');
+      }
       renderPermissionRows();
       message('perm-status', `已加载 ${permissionRows.length} 条权限记录。`);
     } catch (error) { message('perm-status', `加载失败：${error.message}`, false); }
   }
 
   async function savePermissions() {
-    const payload = {super_admin: [], admin: [], jianzhang: [], member: [], blacklist: permissionBlacklist.slice(), scoped_entries: []};
-    permissionRows.forEach(entry => {
+    const readLegacyNames = role => [...new Set($('perm-legacy-' + role).value.split(/\r?\n/).map(v => v.trim()).filter(Boolean))];
+    const payload = {super_admin: [], admin: [], jianzhang: readLegacyNames('jianzhang'), member: readLegacyNames('member'), blacklist: permissionBlacklist.slice(), scoped_entries: []};
+    permissionRows.filter(entry => Object.hasOwn(permissionRoles, entry.role)).forEach(entry => {
       if (entry.kind === 'name' && entry.platforms.length === 0) payload[entry.role].push(entry.id);
       else payload.scoped_entries.push({ id: entry.id, kind: entry.kind, role: entry.role, platforms: entry.platforms });
     });
@@ -373,6 +380,7 @@
     const role = $('perm-role').value;
     const platforms = [...document.querySelectorAll('[name="perm-platform"]:checked')].map(node => node.value);
     if (!id || /[\r\n\0]/.test(id)) { $('perm-identity').reportValidity(); return; }
+    if (!Object.hasOwn(permissionRoles, role)) { message('perm-status', '仅最高管理员和管理员可以配置来源平台。', false); return; }
     if (permissionRows.some((r, i) => i !== editingPermission && r.id === id && r.kind === kind && r.role === role && JSON.stringify(r.platforms.slice().sort()) === JSON.stringify(platforms.slice().sort()))) {
       message('perm-status', '该用户、角色和平台组合已存在。', false); return;
     }
