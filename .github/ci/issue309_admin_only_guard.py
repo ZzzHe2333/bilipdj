@@ -139,7 +139,9 @@ def main():
     assert 'value="super_admin"' in role_select and 'value="admin"' in role_select
     assert 'value="jianzhang"' not in role_select and 'value="member"' not in role_select
     for name in ("perm-legacy-jianzhang", "perm-legacy-member"):
-        assert name in web and name in js
+        assert name in web
+    assert "'perm-legacy-' + role" in js, "Web must load each legacy role independently"
+    assert "readLegacyNames('jianzhang')" in js and "readLegacyNames('member')" in js
     assert "const permissionRoles = {super_admin: '最高管理员', admin: '管理员'}" in js
     assert 'role_labels = {"super_admin": "最高管理员", "admin": "管理员"}' in tk
     assert 'panel._quanxian_text[role]' in tk
