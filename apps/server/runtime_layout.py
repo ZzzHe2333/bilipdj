@@ -215,6 +215,14 @@ def ensure_runtime_layout(
         # directory separately. Divergent files require a deliberate choice.
         migrate_legacy_local_state(data_root, state_root)
         migrate(app_root, data_root, defaults_dir=defaults_dir, state_root=state_root)
+    # The older archive code stored blacklist.csv with queue slots. It is
+    # a small permission/configuration file and now stays with Roaming config.
+    saved_blacklist = core_dir / "blacklist.csv"
+    if not saved_blacklist.exists():
+        for candidate in (core_dir / "cd" / "blacklist.csv", archive_dir / "blacklist.csv"):
+            if candidate.is_file() and not candidate.is_symlink():
+                shutil.copy2(candidate, saved_blacklist)
+                break
     seed_client_styles(data_root)
     return core_dir, key_dir
 
