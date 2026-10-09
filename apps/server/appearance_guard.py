@@ -7,7 +7,7 @@ import threading
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 APPEARANCE_SCHEMA = 1
 PROFILE_KIND = "bilipdj-appearance-profile"
@@ -58,8 +58,17 @@ DEFAULT_APPEARANCE: dict[str, Any] = {
 PALETTE_KEYS = tuple(DEFAULT_APPEARANCE["dark"].keys())
 
 
-def _appearance_path(server_module: Any) -> Path:
-    return Path(getattr(server_module, "_YAML_DIR")) / "appearance.json"
+def _appearance_path(server_module: Any, client: str = "web") -> Path:
+    if client == "win":
+        return Path(getattr(server_module, "APPEARANCE_WIN_PATH", Path(getattr(server_module, "_YAML_DIR")) / "appearance-win.json"))
+    return Path(getattr(server_module, "APPEARANCE_PATH", Path(getattr(server_module, "_YAML_DIR")) / "appearance.json")
+
+
+def _style_api(server_module: Any, client: str) -> tuple[Any, Any]:
+    if client == "win":
+        return server_module.load_win_style, server_module.save_win_style
+    return server_module.load_style, server_module.save_style
+
 
 
 def _atomic_write(server_module: Any, path: Path, text: str) -> None:
@@ -133,8 +142,8 @@ def migrate_legacy_web_theme(raw: Any) -> dict[str, Any]:
     return normalize_appearance(result)
 
 
-def load_appearance(server_module: Any) -> dict[str, Any]:
-    path = _appearance_path(server_module)
+def load_appearance(server_module: Any, client: str = "web") -> dict[str, Any]:
+    path = _appearance_path(server_module, client)
     if path.is_file():
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
@@ -156,16 +165,19 @@ def load_appearance(server_module: Any) -> dict[str, Any]:
     return normalize_appearance(fallback)
 
 
-def appearance_exists(server_module: Any) -> bool:
-    return _appearance_path(server_module).is_file()
+def appearance_exists(server_module: Any, client: str = "web") -> bool:
+    return _appearance_path(server_module, client).is_file()
 
 
-def save_appearance(server_module: Any, raw: Any) -> dict[str, Any]:
+def save_appearance(server_module: Any, raw: Any, client: str = "web") -> dict[str, Any]:
     normalized = normalize_appearance(raw)
-    path = _appearance_path(server_module)
+    path = _appearance_path(server_module, client)
     _atomic_write(server_module, path, json.dumps(normalized, ensure_ascii=False, indent=2) + "\n")
 
-    # Keep the old ui.theme field synchronized for older Windows builds.
+    # Keep Windows old ui.theme synced only for the native client.
+    # Saving Web theme must never change Tk theme in config.yaml.
+    if client != "win":
+        return normalized
     try:
         config = server_module.load_config()
         if isinstance(config, dict):
@@ -184,56 +196,57 @@ def save_appearance(server_module: Any, raw: Any) -> dict[str, Any]:
     return normalized
 
 
-def build_profile(server_module: Any) -> dict[str, Any]:
+def build_profile(server_module: Any, client: str = "web") -> dict[str, Any]:
+    load_style, _save_style = _style_api(server_module, client)
     return {
         "schema": APPEARANCE_SCHEMA,
         "kind": PROFILE_KIND,
-        "appearance": load_appearance(server_module),
-        "display_style": server_module.load_style(),
+        "appearance": load_appearance(server_module, client),
+        "display_style": load_style(),
     }
 
 
-def import_profile(server_module: Any, raw: Any) -> dict[str, Any]:
+def import_profile(server_module: Any, raw: Any, client: str = "web") -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError("配置必须是 JSON 对象")
 
     # Full cross-client profile.
     if raw.get("kind") == PROFILE_KIND or "appearance" in raw or "display_style" in raw:
-        appearance = raw.get("appearance", load_appearance(server_module))
-        saved = save_appearance(server_module, appearance)
+        appearance = raw.get("appearance", load_appearance(server_module, client))
+        saved = save_appearance(server_module, appearance, client)
         style = raw.get("display_style")
         if isinstance(style, dict):
-            server_module.save_style(style)
+            _style_api(server_module, client)[1](style)
         return {
             "schema": APPEARANCE_SCHEMA,
             "kind": PROFILE_KIND,
             "appearance": saved,
-            "display_style": server_module.load_style(),
+            "display_style": _style_api(server_module, client)[0](),
         }
 
     # Old Web localStorage theme payload.
     if any(key in raw for key in ("accent", "bg", "panel", "text")):
-        saved = save_appearance(server_module, migrate_legacy_web_theme(raw))
+        saved = save_appearance(server_module, migrate_legacy_web_theme(raw), client)
         return {
             "schema": APPEARANCE_SCHEMA,
             "kind": PROFILE_KIND,
             "appearance": saved,
-            "display_style": server_module.load_style(),
+            "display_style": _style_api(server_module, client)[0](),
         }
 
     # Old style.json can still be imported through the same cross-client file dialog.
     if any(key in raw for key in ("bg1", "bg2", "bg3", "text_color", "queue_font_size")):
-        server_module.save_style(raw)
-        return build_profile(server_module)
+        _style_api(server_module, client)[1](raw)
+        return build_profile(server_module, client)
 
     # Direct appearance.json is also accepted.
     if "dark" in raw or "light" in raw or "mode" in raw:
-        saved = save_appearance(server_module, raw)
+        saved = save_appearance(server_module, raw, client)
         return {
             "schema": APPEARANCE_SCHEMA,
             "kind": PROFILE_KIND,
             "appearance": saved,
-            "display_style": server_module.load_style(),
+            "display_style": _style_api(server_module, client)[0](),
         }
     raise ValueError("无法识别的主题/样式配置格式")
 
@@ -264,7 +277,9 @@ def install_appearance_guard(server_module: Any) -> bool:
         server_module.DEFAULT_APPEARANCE = copy.deepcopy(DEFAULT_APPEARANCE)
         server_module.APPEARANCE_PATH = _appearance_path(server_module)
         server_module.load_appearance = lambda: load_appearance(server_module)
+        server_module.load_win_appearance = lambda: load_appearance(server_module, "win")
         server_module.save_appearance = lambda payload: save_appearance(server_module, payload)
+        server_module.save_win_appearance = lambda payload: save_appearance(server_module, payload, "win")
         server_module.build_appearance_profile = lambda: build_profile(server_module)
         server_module.import_appearance_profile = lambda payload: import_profile(server_module, payload)
 
@@ -273,25 +288,29 @@ def install_appearance_guard(server_module: Any) -> bool:
         original_post = handler_class.do_POST
 
         def do_GET(self: Any) -> None:  # noqa: N802
-            path = urlparse(self.path).path
+            parsed = urlparse(self.path)
+            path = parsed.path
+            client = "win" if parse_qs(parsed.query).get("client", [""])[0] == "win" else "web"
             if path == "/api/appearance":
                 if not self._require_loopback():
                     return
                 self._write_json({
                     "status": "ok",
-                    "exists": appearance_exists(server_module),
-                    "appearance": load_appearance(server_module),
+                    "exists": appearance_exists(server_module, client),
+                    "appearance": load_appearance(server_module, client),
                 })
                 return
             if path == "/api/appearance/profile":
                 if not self._require_loopback():
                     return
-                self._write_json(build_profile(server_module))
+                self._write_json(build_profile(server_module, client))
                 return
             return original_get(self)
 
         def do_POST(self: Any) -> None:  # noqa: N802
-            path = urlparse(self.path).path
+            parsed = urlparse(self.path)
+            path = parsed.path
+            client = "win" if parse_qs(parsed.query).get("client", [""])[0] == "win" else "web"
             if path not in {"/api/appearance", "/api/appearance/profile"}:
                 return original_post(self)
             if not self._require_loopback():
@@ -300,10 +319,10 @@ def install_appearance_guard(server_module: Any) -> bool:
             try:
                 if path == "/api/appearance":
                     raw = payload.get("appearance", payload)
-                    appearance = save_appearance(server_module, raw)
+                    appearance = save_appearance(server_module, raw, client)
                     self._write_json({"status": "ok", "appearance": appearance})
                 else:
-                    profile = import_profile(server_module, payload)
+                    profile = import_profile(server_module, payload, client)
                     self._write_json({"status": "ok", **profile})
             except ValueError as exc:
                 self._write_json({"status": "error", "message": str(exc)}, status=HTTPStatus.BAD_REQUEST)
