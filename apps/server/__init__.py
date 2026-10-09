@@ -68,9 +68,9 @@ def configure_runtime_paths(module: Any = server) -> Any:
         app_dir,
         defaults_dir=compatibility_core_dir,
     )
-    # Legacy source/portable layouts stay unchanged unless BILIPDJ_DATA_DIR is
-    # explicitly configured. Docker uses the external data root for settings.
-    misc_config_dir = data_dir if external_data_dir else (app_dir if frozen else compatibility_core_dir)
+    # User-specific data is authoritative across desktop operating systems.
+    # Explicit BILIPDJ_DATA_DIR remains the Docker/hosting override.
+    misc_config_dir = data_dir
 
     source_web = REPO_ROOT / "apps" / "web" / "static"
     bundled_web = bundle_root / "apps" / "web" / "static"
@@ -92,19 +92,19 @@ def configure_runtime_paths(module: Any = server) -> Any:
     module.BUNDLE_UI_DIR = bundled_web
     module.UI_DIR = ui_dir
     module.CONFIG_PATH = runtime_core_dir / "config.yaml"
-    module.LOG_DIR = (data_dir if external_data_dir else app_dir) / "log"
+    module.LOG_DIR = data_dir / "log"
     module.PD_DIR = runtime_core_dir / "cd"
     module.QUEUE_STATE_PATH = module.PD_DIR / "queue_archive_state.json"
     module.BLACKLIST_PATH = runtime_core_dir / "blacklist.csv"
     module.QUANXIAN_PATH = runtime_core_dir / "quanxian.yaml"
     module.KAIGUAN_PATH = runtime_core_dir / "kaiguan.yaml"
-    module.STYLE_PATH = misc_config_dir / "style.json"
-    module.APPEARANCE_PATH = misc_config_dir / "appearance.json"
+    module.STYLE_PATH = misc_config_dir / "style-web.json"
+    module.APPEARANCE_PATH = misc_config_dir / "appearance-web.json"
     module.KEY_DIR = key_dir
     module.UPDATE_RESULT_PATH = key_dir / "update-result.json"
-    module.PLUGINS_DIR = (data_dir if external_data_dir else app_dir) / "plugins"
-    module.BACKUP_DIR = (data_dir if external_data_dir else app_dir) / "backup"
-    module.LIVE_STYLE_CSS_PATH = (data_dir if external_data_dir else ui_dir) / "moren.css"
+    module.PLUGINS_DIR = data_dir / "plugins"
+    module.BACKUP_DIR = data_dir / "backup"
+    module.LIVE_STYLE_CSS_PATH = data_dir / "moren.css"
     module._CONFIG_LOCK_PATH = runtime_core_dir / ".config.lock"
     return module
 
