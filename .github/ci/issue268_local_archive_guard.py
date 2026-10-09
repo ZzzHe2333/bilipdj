@@ -127,8 +127,11 @@ def check_runtime_wiring() -> None:
     runtime_layout = (ROOT / "apps/server/runtime_layout.py").read_text(encoding="utf-8")
     assert "install_backup_cleanup_ui()" in desktop
     assert "install_queue_clear_dialog(panel_class)" in desktop
-    assert "sync_local_data_archive(app_root" in runtime_layout
+    # The legacy mirror remains independently testable for old builds,
+    # but new builds must use a durable user-data directory as authority.
+    assert "migrate(app_root, data_root" in runtime_layout
     assert "if data_dir_overridden():" in runtime_layout
+    assert "seed_client_styles(data_root)" in runtime_layout
 
 
 def main() -> None:
