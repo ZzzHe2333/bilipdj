@@ -339,3 +339,27 @@ td.actions { white-space: nowrap; }
   }
   .button:active:not(.disabled):not(:disabled) { transform: none; }
 }
+
+
+/* Issue #307: scoped platform-role permission editor */
+.permission-manager { overflow-x: auto; }
+.permission-head, .permission-row { display: grid; grid-template-columns: minmax(130px,2fr) minmax(100px,1fr) minmax(110px,1.4fr) 78px; align-items: center; gap: 12px; padding: 11px 9px; }
+.permission-head { color: var(--muted); font-weight: 600; font-size: 13px; border-bottom: 1px solid var(--line); }
+.permission-row { width: 100%; text-align: left; color: inherit; background: transparent; border: 0; border-bottom: 1px solid var(--line); cursor: pointer; border-radius: 5px; }
+.permission-row:hover, .permission-row:focus-visible { background: var(--panel2); }
+.permission-identity { overflow-wrap: anywhere; }
+.permission-identity small { display: block; color: var(--muted); font-size: 11px; margin-top: 3px; }
+.permission-empty { padding: 22px; color: var(--muted); }
+.permission-dialog { width: min(520px, calc(100vw - 28px)); border: 1px solid var(--line); border-radius: 14px; color: var(--text); background: var(--panel); box-shadow: 0 24px 60px rgba(0,0,0,.55); }
+.permission-dialog::backdrop { background: rgba(0,0,0,.65); }
+.permission-form { display: grid; gap: 14px; }
+.permission-form h2 { margin: 0 0 5px; }
+.permission-form > label { display: grid; gap: 6px; }
+.permission-form input:not([type="checkbox"]), .permission-form select { width: 100%; }
+.permission-platforms { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; }
+.permission-platforms legend { padding: 0 5px; }
+.permission-platforms label { display: flex; align-items: center; gap: 7px; }
+.permission-hint { color: var(--muted); font-size: 13px; margin: 0; }
+.permission-actions { display: flex; align-items: center; gap: 8px; }
+.permission-spacer { flex: 1; }
+@media (max-width: 650px) { .permission-head, .permission-row { grid-template-columns: minmax(110px,2fr) minmax(75px,1fr) minmax(80px,1fr); } .permission-head span:last-child, .permission-row span:last-child { display: none; } }

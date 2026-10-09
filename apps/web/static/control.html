@@ -115,14 +115,41 @@
       </section>
 
       <section class="view" id="view-permissions">
-        <div class="page-head"><div><h1>权限</h1><p>每行一个用户名；保存后后端立即重新加载。</p></div></div>
-        <div class="permission-grid">
-          <label class="card"><strong>超级管理员</strong><textarea id="perm-super_admin"></textarea></label>
-          <label class="card"><strong>管理员</strong><textarea id="perm-admin"></textarea></label>
-          <label class="card"><strong>舰长</strong><textarea id="perm-jianzhang"></textarea></label>
-          <label class="card"><strong>成员</strong><textarea id="perm-member"></textarea></label>
+        <div class="page-head">
+          <div><h1>权限</h1><p>按照用户 ID 或历史用户名分配角色；未选择来源平台即为全平台有效。</p></div>
+          <button id="perm-add" type="button" class="button">＋ 新增权限</button>
         </div>
-        <button id="perm-save" class="button">保存权限</button><div id="perm-status" class="status"></div>
+        <div class="card permission-manager">
+          <div class="permission-head"><span>用户标识</span><span>身份 / 权限</span><span>来源平台</span><span>操作</span></div>
+          <div id="perm-list" class="permission-rows" aria-live="polite"></div>
+        </div>
+        <div class="toolbar"><button id="perm-save" class="button ghost" type="button">保存全部</button><button id="perm-refresh" class="button ghost" type="button">刷新</button></div>
+        <div id="perm-status" class="status" role="status"></div>
+        <dialog id="perm-dialog" class="permission-dialog" aria-labelledby="perm-dialog-title">
+          <form id="perm-form" class="permission-form">
+            <h2 id="perm-dialog-title">编辑权限</h2>
+            <label>账号类型<select id="perm-kind"><option value="id">平台用户 ID（推荐）</option><option value="name">用户名（兼容旧数据）</option></select></label>
+            <label>用户 ID / 用户名<input id="perm-identity" maxlength="256" required placeholder="输入直播平台提供的用户 ID" autocomplete="off"></label>
+            <label>权限等级<select id="perm-role">
+              <option value="super_admin">最高管理员 · 完整管理权</option><option value="admin">管理员 · 排队管理权</option>
+              <option value="jianzhang">舰长 · 舰长权限</option><option value="member">成员 · 普通用户</option>
+            </select></label>
+            <fieldset class="permission-platforms"><legend>来源平台（可多选）</legend>
+              <label><input type="checkbox" value="bilibili" name="perm-platform"> Bilibili</label>
+              <label><input type="checkbox" value="douyin" name="perm-platform"> 抖音</label>
+              <label><input type="checkbox" value="huya" name="perm-platform"> 虎牙</label>
+              <label><input type="checkbox" value="youtube" name="perm-platform"> YouTube</label>
+              <label><input type="checkbox" value="twitch" name="perm-platform"> Twitch</label>
+            </fieldset>
+            <p class="permission-hint">全部不勾选 = 所有平台；选中平台后，权限仅在所选平台生效。</p>
+            <div class="permission-actions">
+              <button id="perm-delete" class="button danger" type="button">删除此权限</button>
+              <span class="permission-spacer"></span>
+              <button id="perm-cancel" class="button ghost" type="button">取消</button>
+              <button class="button" type="submit">保存</button>
+            </div>
+          </form>
+        </dialog>
       </section>
 
       <section class="view" id="view-performance">

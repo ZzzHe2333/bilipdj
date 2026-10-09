@@ -505,83 +505,139 @@ def _build_plugin_manager_tab(panel: Any, module: Any) -> None:
 
 
 def _build_permissions_page(panel: Any, frame: Any, module: Any) -> None:
+    """Shared Windows Tk permission pairing-list editor (Issue #307)."""
     _clear_children(frame)
     frame.columnconfigure(0, weight=1)
-    frame.columnconfigure(1, weight=1)
-    panel._quanxian_text = {}
+    frame.rowconfigure(2, weight=1)
+    panel._quanxian_text = {}  # Legacy compatibility; production uses the list below.
+    panel._permission_entries = []
+    panel._permission_blacklist = []
 
     module.ttk.Label(frame, text="权限与身份", font=("Microsoft YaHei UI", 15, "bold")).grid(
-        row=0, column=0, columnspan=2, sticky="w", pady=(0, 3)
+        row=0, column=0, sticky="w", pady=(0, 5)
     )
     module.ttk.Label(
-        frame,
-        text="每行填写一个用户名。最高管理员/管理员用于管理命令；舰长与成员控制普通排队权限；黑名单优先阻止所有弹幕指令。",
-        wraplength=800,
-        justify="left",
-    ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 10))
+        frame, text="按用户 ID 或历史用户名分配角色；来源平台未勾选时代表全平台。",
+        wraplength=800, justify="left"
+    ).grid(row=1, column=0, sticky="w", pady=(0, 10))
 
-    definitions = [
-        ("super_admin", "最高管理员", "可新增/删除管理员并执行全部管理命令"),
-        ("admin", "管理员", "除新增/删除管理员外，可执行其他管理命令"),
-        ("jianzhang", "舰长", "用于舰长插队等舰长级权限"),
-        ("member", "成员", "普通观众的自助排队、取消和修改身份名单"),
-        ("blacklist", "黑名单", "优先禁止触发任何弹幕指令，不能与管理员身份同时生效"),
-    ]
-    for index, (key, title, description) in enumerate(definitions):
-        if key == "blacklist":
-            row, column, columnspan = 4, 0, 2
-        else:
-            row, column, columnspan = 2 + index // 2, index % 2, 1
-        card = module.ttk.LabelFrame(frame, text=title, padding=10)
-        card.grid(
-            row=row,
-            column=column,
-            columnspan=columnspan,
-            sticky="nsew",
-            padx=(0 if column == 0 else 6, 6 if column == 0 else 0),
-            pady=5,
+    columns = ("identity", "role", "platforms")
+    tree = module.ttk.Treeview(frame, columns=columns, show="headings", height=10, selectmode="browse")
+    tree.heading("identity", text="用户 ID / 用户名")
+    tree.heading("role", text="权限")
+    tree.heading("platforms", text="来源平台")
+    tree.column("identity", width=260, minwidth=135, stretch=True)
+    tree.column("role", width=145, minwidth=90, stretch=False)
+    tree.column("platforms", width=245, minwidth=120, stretch=True)
+    tree.grid(row=2, column=0, sticky="nsew")
+    scroll = module.ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+    scroll.grid(row=2, column=1, sticky="ns")
+    tree.configure(yscrollcommand=scroll.set)
+    panel._permission_tree = tree
+    role_labels = {"super_admin": "最高管理员", "admin": "管理员", "jianzhang": "舰长", "member": "成员"}
+    platforms = {"bilibili": "Bilibili", "douyin": "抖音", "huya": "虎牙", "youtube": "YouTube", "twitch": "Twitch"}
+
+    def redraw() -> None:
+        for iid in tree.get_children():
+            tree.delete(iid)
+        for i, entry in enumerate(panel._permission_entries):
+            display_id = entry["id"] + ("（旧用户名）" if entry.get("kind") == "name" else "")
+            tree.insert("", "end", iid=str(i), values=(
+                display_id, role_labels.get(entry["role"], entry["role"]),
+                " / ".join(platforms.get(x, x) for x in entry.get("platforms", [])) or "全平台",
+            ))
+
+    panel._refresh_permission_list = redraw
+
+    def editor(index: int = -1) -> None:
+        entry = panel._permission_entries[index] if index >= 0 else {
+            "id": "", "kind": "id", "role": "admin", "platforms": []
+        }
+        dialog = module.tk.Toplevel(panel.root)
+        dialog.title("编辑权限" if index >= 0 else "新增权限")
+        dialog.transient(panel.root)
+        dialog.resizable(False, False)
+        dialog.grab_set()
+        body = module.ttk.Frame(dialog, padding=18)
+        body.pack(fill="both", expand=True)
+        body.columnconfigure(1, weight=1)
+        kind_var = module.tk.StringVar(value=entry["kind"])
+        id_var = module.tk.StringVar(value=entry["id"])
+        role_var = module.tk.StringVar(value=entry["role"])
+        module.ttk.Label(body, text="账号类型").grid(row=0, column=0, sticky="w", pady=5)
+        module.ttk.Combobox(body, textvariable=kind_var, values=("id", "name"),
+                            state="readonly", width=32).grid(row=0, column=1, sticky="ew", pady=5)
+        module.ttk.Label(body, text="用户 ID / 用户名").grid(row=1, column=0, sticky="w", pady=5)
+        id_input = module.ttk.Entry(body, textvariable=id_var, width=34)
+        id_input.grid(row=1, column=1, sticky="ew", pady=5)
+        module.ttk.Label(body, text="权限等级").grid(row=2, column=0, sticky="w", pady=5)
+        choices = list(role_labels)
+        role_box = module.ttk.Combobox(body, values=[role_labels[x] for x in choices],
+                                      state="readonly", width=32)
+        role_box.current(choices.index(role_var.get()) if role_var.get() in choices else 1)
+        role_box.grid(row=2, column=1, sticky="ew", pady=5)
+        module.ttk.Label(body, text="来源平台（可多选）").grid(row=3, column=0, columnspan=2, sticky="w", pady=(12, 4))
+        platform_vars = {}
+        for n, (key, name) in enumerate(platforms.items()):
+            platform_vars[key] = module.tk.BooleanVar(value=key in entry.get("platforms", []))
+            module.ttk.Checkbutton(body, text=name, variable=platform_vars[key]).grid(
+                row=4+n//2, column=n%2, sticky="w", pady=3
+            )
+        module.ttk.Label(body, text="未勾选＝全平台；勾选后只在选中平台有效。").grid(
+            row=7, column=0, columnspan=2, sticky="w", pady=(9, 12)
         )
-        card.columnconfigure(0, weight=1)
-        module.ttk.Label(card, text=description, wraplength=370 if columnspan == 1 else 790, justify="left").grid(
-            row=0, column=0, sticky="w", pady=(0, 6)
-        )
-        editor = module.tk.Text(card, height=4 if key != "blacklist" else 3, wrap="word", undo=True)
-        scrollbar = module.ttk.Scrollbar(card, orient="vertical", command=editor.yview)
-        editor.configure(yscrollcommand=scrollbar.set)
-        editor.grid(row=1, column=0, sticky="nsew")
-        scrollbar.grid(row=1, column=1, sticky="ns")
-        panel._quanxian_text[key] = editor
-        text_widgets = getattr(panel, "_all_text_widgets", None)
-        if isinstance(text_widgets, list):
-            text_widgets.append(editor)
+        footer = module.ttk.Frame(body)
+        footer.grid(row=8, column=0, columnspan=2, sticky="ew")
 
-    status_var = module.tk.StringVar(value="修改后点击保存；刷新会重新读取当前权限配置。")
-    panel._issue180_permission_status_var = status_var
-    footer = module.ttk.Frame(frame)
-    footer.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(10, 0))
-    module.ttk.Label(footer, textvariable=status_var).pack(side="left", fill="x", expand=True)
-
-    def save() -> None:
-        status_var.set("正在保存权限……")
-        try:
+        def commit(delete: bool = False) -> None:
+            if delete:
+                if index >= 0:
+                    panel._permission_entries.pop(index)
+            else:
+                identity = id_var.get().strip()
+                role = choices[role_box.current()]
+                selected = [key for key, var in platform_vars.items() if var.get()]
+                if not identity or len(identity) > 256 or any(ch in identity for ch in "\r\n\0"):
+                    module.messagebox.showerror("无效用户", "请输入有效的用户 ID 或用户名（不超过 256 字符）。", parent=dialog)
+                    return
+                new_entry = {"id": identity, "kind": kind_var.get(), "role": role, "platforms": selected}
+                if any(i != index and item == new_entry for i, item in enumerate(panel._permission_entries)):
+                    module.messagebox.showerror("重复权限", "相同用户、角色和平台范围已存在。", parent=dialog)
+                    return
+                if index >= 0:
+                    panel._permission_entries[index] = new_entry
+                else:
+                    panel._permission_entries.append(new_entry)
+            redraw()
+            dialog.destroy()
             panel._save_quanxian()
-        except Exception as exc:
-            status_var.set(f"保存失败：{exc}")
-        else:
-            status_var.set("权限保存请求已完成。")
-
-    def refresh() -> None:
-        status_var.set("正在刷新权限……")
-        try:
             panel._load_quanxian()
-        except Exception as exc:
-            status_var.set(f"刷新失败：{exc}")
-        else:
-            status_var.set("已刷新当前权限配置。")
 
-    module.ttk.Button(footer, text="保存权限", command=save, width=12).pack(side="right", padx=(8, 0))
-    module.ttk.Button(footer, text="刷新权限", command=refresh, width=12).pack(side="right")
+        if index >= 0:
+            module.ttk.Button(footer, text="删除权限", command=lambda: commit(True)).pack(side="left")
+        module.ttk.Button(footer, text="取消", command=dialog.destroy).pack(side="right", padx=5)
+        module.ttk.Button(footer, text="保存", command=commit).pack(side="right")
+        id_input.focus_set()
+
+    # Keep the existing global blacklist editor while privileged roles migrate
+    # to the structured per-platform list. Blacklist is not a scoped role.
+    blacklist_card = module.ttk.LabelFrame(frame, text="黑名单（全平台，仍按用户名匹配）", padding=7)
+    blacklist_card.grid(row=3, column=0, sticky="ew", pady=(9, 0))
+    blacklist_card.columnconfigure(0, weight=1)
+    blacklist_editor = module.tk.Text(blacklist_card, height=3, wrap="word", undo=True)
+    blacklist_editor.grid(row=0, column=0, sticky="ew")
+    panel._quanxian_text["blacklist"] = blacklist_editor
+    if isinstance(getattr(panel, "_all_text_widgets", None), list):
+        panel._all_text_widgets.append(blacklist_editor)
+
+    actions = module.ttk.Frame(frame)
+    actions.grid(row=4, column=0, sticky="ew", pady=(10, 0))
+    module.ttk.Button(actions, text="＋ 新增权限", command=lambda: editor()).pack(side="left")
+    module.ttk.Button(actions, text="刷新", command=panel._load_quanxian).pack(side="right")
+    module.ttk.Button(actions, text="保存全部", command=panel._save_quanxian).pack(side="right", padx=8)
+    tree.bind("<Double-1>", lambda event: editor(int(tree.selection()[0])) if tree.selection() else None)
     panel._load_quanxian()
+
 
 
 def _build_performance_page(panel: Any, frame: Any, module: Any) -> None:

@@ -3961,29 +3961,62 @@ class ControlPanelApp:
         try:
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/quanxian", timeout=2) as r:
                 data = json.loads(r.read().decode("utf-8", errors="replace"))
-            for key, widget in self._quanxian_text.items():
-                widget.delete("1.0", "end")
-                items = [x for x in data.get(key, []) if x]
-                widget.insert("end", "\n".join(items))
         except Exception:
-            # 后端未运行时从本地配置读（优先 config.yaml，兼容 quanxian.yaml）
+            # Read the same canonical backend schema even when the server is stopped.
             try:
                 backend_server = load_backend_server_module()
-                raw = backend_server.load_quanxian()
+                data = backend_server.load_quanxian()
             except Exception:
-                raw = load_simple_yaml(QUANXIAN_PATH)
-            for key, widget in self._quanxian_text.items():
-                widget.delete("1.0", "end")
-                items = [x for x in raw.get(key, []) if x]
-                widget.insert("end", "\n".join(items))
+                data = load_simple_yaml(QUANXIAN_PATH)
+        if hasattr(self, "_permission_tree"):
+            entries = data.get("entries") if isinstance(data, dict) else None
+            if not isinstance(entries, list):
+                entries = [
+                    {"id": str(identity), "kind": "name", "role": role, "platforms": []}
+                    for role in ("super_admin", "admin", "jianzhang", "member")
+                    for identity in data.get(role, []) if str(identity).strip()
+                ]
+            self._permission_entries = [
+                {"id": str(item.get("id", "")), "kind": item.get("kind", "name"),
+                 "role": item.get("role", "member"),
+                 "platforms": list(item.get("platforms", []))}
+                for item in entries if isinstance(item, dict) and str(item.get("id", "")).strip()
+            ]
+            self._permission_blacklist = list(data.get("blacklist", []))
+            blacklist_widget = self._quanxian_text.get("blacklist")
+            if blacklist_widget is not None:
+                blacklist_widget.delete("1.0", "end")
+                blacklist_widget.insert("end", "\n".join(self._permission_blacklist))
+            self._refresh_permission_list()
+            return
+        for key, widget in self._quanxian_text.items():
+            widget.delete("1.0", "end")
+            values = [str(x) for x in data.get(key, []) if x]
+            widget.insert("end", "\n".join(values))
 
     def _save_quanxian(self) -> None:
-        payload: dict[str, list[str]] = {}
-        for key, widget in self._quanxian_text.items():
-            names = [line.strip() for line in widget.get("1.0", "end").splitlines() if line.strip()]
-            payload[key] = names
+        if hasattr(self, "_permission_tree"):
+            payload: dict[str, Any] = {
+                "super_admin": [], "admin": [], "jianzhang": [], "member": [],
+                "blacklist": [
+                    line.strip() for line in self._quanxian_text["blacklist"].get("1.0", "end").splitlines()
+                    if line.strip()
+                ] if "blacklist" in self._quanxian_text else list(getattr(self, "_permission_blacklist", [])),
+                "scoped_entries": [],
+            }
+            for item in self._permission_entries:
+                role = item["role"]
+                if item.get("kind") == "name" and not item.get("platforms"):
+                    payload[role].append(item["id"])
+                else:
+                    payload["scoped_entries"].append(item)
+        else:
+            payload = {
+                key: [line.strip() for line in widget.get("1.0", "end").splitlines() if line.strip()]
+                for key, widget in self._quanxian_text.items()
+            }
         port = self.port_var.get().strip() or "9816"
-        body = json.dumps(payload).encode("utf-8")
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(
             f"http://127.0.0.1:{port}/api/quanxian",
             data=body,
@@ -3994,16 +4027,20 @@ class ControlPanelApp:
             with urllib.request.urlopen(req, timeout=2):
                 pass
             self._append_log("[GUI] 权限配置已保存并生效")
-        except Exception:
-            # 后端未运行时写本地配置（同步写入 config.yaml）
+        except urllib.error.HTTPError as exc:
+            # Reject server validation errors rather than overwriting data locally.
+            raise ValueError(f"服务器拒绝权限配置：HTTP {exc.code}") from exc
+        except (urllib.error.URLError, OSError):
             self._write_quanxian_local(payload)
             self._append_log("[GUI] 权限配置已保存到本地（后端未运行，下次启动生效）")
 
-    def _write_quanxian_local(self, payload: dict[str, list[str]]) -> None:
+    def _write_quanxian_local(self, payload: dict[str, Any]) -> None:
         try:
             backend_server = load_backend_server_module()
             backend_server.save_quanxian(payload)
-        except Exception:
+        except Exception as exc:
+            if payload.get("scoped_entries"):
+                raise RuntimeError("本地后端不可用，无法安全保存多平台权限；没有覆盖原配置。") from exc
             labels = {
                 "super_admin": "最高管理员：拥有所有权限，包括新增/删除管理员",
                 "admin": "管理员：拥有除新增/删除管理员以外的所有操作权限",
