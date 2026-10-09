@@ -2402,6 +2402,10 @@ class QueueManager:
         return list(items)
 
     def _has_scoped_role(self, role: str, uname: str) -> bool:
+        # Platform-scoped grants exist only for administrator roles.
+        # Bilibili guards and ordinary members must not gain scoped privileges.
+        if role not in SCOPED_PERMISSION_ROLES:
+            return False
         platform = str(getattr(self._queue_origin_context, "platform", "") or "").lower()
         user_id = str(getattr(self._queue_origin_context, "user_id", "") or "").strip()
         for entry in self._scoped_permissions:
@@ -2644,11 +2648,15 @@ class QueueManager:
                     return False, "排队功能已暂停，权限不足"
                 return False, None
 
-            if is_guard and guard_level > 0 and uname not in self._jianzhang:
+            # 舰长属于 B站直播间身份，与多平台管理员授权完全独立。
+            # Do not cache a guard name from another relay or allow a cached
+            # Bilibili guard name to claim guard-only commands on Douyin.
+            is_bilibili = str(getattr(self._queue_origin_context, "platform", "") or "").lower() == "bilibili"
+            if is_bilibili and is_guard and guard_level > 0 and uname not in self._jianzhang:
                 self._jianzhang.append(uname)
 
             index = self._find_index(uname)
-            is_jianzhang = uname in self._jianzhang or self._has_scoped_role("jianzhang", uname)
+            is_jianzhang = is_bilibili and (uname in self._jianzhang or (is_guard and guard_level > 0))
             modified = False
 
             # --- Join commands (not yet in queue) ---
@@ -2869,7 +2877,7 @@ DEFAULT_QUANXIAN: dict[str, Any] = {
 }
 
 
-SCOPED_PERMISSION_ROLES = ("super_admin", "admin", "jianzhang", "member")
+SCOPED_PERMISSION_ROLES = ("super_admin", "admin")
 SCOPED_PERMISSION_PLATFORMS = ("bilibili", "douyin", "huya", "youtube", "twitch")
 
 
@@ -2976,6 +2984,9 @@ def load_quanxian() -> dict[str, Any]:
     elif isinstance(raw_file.get("scoped_entries"), list):
         result["scoped_entries"] = raw_file["scoped_entries"]
     normalized = _normalize_quanxian_config(result)
+    # The structured pairing list is strictly for super_admin/admin.
+    # jianzhang and member stay in their legacy role lists, not in multi-
+    # platform grants or the editor's shared user-ID role selector.
     normalized["entries"] = [
         {"id": name, "kind": "name", "role": key, "platforms": []}
         for key in SCOPED_PERMISSION_ROLES for name in normalized[key]

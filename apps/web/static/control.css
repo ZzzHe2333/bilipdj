@@ -363,3 +363,9 @@ td.actions { white-space: nowrap; }
 .permission-actions { display: flex; align-items: center; gap: 8px; }
 .permission-spacer { flex: 1; }
 @media (max-width: 650px) { .permission-head, .permission-row { grid-template-columns: minmax(110px,2fr) minmax(75px,1fr) minmax(80px,1fr); } .permission-head span:last-child, .permission-row span:last-child { display: none; } }
+
+/* Guards and ordinary members are independent from the scoped admin list. */
+.permission-legacy { margin-top: 16px; }
+.permission-legacy .card { margin-bottom: 0; }
+.permission-legacy .permission-hint { display: block; min-height: 34px; margin: 6px 0 10px; }
+.permission-legacy textarea { min-height: 85px; }

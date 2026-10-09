@@ -102,6 +102,8 @@ jobs:
         run: python .github/ci/issue283_multi_platform_guard.py
       - name: Validate source-scoped permissions and list UIs
         run: python .github/ci/issue307_scoped_permissions_guard.py
+      - name: Validate admin-only platform scopes and Bilibili guards
+        run: python .github/ci/issue309_admin_only_guard.py
       - name: Validate unified multi-platform queue and archives
         timeout-minutes: 3
         run: timeout --signal=SIGINT --kill-after=5s 90s python -u .github/ci/issue303_shared_queue_guard.py

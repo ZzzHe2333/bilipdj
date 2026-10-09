@@ -3973,16 +3973,26 @@ class ControlPanelApp:
             if not isinstance(entries, list):
                 entries = [
                     {"id": str(identity), "kind": "name", "role": role, "platforms": []}
-                    for role in ("super_admin", "admin", "jianzhang", "member")
+                    for role in ("super_admin", "admin")
                     for identity in data.get(role, []) if str(identity).strip()
                 ]
             self._permission_entries = [
                 {"id": str(item.get("id", "")), "kind": item.get("kind", "name"),
                  "role": item.get("role", "member"),
                  "platforms": list(item.get("platforms", []))}
-                for item in entries if isinstance(item, dict) and str(item.get("id", "")).strip()
+                for item in entries
+                if isinstance(item, dict)
+                and item.get("role") in ("super_admin", "admin")
+                and str(item.get("id", "")).strip()
             ]
             self._permission_blacklist = list(data.get("blacklist", []))
+            for legacy_role in ("jianzhang", "member"):
+                legacy_widget = self._quanxian_text.get(legacy_role)
+                if legacy_widget is not None:
+                    legacy_widget.delete("1.0", "end")
+                    legacy_widget.insert("end", "\n".join(
+                        str(name) for name in data.get(legacy_role, []) if str(name).strip()
+                    ))
             blacklist_widget = self._quanxian_text.get("blacklist")
             if blacklist_widget is not None:
                 blacklist_widget.delete("1.0", "end")
@@ -3997,7 +4007,15 @@ class ControlPanelApp:
     def _save_quanxian(self) -> None:
         if hasattr(self, "_permission_tree"):
             payload: dict[str, Any] = {
-                "super_admin": [], "admin": [], "jianzhang": [], "member": [],
+                "super_admin": [], "admin": [],
+                "jianzhang": [
+                    line.strip() for line in self._quanxian_text["jianzhang"].get("1.0", "end").splitlines()
+                    if line.strip()
+                ],
+                "member": [
+                    line.strip() for line in self._quanxian_text["member"].get("1.0", "end").splitlines()
+                    if line.strip()
+                ],
                 "blacklist": [
                     line.strip() for line in self._quanxian_text["blacklist"].get("1.0", "end").splitlines()
                     if line.strip()
@@ -4006,6 +4024,8 @@ class ControlPanelApp:
             }
             for item in self._permission_entries:
                 role = item["role"]
+                if role not in ("super_admin", "admin"):
+                    continue  # Never serialize guards/members as multi-platform ACL.
                 if item.get("kind") == "name" and not item.get("platforms"):
                     payload[role].append(item["id"])
                 else:

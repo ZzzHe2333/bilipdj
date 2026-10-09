@@ -40,6 +40,7 @@ def main() -> None:
             {"id": "77", "kind": "id", "role": "super_admin", "platforms": []},
             {"id": "guest", "kind": "name", "role": "admin", "platforms": ["twitch"]},
             {"id": "91", "kind": "id", "role": "jianzhang", "platforms": ["huya"]},
+            {"id": "92", "kind": "id", "role": "member", "platforms": []},
         ],
     }
     normalized = backend._normalize_quanxian_config(source)
@@ -49,11 +50,13 @@ def main() -> None:
     assert not _event(mgr, "douyin", "100", "shared")  # Identical display name is not identity.
     assert _event(mgr, "twitch", "100", "guest") and not _event(mgr, "douyin", "100", "guest")
     assert _event(mgr, "youtube", "77") and _event(mgr, "huya", "77")
-    assert _event(mgr, "youtube", "nope", "legacy_admin")  # Legacy roles are global.
+    assert _event(mgr, "youtube", "nope", "legacy_admin")  # Legacy admin roles are global.
+    assert len(backend._decode_scoped_permissions(normalized["scoped_entries"])) == 3
     mgr._queue_origin_context.platform, mgr._queue_origin_context.user_id = "huya", "91"
-    assert mgr._has_scoped_role("jianzhang", "other")
+    assert not mgr._has_scoped_role("jianzhang", "other")
     mgr._queue_origin_context.platform = "bilibili"
     assert not mgr._has_scoped_role("jianzhang", "other")
+    assert not mgr._has_scoped_role("member", "other")
     malicious = backend._normalize_quanxian_config({
         "super_admin": [], "admin": [], "jianzhang": [], "member": [], "blacklist": [],
         "scoped_entries": [{"id": "evil", "kind": "id", "role": "admin", "platforms": ["unknown-service"]}],
@@ -70,13 +73,13 @@ def main() -> None:
             backend._CONFIG_LOCK_PATH = root / ".config.lock"
             backend.save_quanxian(source)
             loaded = backend.load_quanxian()
-            assert len(loaded["entries"]) == 6, loaded["entries"]
+            assert len(loaded["entries"]) == 5, loaded["entries"]
             assert backend._decode_scoped_permissions(loaded["scoped_entries"]) == backend._decode_scoped_permissions(normalized["scoped_entries"])
             assert "scoped_entries:" in backend.CONFIG_PATH.read_text(encoding="utf-8")
             assert "scoped_entries:" in backend.QUANXIAN_PATH.read_text(encoding="utf-8")
             # A legacy editor saving name-only roles must never delete scoped rules.
             backend.save_quanxian({k: loaded[k] for k in ("super_admin", "admin", "jianzhang", "member", "blacklist")})
-            assert len(backend.load_quanxian()["entries"]) == 6
+            assert len(backend.load_quanxian()["entries"]) == 5
             # Explicit empty list revokes scopes.
             backend.save_quanxian({**{k: [] for k in ("super_admin", "admin", "jianzhang", "member", "blacklist")}, "scoped_entries": []})
             assert backend.load_quanxian()["entries"] == []

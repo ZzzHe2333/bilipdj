@@ -295,7 +295,7 @@ def _build_plugin_manager_tab(panel: Any, module: Any) -> None:
     panel._issue180_plugins_by_id = {}
 
     actions = module.ttk.Frame(frame)
-    actions.grid(row=4, column=0, sticky="ew", pady=(10, 0))
+    actions.grid(row=5, column=0, sticky="ew", pady=(10, 0))
     install_button = module.ttk.Button(actions, text="安装插件")
     refresh_button = module.ttk.Button(actions, text="刷新状态")
     toggle_button = module.ttk.Button(actions, text="启用 / 禁用", state="disabled")
@@ -517,7 +517,7 @@ def _build_permissions_page(panel: Any, frame: Any, module: Any) -> None:
         row=0, column=0, sticky="w", pady=(0, 5)
     )
     module.ttk.Label(
-        frame, text="按用户 ID 或历史用户名分配角色；来源平台未勾选时代表全平台。",
+        frame, text="来源平台仅限定最高管理员、管理员（不选＝全平台）；舰长只属于 B站，成员为普通用户。",
         wraplength=800, justify="left"
     ).grid(row=1, column=0, sticky="w", pady=(0, 10))
 
@@ -534,7 +534,7 @@ def _build_permissions_page(panel: Any, frame: Any, module: Any) -> None:
     scroll.grid(row=2, column=1, sticky="ns")
     tree.configure(yscrollcommand=scroll.set)
     panel._permission_tree = tree
-    role_labels = {"super_admin": "最高管理员", "admin": "管理员", "jianzhang": "舰长", "member": "成员"}
+    role_labels = {"super_admin": "最高管理员", "admin": "管理员"}
     platforms = {"bilibili": "Bilibili", "douyin": "抖音", "huya": "虎牙", "youtube": "YouTube", "twitch": "Twitch"}
 
     def redraw() -> None:
@@ -619,10 +619,28 @@ def _build_permissions_page(panel: Any, frame: Any, module: Any) -> None:
         module.ttk.Button(footer, text="保存", command=commit).pack(side="right")
         id_input.focus_set()
 
-    # Keep the existing global blacklist editor while privileged roles migrate
-    # to the structured per-platform list. Blacklist is not a scoped role.
+    # Bilibili guard / ordinary member are legacy user-name lists, and must
+    # never go through the administrator multi-platform selector.
+    legacy_group = module.ttk.Frame(frame)
+    legacy_group.grid(row=3, column=0, sticky="ew", pady=(9, 0))
+    legacy_group.columnconfigure(0, weight=1)
+    legacy_group.columnconfigure(1, weight=1)
+    for col, (role, label) in enumerate((
+        ("jianzhang", "舰长（仅 B站，按旧用户名）"),
+        ("member", "成员（普通用户，不授予管理权）"),
+    )):
+        card = module.ttk.LabelFrame(legacy_group, text=label, padding=7)
+        card.grid(row=0, column=col, sticky="nsew", padx=(0, 5) if col == 0 else (5, 0))
+        card.columnconfigure(0, weight=1)
+        editor_widget = module.tk.Text(card, height=3, wrap="word", undo=True)
+        editor_widget.grid(row=0, column=0, sticky="ew")
+        panel._quanxian_text[role] = editor_widget
+        if isinstance(getattr(panel, "_all_text_widgets", None), list):
+            panel._all_text_widgets.append(editor_widget)
+
+    # Global blacklist remains independent from scoped administrator roles.
     blacklist_card = module.ttk.LabelFrame(frame, text="黑名单（全平台，仍按用户名匹配）", padding=7)
-    blacklist_card.grid(row=3, column=0, sticky="ew", pady=(9, 0))
+    blacklist_card.grid(row=4, column=0, sticky="ew", pady=(9, 0))
     blacklist_card.columnconfigure(0, weight=1)
     blacklist_editor = module.tk.Text(blacklist_card, height=3, wrap="word", undo=True)
     blacklist_editor.grid(row=0, column=0, sticky="ew")
@@ -632,7 +650,7 @@ def _build_permissions_page(panel: Any, frame: Any, module: Any) -> None:
 
     actions = module.ttk.Frame(frame)
     actions.grid(row=4, column=0, sticky="ew", pady=(10, 0))
-    module.ttk.Button(actions, text="＋ 新增权限", command=lambda: editor()).pack(side="left")
+    module.ttk.Button(actions, text="＋ 新增管理员", command=lambda: editor()).pack(side="left")
     module.ttk.Button(actions, text="刷新", command=panel._load_quanxian).pack(side="right")
     module.ttk.Button(actions, text="保存全部", command=panel._save_quanxian).pack(side="right", padx=8)
     tree.bind("<Double-1>", lambda event: editor(int(tree.selection()[0])) if tree.selection() else None)
