@@ -711,8 +711,42 @@ def read_queue_archive_entries(path: Path) -> list[dict[str, str]]:
     return parse_queue_archive_rows(rows)[1]
 
 
+def _backup_existing_queue_slot(path: Path) -> None:
+    """Best-effort bounded local history before replacing the shared queue CSV.
+
+    Back up at most once per 30-minute bucket per queue slot. Avoid disk churn
+    while live rooms receive many rapid messages. This does not affect WebDAV.
+    """
+    if path.parent != PD_DIR or not re.fullmatch(r"queue_archive_slot_\\d+\\.csv", path.name):
+        return
+    if not path.is_file():
+        return
+    target_root = Path(globals().get("BACKUP_DIR", APP_DIR / "backup")) / "queue" / path.stem
+    # Stable time buckets mean checks after the first copy are O(1).
+    bucket = int(time.time() // (30 * 60))
+    target = target_root / f"{bucket}.csv"
+    if target.is_file():
+        return
+    try:
+        import shutil  # imported lazily to keep the server's common path small
+        target_root.mkdir(parents=True, exist_ok=True)
+        temp = target.with_name("." + target.name + f".{os.getpid()}.tmp")
+        try:
+            shutil.copy2(path, temp)
+            os.replace(temp, target)
+        finally:
+            temp.unlink(missing_ok=True)
+        snapshots = sorted(target_root.glob("*.csv"), key=lambda entry: entry.name)
+        for stale in snapshots[:-96]:
+            stale.unlink(missing_ok=True)
+    except OSError:
+        # A full/read-only backup volume must never break live queue persistence.
+        logging.getLogger("danmuji.backend").warning("Queue backup unavailable: %s", target)
+
+
 def write_queue_archive_entries(path: Path, entries: list[dict[str, Any]], meta: dict[str, Any] | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    _backup_existing_queue_slot(path)
     metadata = meta if isinstance(meta, dict) else {}
     timestamp = _format_archive_timestamp(metadata.get("timestamp"))
     buffer = io.StringIO(newline="")
