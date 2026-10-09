@@ -72,12 +72,23 @@ def _application_dir() -> Path:
 
 
 def _startup_log_path() -> Path:
-    # Bootstrap failures occur before the backend initializes runtime paths.
-    # Resolve OS-specific log storage independently; do not rely on the
-    # portable executable folder being writable (Program Files, etc.).
-    from apps.server.user_data_paths import preferred_log_root, preferred_root
-    root = preferred_root(_application_dir())
-    return preferred_log_root(root) / GUI_STARTUP_LOG_NAME
+    # This path must work even if importing apps.server raised an exception.
+    # Never import the backend again while logging an early startup failure.
+    override = str(os.environ.get("BILIPDJ_DATA_DIR", "") or "").strip()
+    if override:
+        data = Path(override).expanduser()
+        if not data.is_absolute():
+            data = _application_dir() / data
+        directory = data / "log"
+    elif sys.platform == "win32":
+        directory = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "bilipdj" / "log"
+    elif sys.platform == "darwin":
+        directory = Path.home() / "Library" / "Logs" / "bilipdj"
+    else:
+        value = str(os.environ.get("XDG_STATE_HOME", "") or "").strip()
+        base = Path(value).expanduser() if value and Path(value).expanduser().is_absolute() else Path.home() / ".local" / "state"
+        directory = base / "bilipdj" / "log"
+    return directory / GUI_STARTUP_LOG_NAME
 
 
 def _write_startup_error(message: str, *, exc: BaseException | None = None, trace: str = "") -> Path:
