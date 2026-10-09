@@ -170,7 +170,7 @@ def _merge_candidates(candidates, dst: Path, *, chooser=None, state_root: Path |
         saved_sources = {}
     current_sources = dict(saved_sources)
     manifest_keys = {
-        (src, dest): str(src) + " -> " + str(dest.relative_to(dst)) if dest.is_relative_to(dst) else str(dest)
+        (src, dest): str(src) + " -> " + (str(dest.relative_to(dst)) if dest.is_relative_to(dst) else str(dest))
         for src, dest in candidates
     }
     source_hashes = {(src, dest): _digest(src) for src, dest in candidates}
