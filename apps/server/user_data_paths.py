@@ -16,6 +16,8 @@ from pathlib import Path
 DATA_FILES = (
     "core/config.yaml", "core/quanxian.yaml", "core/kaiguan.yaml",
     "core/blacklist.csv", "core/cd", "key", "plugins",
+    "config.yaml", "quanxian.yaml", "kaiguan.yaml", "blacklist.csv",
+    "update-result.json",
     "style.json", "appearance.json", "webdav_backup.json",
     "gift_compatibility.json", "language.json",
 )
@@ -45,6 +47,24 @@ def preferred_root(app_dir: Path, *, platform: str | None = None, environ: dict 
         base = Path(custom).expanduser() if custom and Path(custom).expanduser().is_absolute() else user_home / ".local" / "share"
     return (base / "bilipdj").resolve()
 
+
+
+def preferred_log_root(data_root: Path, *, platform: str | None = None, environ: dict | None = None,
+                       home: Path | None = None) -> Path:
+    """Large logs do not belong to Windows roaming profile synchronization."""
+    env = dict(os.environ if environ is None else environ)
+    if str(env.get("BILIPDJ_DATA_DIR", "") or "").strip():
+        return Path(data_root) / "log"
+    plat = platform if platform is not None else sys.platform
+    user_home = Path(home) if home is not None else Path.home()
+    if plat == "win32":
+        base = Path(env["LOCALAPPDATA"]) if env.get("LOCALAPPDATA") else user_home / "AppData" / "Local"
+        return (base / "bilipdj" / "log").resolve()
+    if plat == "darwin":
+        return (user_home / "Library" / "Logs" / "bilipdj").resolve()
+    custom = str(env.get("XDG_STATE_HOME", "") or "").strip()
+    base = Path(custom).expanduser() if custom and Path(custom).expanduser().is_absolute() else user_home / ".local" / "state"
+    return (base / "bilipdj" / "log").resolve()
 
 def _digest(path: Path) -> str:
     h = hashlib.sha256()
@@ -110,9 +130,13 @@ def migrate(app_dir: Path, destination: Path, *, chooser=None, defaults_dir: Pat
         rel = Path(rel_text)
         for src_rel, src in _files(app, rel):
             dest_rel = src_rel
-            if rel_text in ("style.json", "appearance.json", "webdav_backup.json", "gift_compatibility.json", "language.json"):
-                dest_rel = src_rel
-            candidates.append((src, dst / dest_rel))
+            if rel_text in ("config.yaml", "quanxian.yaml", "kaiguan.yaml", "blacklist.csv"):
+                dest_rel = Path("core") / src_rel
+            elif rel_text == "update-result.json":
+                dest_rel = Path("key") / src_rel
+            target = dst / dest_rel
+            if not any(previous_target == target for _, previous_target in candidates):
+                candidates.append((src, target))
     if defaults_dir:
         defaults = Path(defaults_dir).resolve()
         if defaults != app:
