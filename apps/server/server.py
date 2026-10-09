@@ -3305,7 +3305,20 @@ def apply_css_archive_to_live(slot: int, *, force: bool = False) -> bool:
     return True
 
 
-def load_style() -> dict[str, Any]:
+def load_style(client: str = "web") -> dict[str, Any]:
+    if client not in ("web", "win"):
+        raise ValueError("unknown style client")
+    if client == "win":
+        # Windows front-end customization is independent of Web/Go/OBS style.
+        result = dict(DEFAULT_STYLE)
+        source = _YAML_DIR / "style-win.json"
+        try:
+            values = json.loads(source.read_text(encoding="utf-8"))
+            if isinstance(values, dict):
+                result.update(values)
+        except (OSError, json.JSONDecodeError):
+            pass
+        return result
     ensure_style_css_archives()
     raw_config = _read_raw_config()
     result = dict(DEFAULT_STYLE)
@@ -3331,9 +3344,14 @@ def load_style() -> dict[str, Any]:
 
 
 @_serialized_config_io
-def save_style(data: dict[str, Any]) -> None:
+def save_style(data: dict[str, Any], client: str = "web") -> None:
+    if client not in ("web", "win"):
+        raise ValueError("unknown style client")
     merged = dict(DEFAULT_STYLE)
     merged.update(data)
+    if client == "win":
+        _atomic_write_text(_YAML_DIR / "style-win.json", json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+        return
     _atomic_write_text(STYLE_PATH, json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
     current = _merge_config(DEFAULT_CONFIG, _read_raw_config())
     current["style"] = merged
