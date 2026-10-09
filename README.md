@@ -213,7 +213,7 @@ POST /api/appearance/profile?client=win
 | Linux | `$XDG_DATA_HOME/bilipdj`；默认 `~/.local/share/bilipdj` | `$XDG_STATE_HOME/bilipdj/log`；默认 `~/.local/state/bilipdj/log` |
 | Docker / 自定义 | `BILIPDJ_DATA_DIR` 指定的绝对或相对路径（例如 `/data`） | 数据目录的 `log/` |
 
-迁移不会删除原始项目文件。当两边存在内容不同的文件时，启动时会要求选择用户目录或项目目录，并在覆写用户目录数据前留下迁移备份。无终端、无可用图形界面时会安全停止，不擅自覆盖任何一份数据。
+迁移不会删除原始项目文件。当两边存在内容不同的文件时，启动时会要求选择用户目录或项目目录，并在覆写用户目录数据前留下迁移备份。无终端、无可用图形界面时会安全停止，不擅自覆盖任何一份数据。远程/无头环境可在明确决定后临时设置 `BILIPDJ_MIGRATION_CHOICE=user`（使用用户数据目录）或 `BILIPDJ_MIGRATION_CHOICE=project`（导入项目文件），仅在发生数据冲突时使用该设置。
 
 ## 📡 默认地址
 
