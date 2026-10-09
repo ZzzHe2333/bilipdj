@@ -8,6 +8,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .user_data_paths import preferred_root, migrate, seed_client_styles
+
 CORE_CONFIG_FILES = ("config.yaml", "quanxian.yaml", "kaiguan.yaml")
 LEGACY_UPDATE_METADATA_FILES = ("update-result.json",)
 DEFAULT_DATA_FILES = ("style.json", "appearance.json")
@@ -23,14 +25,7 @@ def resolve_data_dir(app_dir: Path) -> Path:
     ``/data`` without moving program files there.
     """
 
-    app_root = Path(app_dir).resolve()
-    raw = str(os.getenv(DATA_DIR_ENV, "") or "").strip()
-    if not raw:
-        return app_root
-    candidate = Path(raw).expanduser()
-    if not candidate.is_absolute():
-        candidate = app_root / candidate
-    return candidate.resolve()
+    return preferred_root(Path(app_dir))
 
 
 def data_dir_overridden() -> bool:
@@ -145,22 +140,8 @@ def _load_archive_sync():
 
 
 def _sync_windows_roaming_archive(app_root: Path, *, logger: Any | None = None) -> None:
-    # BILIPDJ_DATA_DIR is the Docker/external-storage contract and must not be
-    # mixed with the Windows roaming archive. Off Windows this path is skipped
-    # before loading the helper, preserving lightweight standalone CI probes.
-    if data_dir_overridden() or os.name != "nt":
-        return
-    try:
-        sync_local_data_archive = _load_archive_sync()
-        sync_local_data_archive(app_root, logger=logger)
-    except (ImportError, OSError, ValueError) as exc:
-        # The roaming copy is a recovery mirror, never a reason to stop BiliPDJ
-        # from starting if a profile/permission problem prevents synchronization.
-        if logger is not None:
-            try:
-                logger.warning("Local AppData archive sync unavailable: %s", exc)
-            except Exception:
-                pass
+    """Obsolete mirror. The per-user directory is the live data authority."""
+    return
 
 
 def ensure_runtime_layout(
@@ -194,17 +175,18 @@ def ensure_runtime_layout(
     ):
         path.mkdir(parents=True, exist_ok=True)
 
-    for name in CORE_CONFIG_FILES:
-        _migrate_one(app_root / name, core_dir / name, logger=logger)
-    for name in LEGACY_UPDATE_METADATA_FILES:
-        _migrate_one(app_root / name, key_dir / name, logger=logger)
-
-    if data_dir_overridden() and defaults_dir is not None:
-        source_root = Path(defaults_dir).resolve()
-        for name in DEFAULT_DATA_FILES:
-            _seed_default(source_root / name, data_root / name, logger=logger)
-
-    _sync_windows_roaming_archive(app_root, logger=logger)
+    if data_dir_overridden():
+        # Explicit Docker/hosting mount: never sync with a host user's home.
+        for name in CORE_CONFIG_FILES:
+            _migrate_one(app_root / name, core_dir / name, logger=logger)
+        for name in LEGACY_UPDATE_METADATA_FILES:
+            _migrate_one(app_root / name, key_dir / name, logger=logger)
+        if defaults_dir is not None:
+            for name in DEFAULT_DATA_FILES:
+                _seed_default(Path(defaults_dir) / name, data_root / name, logger=logger)
+    else:
+        migrate(app_root, data_root, defaults_dir=defaults_dir)
+    seed_client_styles(data_root)
     return core_dir, key_dir
 
 
@@ -226,14 +208,14 @@ def configure_server_runtime_layout(server_module: Any) -> tuple[Path, Path]:
     server_module.KEY_DIR = key_dir
     server_module.UPDATE_RESULT_PATH = key_dir / "update-result.json"
 
-    if data_dir_overridden():
+    if True:  # Desktop and Docker both use durable user data.
         server_module._YAML_DIR = data_dir
         server_module.LOG_DIR = data_dir / "log"
         server_module.PD_DIR = core_dir / "cd"
         server_module.QUEUE_STATE_PATH = server_module.PD_DIR / "queue_archive_state.json"
         server_module.BLACKLIST_PATH = server_module.PD_DIR / "blacklist.csv"
-        server_module.STYLE_PATH = data_dir / "style.json"
-        server_module.APPEARANCE_PATH = data_dir / "appearance.json"
+        server_module.STYLE_PATH = data_dir / "style-web.json"
+        server_module.APPEARANCE_PATH = data_dir / "appearance-web.json"
         # Generated CSS belongs in persistent storage, not readonly Web assets.
         server_module.LIVE_STYLE_CSS_PATH = data_dir / "moren.css"
         server_module.PLUGINS_DIR = data_dir / "plugins"
