@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 if __package__:
-    from .user_data_paths import preferred_root, preferred_log_root, migrate, seed_client_styles
+    from .user_data_paths import preferred_root, preferred_log_root, migrate, seed_client_styles, promote_legacy_archive_settings
 else:
     # Runtime layout has standalone file-loader compatibility probes.
     import importlib.util as _importlib_util
@@ -24,6 +24,7 @@ else:
     preferred_log_root = _paths.preferred_log_root
     migrate = _paths.migrate
     seed_client_styles = _paths.seed_client_styles
+    promote_legacy_archive_settings = _paths.promote_legacy_archive_settings
 
 CORE_CONFIG_FILES = ("config.yaml", "quanxian.yaml", "kaiguan.yaml")
 LEGACY_UPDATE_METADATA_FILES = ("update-result.json",)
@@ -190,6 +191,9 @@ def ensure_runtime_layout(
     ):
         path.mkdir(parents=True, exist_ok=True)
 
+    # Recover older Roaming mirror settings before project defaults are copied.
+    promote_legacy_archive_settings(data_root)
+
     if data_dir_overridden():
         # Explicit Docker/hosting mount: never sync with a host user's home.
         for name in CORE_CONFIG_FILES:
@@ -223,18 +227,17 @@ def configure_server_runtime_layout(server_module: Any) -> tuple[Path, Path]:
     server_module.KEY_DIR = key_dir
     server_module.UPDATE_RESULT_PATH = key_dir / "update-result.json"
 
-    if True:  # Desktop and Docker both use durable user data.
-        server_module._YAML_DIR = data_dir
-        server_module.LOG_DIR = preferred_log_root(data_dir)
-        server_module.PD_DIR = core_dir / "cd"
-        server_module.QUEUE_STATE_PATH = server_module.PD_DIR / "queue_archive_state.json"
-        server_module.BLACKLIST_PATH = server_module.PD_DIR / "blacklist.csv"
-        server_module.STYLE_PATH = data_dir / "style-web.json"
-        server_module.APPEARANCE_PATH = data_dir / "appearance-web.json"
-        # Generated CSS belongs in persistent storage, not readonly Web assets.
-        server_module.LIVE_STYLE_CSS_PATH = data_dir / "moren.css"
-        server_module.PLUGINS_DIR = data_dir / "plugins"
-        server_module.BACKUP_DIR = data_dir / "backup"
+    server_module._YAML_DIR = data_dir
+    server_module.LOG_DIR = preferred_log_root(data_dir)
+    server_module.PD_DIR = core_dir / "cd"
+    server_module.QUEUE_STATE_PATH = server_module.PD_DIR / "queue_archive_state.json"
+    server_module.BLACKLIST_PATH = server_module.PD_DIR / "blacklist.csv"
+    server_module.STYLE_PATH = data_dir / "style-web.json"
+    server_module.APPEARANCE_PATH = data_dir / "appearance-web.json"
+    # Generated CSS belongs in persistent storage, not readonly Web assets.
+    server_module.LIVE_STYLE_CSS_PATH = data_dir / "moren.css"
+    server_module.PLUGINS_DIR = data_dir / "plugins"
+    server_module.BACKUP_DIR = data_dir / "backup"
     return core_dir, key_dir
 
 
