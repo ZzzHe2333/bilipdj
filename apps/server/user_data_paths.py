@@ -87,6 +87,11 @@ def _files(root: Path, relative: Path):
 
 def ask_preference(conflicts: list[tuple[Path, Path]]) -> str:
     """Prompt once for a migration conflict; cancel leaves all files intact."""
+    explicit = str(os.getenv("BILIPDJ_MIGRATION_CHOICE", "") or "").strip().lower()
+    if explicit:
+        if explicit in ("user", "project"):
+            return explicit
+        raise DataConflictError("BILIPDJ_MIGRATION_CHOICE 只能为 user 或 project")
     title = "BiliPDJ 发现两处不同的数据"
     message = ("用户数据目录和项目目录均有数据，存在 %d 个冲突文件。\\n"
                "是：使用用户目录；否：导入项目数据（项目原件不会删除）；取消：退出。\\n"
@@ -112,7 +117,7 @@ def ask_preference(conflicts: list[tuple[Path, Path]]) -> str:
                 return "user" if result else "project"
         except (ImportError, RuntimeError, OSError):
             pass
-    raise DataConflictError("存在两份不同的 BiliPDJ 数据；无交互界面时停止迁移，避免错误覆盖。请在桌面环境选择。")
+    raise DataConflictError("存在两份不同的 BiliPDJ 数据；无交互界面时停止迁移，不会覆盖。请在终端设置 BILIPDJ_MIGRATION_CHOICE=user 或 project 后重试。")
 
 
 def migrate(app_dir: Path, destination: Path, *, chooser=None, defaults_dir: Path | None = None):
