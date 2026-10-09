@@ -129,7 +129,7 @@ def check_runtime_wiring() -> None:
     assert "install_queue_clear_dialog(panel_class)" in desktop
     # Issue #311 replaces the destructive roaming mirror with safe copy-only migration.
     assert "user_data.migrate_if_needed(plan)" in runtime_layout
-    assert "_sync_windows_roaming_archive(app_root" not in runtime_layout
+    assert "_sync_windows_roaming_archive(app_root, logger=logger)" not in runtime_layout
     assert "if data_dir_overridden():" in runtime_layout
 
 
