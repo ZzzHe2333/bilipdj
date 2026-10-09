@@ -20,6 +20,8 @@ from . import web_queue_layout as _web_queue_layout
 from . import websocket_performance_guard as _websocket_performance_guard
 from .runtime_layout import data_dir_overridden as _data_dir_overridden
 from .user_data_paths import preferred_log_root as _preferred_log_root
+from .user_data_paths import preferred_archive_dir as _preferred_archive_dir
+from .user_data_paths import preferred_backup_dir as _preferred_backup_dir
 from .runtime_layout import ensure_runtime_layout as _ensure_runtime_layout
 from .runtime_layout import resolve_data_dir as _resolve_data_dir
 
@@ -94,7 +96,7 @@ def configure_runtime_paths(module: Any = server) -> Any:
     module.UI_DIR = ui_dir
     module.CONFIG_PATH = runtime_core_dir / "config.yaml"
     module.LOG_DIR = _preferred_log_root(data_dir)
-    module.PD_DIR = runtime_core_dir / "cd"
+    module.PD_DIR = _preferred_archive_dir(app_dir)
     module.QUEUE_STATE_PATH = module.PD_DIR / "queue_archive_state.json"
     module.BLACKLIST_PATH = runtime_core_dir / "blacklist.csv"
     module.QUANXIAN_PATH = runtime_core_dir / "quanxian.yaml"
@@ -104,7 +106,7 @@ def configure_runtime_paths(module: Any = server) -> Any:
     module.KEY_DIR = key_dir
     module.UPDATE_RESULT_PATH = key_dir / "update-result.json"
     module.PLUGINS_DIR = data_dir / "plugins"
-    module.BACKUP_DIR = data_dir / "backup"
+    module.BACKUP_DIR = _preferred_backup_dir(app_dir)
     module.LIVE_STYLE_CSS_PATH = data_dir / "moren.css"
     module._CONFIG_LOCK_PATH = runtime_core_dir / ".config.lock"
     return module
