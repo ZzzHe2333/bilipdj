@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import copy
 import csv
 import datetime as dt
@@ -2907,7 +2908,7 @@ def _decode_scoped_permissions(raw: Any) -> list[dict[str, Any]]:
                 continue
             seen.add(key)
             results.append({"role": role, "kind": kind, "id": identity, "platforms": platforms})
-        except (ValueError, TypeError, UnicodeError, json.JSONDecodeError):
+        except (ValueError, TypeError, UnicodeError, binascii.Error):
             continue
     return results
 
