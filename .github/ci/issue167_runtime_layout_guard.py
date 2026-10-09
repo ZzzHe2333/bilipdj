@@ -33,9 +33,9 @@ def check_runtime_migration() -> None:
         core, key = layout.ensure_runtime_layout(app)
         for name in ("config.yaml", "quanxian.yaml", "kaiguan.yaml"):
             assert (core / name).is_file(), name
-            assert not (app / name).exists(), f"legacy root {name} was not migrated"
+            assert (app / name).is_file(), f"original {name} must remain intact"
         assert (key / "update-result.json").is_file()
-        assert not (app / "update-result.json").exists()
+        assert (app / "update-result.json").is_file(), "original metadata must remain"
 
     with tempfile.TemporaryDirectory() as raw:
         app = Path(raw)
@@ -49,10 +49,21 @@ def check_runtime_migration() -> None:
         os.utime(target, ns=(old, old))
         now = time.time_ns()
         os.utime(source, ns=(now, now))
-        core_dir, _key_dir = layout.ensure_runtime_layout(app)
-        assert (core_dir / "config.yaml").read_text(encoding="utf-8") == "server:\n  port: 9988\n"
-        backups = list((core_dir / "migration-backup").glob("config.yaml.legacy-root-*"))
-        assert backups, "previous core config was not preserved during conflict migration"
+        # A newer mtime must never silently choose a source: explicit consent
+        # (or a GUI prompt) is required before overwriting user data.
+        previous = os.environ.get("BILIPDJ_MIGRATION_CHOICE")
+        os.environ["BILIPDJ_MIGRATION_CHOICE"] = "project"
+        try:
+            core_dir, _key_dir = layout.ensure_runtime_layout(app)
+        finally:
+            if previous is None:
+                os.environ.pop("BILIPDJ_MIGRATION_CHOICE", None)
+            else:
+                os.environ["BILIPDJ_MIGRATION_CHOICE"] = previous
+        assert (core_dir / "config.yaml").read_text(encoding="utf-8") == "server:\\n  port: 9988\\n"
+        assert source.read_text(encoding="utf-8") == "server:\\n  port: 9988\\n"
+        backups = list((app / "migration-backup" / "core").glob("config.yaml.before-import-*"))
+        assert backups, "overwritten config must be kept under versioned migration backup"
         assert "9816" in backups[0].read_text(encoding="utf-8")
 
 
