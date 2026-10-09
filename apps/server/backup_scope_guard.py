@@ -118,6 +118,12 @@ def install_backup_scope_guard(backup_module: Any, server_module: Any) -> bool:
             for name in tuple(getattr(backup_module, "SETTINGS_FILES", ())):
                 if name in _STYLE_FILES:
                     enabled = selected["backup_style"]
+                elif name.startswith("cdang_") and name.endswith(".css"):
+                    # Queue CSS is both a theme and a slot archive asset.
+                    enabled = selected["backup_style"] or selected["backup_archive"]
+                elif name.startswith("pingtai_config_") and name.endswith(".yaml"):
+                    # Platform slots are required by both config and archive restores.
+                    enabled = selected["backup_config"] or selected["backup_archive"]
                 elif name in archive_name_set:
                     enabled = selected["backup_archive"]
                 else:
