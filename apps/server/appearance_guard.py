@@ -59,9 +59,10 @@ PALETTE_KEYS = tuple(DEFAULT_APPEARANCE["dark"].keys())
 
 
 def _appearance_path(server_module: Any, client: str = "web") -> Path:
+    root = Path(getattr(server_module, "_YAML_DIR"))
     if client == "win":
-        return Path(getattr(server_module, "APPEARANCE_WIN_PATH", Path(getattr(server_module, "_YAML_DIR")) / "appearance-win.json"))
-    return Path(getattr(server_module, "APPEARANCE_PATH", Path(getattr(server_module, "_YAML_DIR")) / "appearance.json")
+        return Path(getattr(server_module, "APPEARANCE_WIN_PATH", root / "appearance-win.json"))
+    return Path(getattr(server_module, "APPEARANCE_PATH", root / "appearance.json"))
 
 
 def _style_api(server_module: Any, client: str) -> tuple[Any, Any]:
