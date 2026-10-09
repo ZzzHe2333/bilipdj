@@ -122,6 +122,7 @@ def _configure_control_panel_paths() -> None:
     control_panel.CORE_DIR = windows_dir
     control_panel.BUNDLE_DIR = bundle_root
     control_panel.APP_DIR = app_dir
+    control_panel.DATA_DIR = config_dir.parent
     control_panel._YAML_DIR = config_dir
     control_panel.BUNDLE_CORE_DIR = bundle_root / "apps" / "windows"
     control_panel.RUNTIME_CORE_DIR = windows_dir
