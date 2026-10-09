@@ -178,6 +178,34 @@ def main():
             assert (mounted / "backup").is_dir()
             assert not (mounted / "archives").exists()
 
+    # Runtime queue writes produce a bounded Local backup of the previous
+    # unified (multi-platform) queue, without backing up unrelated CSV files.
+    from apps.server import server as live_backend
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        old_pd_dir = live_backend.PD_DIR
+        old_backup_dir = getattr(live_backend, "BACKUP_DIR", None)
+        try:
+            live_backend.PD_DIR = root / "archives"
+            live_backend.BACKUP_DIR = root / "backups"
+            slot = live_backend.PD_DIR / "queue_archive_slot_1.csv"
+            first = [{"id": "A", "content": "first", "platform": "bilibili"}]
+            second = [{"id": "B", "content": "second", "platform": "douyin"}]
+            live_backend.write_queue_archive_entries(slot, first)
+            live_backend.write_queue_archive_entries(slot, second)
+            backups = list((root / "backups/queue/queue_archive_slot_1").glob("*.csv"))
+            assert len(backups) == 1, backups
+            assert "bilibili" in backups[0].read_text(encoding="utf-8-sig")
+            assert "douyin" in slot.read_text(encoding="utf-8-sig")
+            live_backend.write_queue_archive_entries(slot, first)
+            assert len(list((root / "backups/queue/queue_archive_slot_1").glob("*.csv"))) == 1
+        finally:
+            live_backend.PD_DIR = old_pd_dir
+            if old_backup_dir is None:
+                delattr(live_backend, "BACKUP_DIR")
+            else:
+                live_backend.BACKUP_DIR = old_backup_dir
+
     backend = (ROOT / "apps/server/server.py").read_text(encoding="utf-8")
     win = (ROOT / "apps/windows/control_panel.py").read_text(encoding="utf-8")
     layout = (ROOT / "apps/server/runtime_layout.py").read_text(encoding="utf-8")
