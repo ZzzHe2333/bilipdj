@@ -19,6 +19,8 @@ from . import style_option_guard as _style_option_guard
 from . import web_queue_layout as _web_queue_layout
 from . import websocket_performance_guard as _websocket_performance_guard
 from .runtime_layout import data_dir_overridden as _data_dir_overridden
+from .runtime_layout import data_root_is_external as _data_root_is_external
+from . import user_data as _user_data
 from .runtime_layout import ensure_runtime_layout as _ensure_runtime_layout
 from .runtime_layout import resolve_data_dir as _resolve_data_dir
 
@@ -63,13 +65,13 @@ def configure_runtime_paths(module: Any = server) -> Any:
     app_dir = Path(sys.executable).resolve().parent if frozen else REPO_ROOT
     compatibility_core_dir = REPO_ROOT / "core"
     data_dir = _resolve_data_dir(app_dir)
-    external_data_dir = _data_dir_overridden()
+    external_data_dir = _data_root_is_external(app_dir)
     runtime_core_dir, key_dir = _ensure_runtime_layout(
         app_dir,
         defaults_dir=compatibility_core_dir,
     )
-    # Legacy source/portable layouts stay unchanged unless BILIPDJ_DATA_DIR is
-    # explicitly configured. Docker uses the external data root for settings.
+    # User settings follow the OS account directory; explicit Docker volumes
+    # remain authoritative; unresolved conflicts safely read the old root.
     misc_config_dir = data_dir if external_data_dir else (app_dir if frozen else compatibility_core_dir)
 
     source_web = REPO_ROOT / "apps" / "web" / "static"
@@ -92,14 +94,16 @@ def configure_runtime_paths(module: Any = server) -> Any:
     module.BUNDLE_UI_DIR = bundled_web
     module.UI_DIR = ui_dir
     module.CONFIG_PATH = runtime_core_dir / "config.yaml"
-    module.LOG_DIR = (data_dir if external_data_dir else app_dir) / "log"
+    module.LOG_DIR = ((data_dir / "log") if _data_dir_overridden() else (_user_data.local_log_root() if external_data_dir else app_dir / "log"))
     module.PD_DIR = runtime_core_dir / "cd"
     module.QUEUE_STATE_PATH = module.PD_DIR / "queue_archive_state.json"
     module.BLACKLIST_PATH = runtime_core_dir / "blacklist.csv"
     module.QUANXIAN_PATH = runtime_core_dir / "quanxian.yaml"
     module.KAIGUAN_PATH = runtime_core_dir / "kaiguan.yaml"
-    module.STYLE_PATH = misc_config_dir / "style.json"
-    module.APPEARANCE_PATH = misc_config_dir / "appearance.json"
+    module.STYLE_PATH = misc_config_dir / ("style-web.json" if external_data_dir and not _data_dir_overridden() else "style.json")
+    module.STYLE_WIN_PATH = misc_config_dir / ("style-win.json" if external_data_dir and not _data_dir_overridden() else "style-win.json")
+    module.APPEARANCE_PATH = misc_config_dir / ("appearance-web.json" if external_data_dir and not _data_dir_overridden() else "appearance.json")
+    module.APPEARANCE_WIN_PATH = misc_config_dir / "appearance-win.json"
     module.KEY_DIR = key_dir
     module.UPDATE_RESULT_PATH = key_dir / "update-result.json"
     module.PLUGINS_DIR = (data_dir if external_data_dir else app_dir) / "plugins"
