@@ -72,7 +72,12 @@ def _application_dir() -> Path:
 
 
 def _startup_log_path() -> Path:
-    return _application_dir() / "log" / GUI_STARTUP_LOG_NAME
+    # Bootstrap failures occur before the backend initializes runtime paths.
+    # Resolve OS-specific log storage independently; do not rely on the
+    # portable executable folder being writable (Program Files, etc.).
+    from apps.server.user_data_paths import preferred_log_root, preferred_root
+    root = preferred_root(_application_dir())
+    return preferred_log_root(root) / GUI_STARTUP_LOG_NAME
 
 
 def _write_startup_error(message: str, *, exc: BaseException | None = None, trace: str = "") -> Path:
