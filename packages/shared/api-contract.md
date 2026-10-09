@@ -70,8 +70,8 @@ Content-Type: application/json
 | GET | `/api/kaiguan` | 功能开关 |
 | GET | `/api/style` | 当前 OBS/队列展示样式 |
 | POST | `/api/style` | 保存 OBS/队列展示样式 |
-| GET | `/api/appearance` | 读取 Windows/Web 通用界面主题 |
-| POST | `/api/appearance` | 保存 Windows/Web 通用界面主题 |
+| GET | `/api/appearance` | 读取 Web 默认或 ?client=win 的 Windows 界面主题 |
+| POST | `/api/appearance` | 保存 Web 默认或 ?client=win 的 Windows 界面主题 |
 | GET | `/api/appearance/profile` | 导出 Windows/Web/OBS 通用配置 |
 | POST | `/api/appearance/profile` | 导入 Windows/Web/OBS 通用配置 |
 | GET | `/api/platforms/active` | 查询激活平台 |
@@ -401,14 +401,14 @@ BiliPDJ Server :9816
 - 新客户端与新代码应使用 `apps.server` 和公开 HTTP / WebSocket 契约；
 - `queue[]`、旧 `entry` 字段继续兼容，但新代码优先结构化 `entries`、`username`、`content`；
 - 旧 `style.json` 保持为 OBS/队列展示样式，不会被新的界面主题系统废弃；
-- 旧 Web `localStorage` 主题对象可自动迁移到 `appearance.json`；
-- 新主题/样式以 Server 返回为准，Windows/Web 不再维护互不兼容的独立主题文件。
+- 旧 Web `localStorage` 主题对象可迁移到 `appearance-web.json`；
+- 新主题/样式以 Server 返回为准，Windows 使用 `-win` 文件，Web 及未来 Go Web 前端使用 `-web` 文件，互不覆盖。
 
-## 14. Windows / Web / OBS 通用主题与样式配置
+## 14. Windows / Web 分离的主题与样式配置
 
-### 14.1 `appearance.json`
+### 14.1 `appearance-win.json` 与 `appearance-web.json`
 
-Windows Tk 与 Web 控制台使用同一套 `appearance.json`。Server 是唯一持久化来源。
+Windows Tk 与 Web 控制台共享 Server API 和队列，但主题文件分离：Windows 为 `appearance-win.json`，Web（含未来 Go Web 前端）为 `appearance-web.json`。通过 `?client=win` 明确请求 Windows，默认使用 Web。
 
 ```json
 {
@@ -483,11 +483,11 @@ Windows 与 Web 的“导出通用配置”生成同一种 JSON：
 }
 ```
 
-- `appearance`：Windows/Web 控制台共同的界面主题；
-- `display_style`：现有 `style.json`，用于 OBS/队列展示；
+- `appearance`：由 `client` 指定的当前客户端界面主题；
+- `display_style`：由 `client` 指定的 `style-win.json` 或 `style-web.json`；
 - Windows 导出后可以在 Web 直接导入；
 - Web 导出后可以在 Windows 直接导入；
-- 配置备份 ZIP/WebDAV 也包含 `appearance.json`。
+- 配置备份 ZIP/WebDAV 同时支持旧 `appearance.json` 和新的 `appearance-win.json` / `appearance-web.json`。
 
 导出：
 
