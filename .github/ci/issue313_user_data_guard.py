@@ -8,7 +8,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from apps.server.user_data_paths import preferred_root, migrate, seed_client_styles, promote_legacy_archive_settings, DataConflictError
+from apps.server.user_data_paths import (preferred_root, preferred_state_root, preferred_archive_dir,
+    preferred_backup_dir, migrate, migrate_legacy_local_state, seed_client_styles,
+    promote_legacy_archive_settings, DataConflictError)
 
 
 def main():
@@ -24,6 +26,21 @@ def main():
         assert preferred_root(app, platform="linux", environ={"XDG_DATA_HOME": "relative"}, home=home) == (home / ".local" / "share" / "bilipdj").resolve()
         explicit = home / "docker-volume"
         assert preferred_root(app, platform="darwin", environ={"BILIPDJ_DATA_DIR": str(explicit)}, home=home) == explicit.resolve()
+        windows_env = {
+            "APPDATA": str(home / "AppData" / "Roaming"),
+            "LOCALAPPDATA": str(home / "AppData" / "Local"),
+        }
+        roaming = preferred_root(app, platform="win32", environ=windows_env, home=home)
+        local = preferred_state_root(app, platform="win32", environ=windows_env, home=home)
+        assert roaming == home / "AppData" / "Roaming" / "bilipdj"
+        assert local == home / "AppData" / "Local" / "bilipdj"
+        assert preferred_archive_dir(app, platform="win32", environ=windows_env, home=home) == local / "archives"
+        assert preferred_backup_dir(app, platform="win32", environ=windows_env, home=home) == local / "backups"
+        assert preferred_archive_dir(app, platform="darwin", environ={}, home=home) == home / "Library" / "Application Support" / "bilipdj" / "archives"
+        assert preferred_backup_dir(app, platform="linux", environ={}, home=home) == home / ".local" / "share" / "bilipdj" / "backups"
+        assert preferred_archive_dir(app, platform="linux", environ={"BILIPDJ_DATA_DIR": str(explicit)}, home=home) == explicit / "core" / "cd"
+        assert preferred_backup_dir(app, platform="linux", environ={"BILIPDJ_DATA_DIR": str(explicit)}, home=home) == explicit / "backup"
+
         # Also honor legacy portable settings at the app root.
         (app / "config.yaml").write_text("portable root", encoding="utf-8")
         source = app / "core" / "config.yaml"
@@ -85,6 +102,56 @@ def main():
         migrate(portable, root / "new-user-data", portable_layout=True)
         assert (root / "new-user-data/core/config.yaml").read_text() == "real portable user data"
         assert (portable / "core/config.yaml").read_text() == "bundled default"
+
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        roaming = root / "roaming" / "bilipdj"
+        local = root / "local" / "bilipdj"
+        project = root / "old-program"
+        old_queue = roaming / "core" / "cd" / "queue_archive_slot_1.csv"
+        old_queue.parent.mkdir(parents=True)
+        old_queue.write_text("from-roaming,queue\\n", encoding="utf-8")
+        old_backup = roaming / "backup" / "snapshot.zip"
+        old_backup.parent.mkdir(parents=True, exist_ok=True)
+        old_backup.write_text("old-backup", encoding="utf-8")
+        moved = migrate_legacy_local_state(roaming, local)
+        assert moved["copied"] == 2, moved
+        assert (local / "archives" / "queue_archive_slot_1.csv").read_text() == "from-roaming,queue\\n"
+        assert (local / "backups" / "snapshot.zip").read_text() == "old-backup"
+        assert old_queue.is_file() and old_backup.is_file()
+        (local / "archives" / "queue_archive_slot_1.csv").write_text("live-queue", encoding="utf-8")
+        migrate_legacy_local_state(roaming, local, chooser=lambda c: (_ for _ in ()).throw(
+            AssertionError("Already migrated source must not conflict with locally edited queue")
+        ))
+        assert (local / "archives" / "queue_archive_slot_1.csv").read_text() == "live-queue"
+        app_queue = project / "core" / "cd" / "queue_archive_slot_1.csv"
+        app_queue.parent.mkdir(parents=True)
+        app_queue.write_text("another-platform-queue", encoding="utf-8")
+        requested = []
+        def choose_local(items):
+            requested.extend(items)
+            return "user"
+        migrate(project, roaming, chooser=choose_local, state_root=local)
+        assert len(requested) == 1
+        assert (local / "archives" / "queue_archive_slot_1.csv").read_text() == "live-queue"
+        app_queue.write_text("new-archive-source", encoding="utf-8")
+        migrate(project, roaming, chooser=lambda c: "project", state_root=local)
+        assert (local / "archives" / "queue_archive_slot_1.csv").read_text() == "new-archive-source"
+        assert list((local / "migration-backup" / "archives").glob("queue_archive_slot_1.csv.before-import-*"))
+        assert app_queue.read_text() == "new-archive-source"
+        # Other platforms use a single shared archive directory, not
+        # platform-specific state roots.
+        assert "bilibili" not in str(local / "archives")
+        assert "douyin" not in str(local / "archives")
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / "core" / "cd").mkdir(parents=True)
+        (root / "core" / "cd" / "queue_archive_slot_2.csv").write_text("mac-old")
+        report = migrate_legacy_local_state(root, root)
+        assert report["copied"] == 1
+        assert (root / "archives" / "queue_archive_slot_2.csv").read_text() == "mac-old"
 
     backend = (ROOT / "apps/server/server.py").read_text(encoding="utf-8")
     win = (ROOT / "apps/windows/control_panel.py").read_text(encoding="utf-8")
