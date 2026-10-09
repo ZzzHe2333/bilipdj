@@ -9,7 +9,9 @@ from pathlib import Path
 from typing import Any
 
 if __package__:
-    from .user_data_paths import preferred_root, preferred_log_root, migrate, seed_client_styles, promote_legacy_archive_settings
+    from .user_data_paths import (preferred_root, preferred_log_root, preferred_state_root,
+        preferred_archive_dir, preferred_backup_dir, migrate, migrate_legacy_local_state,
+        seed_client_styles, promote_legacy_archive_settings)
 else:
     # Runtime layout has standalone file-loader compatibility probes.
     import importlib.util as _importlib_util
@@ -25,6 +27,10 @@ else:
     migrate = _paths.migrate
     seed_client_styles = _paths.seed_client_styles
     promote_legacy_archive_settings = _paths.promote_legacy_archive_settings
+    preferred_state_root = _paths.preferred_state_root
+    preferred_archive_dir = _paths.preferred_archive_dir
+    preferred_backup_dir = _paths.preferred_backup_dir
+    migrate_legacy_local_state = _paths.migrate_legacy_local_state
 
 CORE_CONFIG_FILES = ("config.yaml", "quanxian.yaml", "kaiguan.yaml")
 LEGACY_UPDATE_METADATA_FILES = ("update-result.json",)
@@ -34,12 +40,7 @@ KEY_DIR_NAME = "key"
 
 
 def resolve_data_dir(app_dir: Path) -> Path:
-    """Resolve the user-data root without changing legacy defaults.
-
-    When ``BILIPDJ_DATA_DIR`` is unset, runtime data stays under ``app_dir`` as
-    before. Docker can point the variable at a mounted directory such as
-    ``/data`` without moving program files there.
-    """
+    """Resolve small configuration directory (Roaming, Application Support, XDG)."""
 
     return preferred_root(Path(app_dir))
 
@@ -179,15 +180,20 @@ def ensure_runtime_layout(
     data_root = resolve_data_dir(app_root)
     core_dir = data_root / "core"
     key_dir = data_root / KEY_DIR_NAME
+    state_root = preferred_state_root(app_root)
+    archive_dir = preferred_archive_dir(app_root)
+    backup_dir = preferred_backup_dir(app_root)
 
     for path in (
         data_root,
         core_dir,
         key_dir,
-        data_root / "log",
         data_root / "plugins",
-        data_root / "backup",
-        core_dir / "cd",
+        state_root,
+        state_root / "cache",
+        archive_dir,
+        backup_dir,
+        preferred_log_root(data_root),
     ):
         path.mkdir(parents=True, exist_ok=True)
 
@@ -204,7 +210,11 @@ def ensure_runtime_layout(
             for name in DEFAULT_DATA_FILES:
                 _seed_default(Path(defaults_dir) / name, data_root / name, logger=logger)
     else:
-        migrate(app_root, data_root, defaults_dir=defaults_dir)
+        # Existing profiles may already have old queue data mirrored into
+        # Roaming/core/cd. Bring that into Local FIRST, then check the program
+        # directory separately. Divergent files require a deliberate choice.
+        migrate_legacy_local_state(data_root, state_root)
+        migrate(app_root, data_root, defaults_dir=defaults_dir, state_root=state_root)
     seed_client_styles(data_root)
     return core_dir, key_dir
 
@@ -229,15 +239,15 @@ def configure_server_runtime_layout(server_module: Any) -> tuple[Path, Path]:
 
     server_module._YAML_DIR = data_dir
     server_module.LOG_DIR = preferred_log_root(data_dir)
-    server_module.PD_DIR = core_dir / "cd"
+    server_module.PD_DIR = preferred_archive_dir(app_dir)
     server_module.QUEUE_STATE_PATH = server_module.PD_DIR / "queue_archive_state.json"
-    server_module.BLACKLIST_PATH = server_module.PD_DIR / "blacklist.csv"
+    server_module.BLACKLIST_PATH = core_dir / "blacklist.csv"
     server_module.STYLE_PATH = data_dir / "style-web.json"
     server_module.APPEARANCE_PATH = data_dir / "appearance-web.json"
     # Generated CSS belongs in persistent storage, not readonly Web assets.
     server_module.LIVE_STYLE_CSS_PATH = data_dir / "moren.css"
     server_module.PLUGINS_DIR = data_dir / "plugins"
-    server_module.BACKUP_DIR = data_dir / "backup"
+    server_module.BACKUP_DIR = preferred_backup_dir(app_dir)
     return core_dir, key_dir
 
 
