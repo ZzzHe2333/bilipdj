@@ -20,6 +20,8 @@ DATA_FILES = (
     "update-result.json",
     "style.json", "appearance.json", "webdav_backup.json",
     "gift_compatibility.json", "language.json",
+    "core/style.json", "core/appearance.json", "core/webdav_backup.json",
+    "core/gift_compatibility.json", "core/language.json",
 )
 STYLE_CLIENTS = ("win", "web")
 
@@ -93,9 +95,9 @@ def ask_preference(conflicts: list[tuple[Path, Path]]) -> str:
             return explicit
         raise DataConflictError("BILIPDJ_MIGRATION_CHOICE 只能为 user 或 project")
     title = "BiliPDJ 发现两处不同的数据"
-    message = ("用户数据目录和项目目录均有数据，存在 %d 个冲突文件。\\n"
-               "是：使用用户目录；否：导入项目数据（项目原件不会删除）；取消：退出。\\n"
-               "用户目录：%s\\n项目文件：%s" % (len(conflicts), conflicts[0][1], conflicts[0][0]))
+    message = ("用户数据目录和项目目录均有数据，存在 %d 个冲突文件。\n"
+               "是：使用用户目录；否：导入项目数据（项目原件不会删除）；取消：退出。\n"
+               "用户目录：%s\n项目文件：%s" % (len(conflicts), conflicts[0][1], conflicts[0][0]))
     if sys.stdin and sys.stdin.isatty():
         while True:
             choice = input(f"{title}\\n{message}\\n选 1=用户目录，2=项目目录，q=取消: ").strip().lower()
@@ -139,6 +141,8 @@ def migrate(app_dir: Path, destination: Path, *, chooser=None, defaults_dir: Pat
                 dest_rel = Path("core") / src_rel
             elif rel_text == "update-result.json":
                 dest_rel = Path("key") / src_rel
+            elif rel.parts[0] == "core" and len(rel.parts) == 2 and rel.parts[1].endswith(".json"):
+                dest_rel = Path(rel.parts[1])
             target = dst / dest_rel
             if not any(previous_target == target for _, previous_target in candidates):
                 candidates.append((src, target))
@@ -150,50 +154,68 @@ def migrate(app_dir: Path, destination: Path, *, chooser=None, defaults_dir: Pat
                 target = dst / name
                 if src.is_file() and not src.is_symlink() and not any(t == target for _, t in candidates):
                     candidates.append((src, target))
-    conflict = [(a, b) for a, b in candidates if b.exists() and a.is_file() and b.is_file() and _digest(a) != _digest(b)]
-    # Remember an explicit decision for unchanged source/target fingerprints;
-    # do not repeatedly interrupt startup while old portable files are retained.
-    decision_file = dst / ".migration-decision.json"
-    signature = {
-        str(b.relative_to(dst)): [_digest(a), _digest(b)] for a, b in conflict
-    }
+    # A source fingerprint is a durable *migration history*, not a live mirror:
+    # editing the new config must not turn a previously migrated old copy into
+    # a fresh conflict every time the application restarts.
+    manifest_file = dst / ".migration-sources.json"
     try:
-        previous = json.loads(decision_file.read_text(encoding="utf-8"))
+        saved_sources = json.loads(manifest_file.read_text(encoding="utf-8"))
+        if not isinstance(saved_sources, dict):
+            saved_sources = {}
     except (OSError, ValueError):
-        previous = {}
-    old_choice = previous.get("choice") if previous.get("signature") == signature else None
-    choice = old_choice if old_choice in ("user", "project") else (
-        chooser(conflict) if conflict and chooser else (ask_preference(conflict) if conflict else "user")
-    )
+        saved_sources = {}
+    current_sources = dict(saved_sources)
+    manifest_keys = {
+        (src, dest): str(src) + " -> " + str(dest.relative_to(dst))
+        for src, dest in candidates
+    }
+    source_hashes = {(src, dest): _digest(src) for src, dest in candidates}
+    conflict = [
+        (src, dest) for src, dest in candidates
+        if dest.is_file() and _digest(dest) != source_hashes[(src, dest)]
+        and saved_sources.get(manifest_keys[(src, dest)]) != source_hashes[(src, dest)]
+    ]
+    choice = chooser(conflict) if conflict and chooser else (ask_preference(conflict) if conflict else "user")
     if choice not in ("user", "project"):
         raise DataConflictError("用户未选择有效的迁移来源")
+    # No overwrites are allowed before the conflict choice is settled.
     copied = 0
     for src, dest in candidates:
         if dest.is_symlink() or src.is_symlink():
             continue
+        changed_source = saved_sources.get(manifest_keys[(src, dest)]) != source_hashes[(src, dest)]
         if dest.exists():
-            if choice != "project" or _digest(src) == _digest(dest):
+            if choice != "project" or not changed_source or _digest(src) == _digest(dest):
+                current_sources[manifest_keys[(src, dest)]] = source_hashes[(src, dest)]
                 continue
-            # Never destroy the user-dir copy when choosing the project version.
-            backup = dst / "migration-backup" / dest.relative_to(dst)
-            backup.parent.mkdir(parents=True, exist_ok=True)
-            if backup.exists() and _digest(backup) != _digest(dest):
-                raise DataConflictError(f"冲突备份已存在且内容不同：{backup}")
-            if not backup.exists():
-                shutil.copy2(dest, backup)
+            # Preserve every replaced target; never overwrite a previous
+            # migration backup with a later (different) configuration.
+            backup_dir = dst / "migration-backup" / dest.relative_to(dst).parent
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            suffix = 0
+            while True:
+                backup = backup_dir / (dest.name + f".before-import-{suffix:04d}")
+                if not backup.exists():
+                    break
+                suffix += 1
+            shutil.copy2(dest, backup)
         dest.parent.mkdir(parents=True, exist_ok=True)
         temp = dest.with_name("." + dest.name + ".migrating")
-        shutil.copy2(src, temp)
-        os.replace(temp, dest)
+        try:
+            shutil.copy2(src, temp)
+            os.replace(temp, dest)
+        finally:
+            temp.unlink(missing_ok=True)
         copied += 1
-    if conflict:
-        # Save what was chosen, along with the CURRENT fingerprints so that
-        # the decision remains valid on subsequent launches.
-        current = {str(b.relative_to(dst)): [_digest(a), _digest(b)] for a, b in conflict}
-        decision_file.parent.mkdir(parents=True, exist_ok=True)
-        temp = decision_file.with_suffix(".tmp")
-        temp.write_text(json.dumps({"choice": choice, "signature": current}, indent=2), encoding="utf-8")
-        temp.replace(decision_file)
+        current_sources[manifest_keys[(src, dest)]] = source_hashes[(src, dest)]
+    if candidates:
+        manifest_file.parent.mkdir(parents=True, exist_ok=True)
+        temp = manifest_file.with_suffix(".tmp")
+        try:
+            temp.write_text(json.dumps(current_sources, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.replace(temp, manifest_file)
+        finally:
+            temp.unlink(missing_ok=True)
     return {"copied": copied, "conflicts": len(conflict), "choice": choice}
 
 
