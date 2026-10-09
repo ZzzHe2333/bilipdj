@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from functools import wraps
 from http import HTTPStatus
 from typing import Any
 from urllib.parse import urlparse
@@ -16,6 +17,7 @@ def install_storage_api(server_module: Any) -> None:
     old_get = handler.do_GET
     old_post = handler.do_POST
 
+    @wraps(old_get)
     def do_GET(self: Any) -> None:  # noqa: N802
         if urlparse(self.path).path != "/api/storage/status":
             return old_get(self)
@@ -32,6 +34,7 @@ def install_storage_api(server_module: Any) -> None:
             "user": str(plan["user"]),
         })
 
+    @wraps(old_post)
     def do_POST(self: Any) -> None:  # noqa: N802
         if urlparse(self.path).path != "/api/storage/choice":
             return old_post(self)
