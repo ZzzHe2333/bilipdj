@@ -717,7 +717,7 @@ def _backup_existing_queue_slot(path: Path) -> None:
     Back up at most once per 30-minute bucket per queue slot. Avoid disk churn
     while live rooms receive many rapid messages. This does not affect WebDAV.
     """
-    if path.parent != PD_DIR or not re.fullmatch(r"queue_archive_slot_\\d+\\.csv", path.name):
+    if path.parent != PD_DIR or not re.fullmatch(r"queue_archive_slot_\d+\.csv", path.name):
         return
     if not path.is_file():
         return
