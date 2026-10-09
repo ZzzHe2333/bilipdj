@@ -60,8 +60,8 @@ def check_runtime_migration() -> None:
                 os.environ.pop("BILIPDJ_MIGRATION_CHOICE", None)
             else:
                 os.environ["BILIPDJ_MIGRATION_CHOICE"] = previous
-        assert (core_dir / "config.yaml").read_text(encoding="utf-8") == "server:\\n  port: 9988\\n"
-        assert source.read_text(encoding="utf-8") == "server:\\n  port: 9988\\n"
+        assert (core_dir / "config.yaml").read_text(encoding="utf-8") == "server:\n  port: 9988\n"
+        assert source.read_text(encoding="utf-8") == "server:\n  port: 9988\n"
         backups = list((app / "migration-backup" / "core").glob("config.yaml.before-import-*"))
         assert backups, "overwritten config must be kept under versioned migration backup"
         assert "9816" in backups[0].read_text(encoding="utf-8")
