@@ -220,7 +220,7 @@ def import_profile(server_module: Any, raw: Any, client: str = "web") -> dict[st
             "schema": APPEARANCE_SCHEMA,
             "kind": PROFILE_KIND,
             "appearance": saved,
-            "display_style": server_module.load_style(),
+            "display_style": server_module.load_style(client=client),
         }
 
     # Old style.json can still be imported through the same cross-client file dialog.
@@ -235,7 +235,7 @@ def import_profile(server_module: Any, raw: Any, client: str = "web") -> dict[st
             "schema": APPEARANCE_SCHEMA,
             "kind": PROFILE_KIND,
             "appearance": saved,
-            "display_style": server_module.load_style(),
+            "display_style": server_module.load_style(client=client),
         }
     raise ValueError("无法识别的主题/样式配置格式")
 
