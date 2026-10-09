@@ -220,6 +220,26 @@ def migrate(app_dir: Path, destination: Path, *, chooser=None, defaults_dir: Pat
     return {"copied": copied, "conflicts": len(conflict), "choice": choice}
 
 
+def promote_legacy_archive_settings(data_root: Path) -> None:
+    """Recover settings from the prior Roaming mirror's core/ subfolder.
+
+    Issue #268 mirrored source-mode core/style.json into Roaming/core.
+    New runtime paths use Roaming/style.json. Prefer existing user data over
+    freshly bundled project defaults, without deleting either copy.
+    """
+    root = Path(data_root)
+    for name in ("style.json", "appearance.json", "webdav_backup.json",
+                 "gift_compatibility.json", "language.json"):
+        source = root / "core" / name
+        destination = root / name
+        if destination.exists() or destination.is_symlink():
+            continue
+        if not source.is_file() or source.is_symlink():
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+
+
 def seed_client_styles(data_root: Path) -> None:
     """Imported legacy style becomes a one-time baseline for each client."""
     root = Path(data_root)
