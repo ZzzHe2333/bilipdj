@@ -3983,6 +3983,10 @@ class ControlPanelApp:
                 for item in entries if isinstance(item, dict) and str(item.get("id", "")).strip()
             ]
             self._permission_blacklist = list(data.get("blacklist", []))
+            blacklist_widget = self._quanxian_text.get("blacklist")
+            if blacklist_widget is not None:
+                blacklist_widget.delete("1.0", "end")
+                blacklist_widget.insert("end", "\n".join(self._permission_blacklist))
             self._refresh_permission_list()
             return
         for key, widget in self._quanxian_text.items():
@@ -3994,7 +3998,10 @@ class ControlPanelApp:
         if hasattr(self, "_permission_tree"):
             payload: dict[str, Any] = {
                 "super_admin": [], "admin": [], "jianzhang": [], "member": [],
-                "blacklist": list(getattr(self, "_permission_blacklist", [])),
+                "blacklist": [
+                    line.strip() for line in self._quanxian_text["blacklist"].get("1.0", "end").splitlines()
+                    if line.strip()
+                ] if "blacklist" in self._quanxian_text else list(getattr(self, "_permission_blacklist", [])),
                 "scoped_entries": [],
             }
             for item in self._permission_entries:
@@ -4031,7 +4038,9 @@ class ControlPanelApp:
         try:
             backend_server = load_backend_server_module()
             backend_server.save_quanxian(payload)
-        except Exception:
+        except Exception as exc:
+            if payload.get("scoped_entries"):
+                raise RuntimeError("本地后端不可用，无法安全保存多平台权限；没有覆盖原配置。") from exc
             labels = {
                 "super_admin": "最高管理员：拥有所有权限，包括新增/删除管理员",
                 "admin": "管理员：拥有除新增/删除管理员以外的所有操作权限",
