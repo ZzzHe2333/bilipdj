@@ -213,7 +213,7 @@ POST /api/appearance/profile?client=win
 | Linux | `$XDG_DATA_HOME/bilipdj`（默认 `~/.local/share/bilipdj`） | 同一数据目录下的 `archives/`、`backups/` | `$XDG_STATE_HOME/bilipdj/log`（默认 `~/.local/state/bilipdj/log`） |
 | Docker / 自定义 | `BILIPDJ_DATA_DIR`，例如 `/data` | **保留兼容布局** `/data/core/cd`、`/data/backup` | `/data/log` |
 
-Windows 将高频更新的排队 CSV、队列状态、平台配置槽位以及随槽位保存的显示 CSS 放在本机 Local 目录，不会参与 Roaming 漫游配置同步。缓存位于本机数据目录的 `cache/`；B站、抖音及其他直播平台继续读取同一套 `archives/` 数据，不按直播平台拆分存档。
+Windows 将高频更新的排队 CSV、队列状态、平台配置槽位以及随槽位保存的显示 CSS 放在本机 Local 目录，不会参与 Roaming 漫游配置同步。缓存位于本机数据目录的 `cache/`；B站、抖音及其他直播平台继续读取同一套 `archives/` 数据，不按直播平台拆分存档。**每次更新已有队列槽位前按半小时窗口保留一个旧版本到 `backups/queue/queue_archive_slot_N/`，每槽自动保留最近 96 个快照**（约两天的连续修改），不会在每条弹幕到来时重复复制文件。更新器用于程序回滚的独立快照仍按原更新器约定存放，不与排队存档备份混用。
 
 升级迁移兼容原项目目录的 `core/cd/`、旧 Roaming 镜像的 `core/cd/` / `backup/` 和新 Local 目录。所有迁移保留原文件，只有冲突并经用户明确选择时才覆盖目标，覆盖前保留迁移备份。
 
