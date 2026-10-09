@@ -52,6 +52,8 @@ def install_backup_scope_guard(backup_module: Any, server_module: Any) -> bool:
             "queue_archive_state.json",
             "blacklist.csv",
             *(f"queue_archive_slot_{slot}.csv" for slot in range(1, max_slots + 1)),
+            *(f"pingtai_config_{slot}.yaml" for slot in range(1, max_slots + 1)),
+            *(f"cdang_{slot}.css" for slot in range(1, max_slots + 1)),
         )
         archive_name_set = frozenset(archive_names)
         current_files = tuple(getattr(backup_module, "SETTINGS_FILES", ()))
@@ -77,6 +79,11 @@ def install_backup_scope_guard(backup_module: Any, server_module: Any) -> bool:
             local_max = max(1, int(getattr(self.server, "MAX_QUEUE_ARCHIVE_SLOTS", max_slots) or max_slots))
             for slot in range(1, local_max + 1):
                 paths[f"queue_archive_slot_{slot}.csv"] = pd_dir / f"queue_archive_slot_{slot}.csv"
+                # The platform configuration slot and its queue CSS must be
+                # restored with the corresponding queue CSV, not silently
+                # lost when importing a ZIP or recovering from WebDAV.
+                paths[f"pingtai_config_{slot}.yaml"] = pd_dir / f"pingtai_config_{slot}.yaml"
+                paths[f"cdang_{slot}.css"] = pd_dir / f"cdang_{slot}.css"
             return paths
 
         def load_config(self: Any, *, include_password: bool = False) -> dict[str, Any]:
