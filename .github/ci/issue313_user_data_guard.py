@@ -31,18 +31,23 @@ def main():
         result = migrate(app, target)
         assert result["copied"] and (target / "core/config.yaml").read_text(encoding="utf-8") == "old"
         assert source.read_text(encoding="utf-8") == "old", "Original must be retained"
+        (target / "core/config.yaml").write_text("user edits", encoding="utf-8")
+        migrate(app, target, chooser=lambda conflicts: (_ for _ in ()).throw(
+            AssertionError("Unchanged legacy source must not prompt after destination edits")
+        ))
+        assert (target / "core/config.yaml").read_text() == "user edits"
         source.write_text("project version", encoding="utf-8")
         prompts = []
         def select_user(c):
             prompts.append(len(c))
             return "user"
         migrate(app, target, chooser=select_user)
-        assert prompts == [1] and (target / "core/config.yaml").read_text() == "old"
+        assert prompts == [1] and (target / "core/config.yaml").read_text() == "user edits"
         migrate(app, target, chooser=lambda c: (_ for _ in ()).throw(AssertionError("Repeated prompt")))
         source.write_text("new project", encoding="utf-8")
         migrate(app, target, chooser=lambda c: "project")
         assert (target / "core/config.yaml").read_text() == "new project"
-        assert (target / "migration-backup/core/config.yaml").read_text() == "old"
+        assert len(list((target / "migration-backup/core").glob("config.yaml.before-import-*"))) == 1\n        assert list((target / "migration-backup/core").glob("config.yaml.before-import-*"))[0].read_text() == "user edits"
         assert source.read_text() == "new project"
         other = target / "appearance.json"
         other.write_text(json.dumps({"mode": "light"}), encoding="utf-8")
