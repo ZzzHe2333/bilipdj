@@ -44,7 +44,7 @@ def check_data_dir_layout() -> None:
     with tempfile.TemporaryDirectory() as raw:
         app = Path(raw) / "app"
         app.mkdir()
-        with _with_env(BILIPDJ_DATA_DIR=None):
+        with _with_env(BILIPDJ_DATA_DIR=str(app)):
             core, key = layout.ensure_runtime_layout(app)
             assert core == app / "core"
             assert key == app / "key"
