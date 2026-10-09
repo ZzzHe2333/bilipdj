@@ -46,7 +46,7 @@ BILIPDJ_HOST_PORT=19816 docker compose up -d --build
 
 ## 3. 数据持久化和迁移
 
-默认保留原有 `./data:/data` 绑定：`/data/core/` 保存平台配置、队列和黑名单等，`/data/log/` 为日志、`/data/plugins/` 为插件及私有数据，另外有 `/data/appearance.json`、`/data/style.json`、`/data/key/`、`/data/backup/`。不要将 `/app` 挂载为数据卷；这是应用程序代码。
+保留原有 `./data:/data` 绑定（`BILIPDJ_DATA_DIR=/data` 优先于 Linux XDG 路径）：`/data/core/` 保存平台配置、共享队列和黑名单；`/data/log/` 保存日志，`/data/plugins/` 保存插件数据；`/data/key/` 保存更新信息。Web 与未来 Go Web 前端使用 `/data/appearance-web.json` 和 `/data/style-web.json`；Windows 桌面版单独使用 `appearance-win.json` / `style-win.json`。旧 `appearance.json`、`style.json` 仍作为首次迁移基线保留。不要将 `/app` 挂载为数据卷；这里是代码文件。
 
 ```bash
 docker compose stop
