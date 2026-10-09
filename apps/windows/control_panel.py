@@ -1018,7 +1018,7 @@ class ControlPanelApp:
         style = dict(self._DEFAULT_STYLE)
         try:
             backend_server = load_backend_server_module()
-            data = backend_server.load_style()
+            data = backend_server.load_style(client="win")
             if isinstance(data, dict):
                 style.update(data)
         except Exception:
@@ -2934,7 +2934,7 @@ class ControlPanelApp:
     def _load_style_into_ui_legacy2(self) -> None:
         try:
             backend_server = load_backend_server_module()
-            data = backend_server.load_style()
+            data = backend_server.load_style(client="win")
         except Exception:
             data = {}
         for key, var in self._style_vars.items():
@@ -2963,7 +2963,7 @@ class ControlPanelApp:
         # 始终先写本地文件（index.html 启动时从文件 fetch）
         try:
             backend_server = load_backend_server_module()
-            backend_server.save_style(data)
+            backend_server.save_style(data, client="win")
         except Exception as exc:
             self._append_log(f"[GUI] 样式写入文件失败: {exc}")
             self._style_save_status_var.set("保存失败")
@@ -3182,7 +3182,7 @@ class ControlPanelApp:
     def _load_style_into_ui(self) -> None:
         try:
             backend_server = load_backend_server_module()
-            data = backend_server.load_style()
+            data = backend_server.load_style(client="win")
         except Exception:
             data = {}
         for key, var in self._style_vars.items():
@@ -3225,7 +3225,7 @@ class ControlPanelApp:
             data[key] = bool(var.get())
         try:
             backend_server = load_backend_server_module()
-            backend_server.save_style(data)
+            backend_server.save_style(data, client="win")
         except Exception as exc:
             self._append_log(f"[GUI] 样式写入文件失败: {exc}")
             self._style_save_status_var.set("保存失败")
