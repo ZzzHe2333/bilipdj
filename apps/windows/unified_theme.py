@@ -12,7 +12,7 @@ from tkinter import colorchooser, filedialog, messagebox
 from typing import Any
 
 _PATCH_LOCK = threading.RLock()
-PROFILE_NAME = "BiliPDJ-appearance-profile.json"
+PROFILE_NAME = "BiliPDJ-appearance-win-profile.json"
 
 DEFAULT_APPEARANCE: dict[str, Any] = {
     "schema": 1,
@@ -242,7 +242,7 @@ def _save_to_server(panel: Any, module: Any) -> bool:
     _set_class_palettes(type(panel), saved)
     panel._apply_theme(_resolved_dark(saved))
     _fill_editor(panel)
-    _set_status(panel, "已保存到 Server；Windows/Web 共用 appearance.json。")
+    _set_status(panel, "Windows 专用主题已保存到 appearance-win.json。")
     return True
 
 
