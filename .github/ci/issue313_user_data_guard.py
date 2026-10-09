@@ -153,6 +153,31 @@ def main():
         assert report["copied"] == 1
         assert (root / "archives" / "queue_archive_slot_2.csv").read_text() == "mac-old"
 
+    # Integration: Linux user root carries config, archive root carries data.
+    from unittest.mock import patch
+    from apps.server.runtime_layout import ensure_runtime_layout
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        old_app = root / "repo"
+        old_archive = old_app / "core" / "cd" / "queue_archive_slot_3.csv"
+        old_archive.parent.mkdir(parents=True)
+        old_archive.write_text("bilibili,douyin,shared", encoding="utf-8")
+        xdg = root / "xdg"
+        with patch.dict("os.environ", {"XDG_DATA_HOME": str(xdg), "BILIPDJ_DATA_DIR": ""}):
+            config_core, _ = ensure_runtime_layout(old_app)
+            assert config_core == xdg / "bilipdj" / "core"
+            assert (xdg / "bilipdj" / "archives" / "queue_archive_slot_3.csv").read_text() == "bilibili,douyin,shared"
+            assert (xdg / "bilipdj" / "backups").is_dir()
+            assert (xdg / "bilipdj" / "cache").is_dir()
+            assert old_archive.is_file()
+        mounted = root / "mounted"
+        with patch.dict("os.environ", {"BILIPDJ_DATA_DIR": str(mounted)}):
+            core, _ = ensure_runtime_layout(old_app)
+            assert core == mounted / "core"
+            assert (mounted / "core" / "cd").is_dir()
+            assert (mounted / "backup").is_dir()
+            assert not (mounted / "archives").exists()
+
     backend = (ROOT / "apps/server/server.py").read_text(encoding="utf-8")
     win = (ROOT / "apps/windows/control_panel.py").read_text(encoding="utf-8")
     layout = (ROOT / "apps/server/runtime_layout.py").read_text(encoding="utf-8")
