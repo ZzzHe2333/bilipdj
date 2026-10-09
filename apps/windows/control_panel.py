@@ -1018,7 +1018,7 @@ class ControlPanelApp:
         style = dict(self._DEFAULT_STYLE)
         try:
             backend_server = load_backend_server_module()
-            data = backend_server.load_style()
+            data = backend_server.load_win_style()
             if isinstance(data, dict):
                 style.update(data)
         except Exception:
@@ -2963,21 +2963,14 @@ class ControlPanelApp:
         # 始终先写本地文件（index.html 启动时从文件 fetch）
         try:
             backend_server = load_backend_server_module()
-            backend_server.save_style(data)
+            backend_server.save_win_style(data)
         except Exception as exc:
             self._append_log(f"[GUI] 样式写入文件失败: {exc}")
             self._style_save_status_var.set("保存失败")
             return
         # 如果后端在跑，通知它也刷新（可选）
-        port = self.port_var.get().strip() or "9816"
-        url = f"http://127.0.0.1:{port}/api/style"
-        body = json.dumps(data).encode("utf-8")
-        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
-        try:
-            with urllib.request.urlopen(req, timeout=2):
-                pass
-        except (urllib.error.URLError, TimeoutError):
-            pass
+        # Native Win style must not POST to the Web/OBS /api/style endpoint.
+        # This prevents Tk changes from overwriting style-web.json.
         import time as _t
         self._style_save_status_var.set(f"✓ 修改成功 {_t.strftime('%H:%M:%S')}")
         self._append_log("[GUI] 样式已保存，刷新排队展示页即可生效")

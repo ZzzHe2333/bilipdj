@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import multiprocessing as mp
 import os
 import sys
@@ -35,12 +36,49 @@ _startup_splash.advance(2)
 GUI_STARTUP_LOG_NAME = "gui-startup-error.log"
 
 
+
+def _choose_conflicting_storage() -> None:
+    """Prompt before backend imports bind runtime paths."""
+    if os.getenv("BILIPDJ_DATA_DIR") or os.getenv("BILIPDJ_DATA_CHOICE"):
+        return
+    module_path = REPO_ROOT / "apps" / "server" / "user_data.py"
+    spec = importlib.util.spec_from_file_location("bilipdj_storage_startup", module_path)
+    if spec is None or spec.loader is None:
+        return
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    plan = helper.storage_plan(_application_dir())
+    if not plan.get("conflict"):
+        return
+    from tkinter import messagebox
+
+    dialog = tk.Tk()
+    dialog.withdraw()
+    try:
+        answer = messagebox.askyesnocancel(
+            "BiliPDJ 数据来源冲突",
+            "程序目录和系统用户目录都有数据，不能自动覆盖。\\n\\n"
+            f"旧数据：{plan['legacy']}\\n\\n"
+            f"用户目录：{plan['user']}\\n\\n"
+            "是：读取系统用户目录；否：读取项目目录；取消：退出。\\n"
+            "两份原始数据将保持不变。",
+            parent=dialog,
+        )
+    finally:
+        dialog.destroy()
+    if answer is None:
+        raise RuntimeError("未选择数据来源，退出以避免覆盖数据")
+    helper.choose_storage(_application_dir(), "user" if answer else "legacy")
+
+
 def _initialize_runtime() -> None:
     """Heavy imports occur only after the native startup indicator is visible."""
     global backend, configure_web_assets, ensure_runtime_layout
     global control_panel, update_ui, install_desktop_runtime, patch_update_ui
     global install_windows_update_workspace, WINDOW_HEIGHT, WINDOW_WIDTH
 
+    _startup_splash.update("正在检查数据目录…")
+    _choose_conflicting_storage()
     _startup_splash.update("正在加载弹幕与服务组件…")
     from apps.server import server as backend
     from apps.server.main import configure_web_assets
@@ -72,7 +110,11 @@ def _application_dir() -> Path:
 
 
 def _startup_log_path() -> Path:
-    return _application_dir() / "log" / GUI_STARTUP_LOG_NAME
+    # Avoid roaming potentially large crash logs with profile settings.
+    try:
+        return Path(os.getenv("LOCALAPPDATA") or (Path.home() / "AppData" / "Local")) / "bilipdj" / "log" / GUI_STARTUP_LOG_NAME
+    except Exception:
+        return _application_dir() / "log" / GUI_STARTUP_LOG_NAME
 
 
 def _write_startup_error(message: str, *, exc: BaseException | None = None, trace: str = "") -> Path:

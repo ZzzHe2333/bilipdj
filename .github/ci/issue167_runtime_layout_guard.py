@@ -4,6 +4,7 @@ import importlib.util
 import os
 import tempfile
 import time
+from unittest.mock import patch
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -27,7 +28,8 @@ def check_runtime_migration() -> None:
         (app / "quanxian.yaml").write_text("super_admin:\n  - test\n", encoding="utf-8")
         (app / "kaiguan.yaml").write_text("paidui: false\n", encoding="utf-8")
         (app / "update-result.json").write_text('{"status":"installed"}', encoding="utf-8")
-        core, key = layout.ensure_runtime_layout(app)
+        with patch.dict(os.environ, {"BILIPDJ_DATA_DIR": str(app)}):
+            core, key = layout.ensure_runtime_layout(app)
         for name in ("config.yaml", "quanxian.yaml", "kaiguan.yaml"):
             assert (core / name).is_file(), name
             assert not (app / name).exists(), f"legacy root {name} was not migrated"
@@ -46,7 +48,8 @@ def check_runtime_migration() -> None:
         os.utime(target, ns=(old, old))
         now = time.time_ns()
         os.utime(source, ns=(now, now))
-        core_dir, _key_dir = layout.ensure_runtime_layout(app)
+        with patch.dict(os.environ, {"BILIPDJ_DATA_DIR": str(app)}):
+            core_dir, _key_dir = layout.ensure_runtime_layout(app)
         assert (core_dir / "config.yaml").read_text(encoding="utf-8") == "server:\n  port: 9988\n"
         backups = list((core_dir / "migration-backup").glob("config.yaml.legacy-root-*"))
         assert backups, "previous core config was not preserved during conflict migration"

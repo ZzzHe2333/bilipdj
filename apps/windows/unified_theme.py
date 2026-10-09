@@ -12,7 +12,7 @@ from tkinter import colorchooser, filedialog, messagebox
 from typing import Any
 
 _PATCH_LOCK = threading.RLock()
-PROFILE_NAME = "BiliPDJ-appearance-profile.json"
+PROFILE_NAME = "BiliPDJ-appearance-win-profile.json"
 
 DEFAULT_APPEARANCE: dict[str, Any] = {
     "schema": 1,
@@ -109,6 +109,8 @@ def _port(panel: Any) -> str:
 
 
 def _api(panel: Any, path: str, *, payload: dict[str, Any] | None = None, timeout: float = 2.5) -> dict[str, Any]:
+    if path.startswith("/api/appearance"):
+        path += ("&" if "?" in path else "?") + "client=win"
     url = f"http://127.0.0.1:{_port(panel)}{path}"
     data = None
     method = "GET"
@@ -128,7 +130,14 @@ def _api(panel: Any, path: str, *, payload: dict[str, Any] | None = None, timeou
 
 
 def _bootstrap_appearance(module: Any) -> dict[str, Any]:
+    # Boot with native Windows theme if Server is not running yet.
+    try:
+        from apps.server import server as backend
+        primary = Path(getattr(backend, "APPEARANCE_WIN_PATH"))
+    except Exception:
+        primary = Path(getattr(module, "APP_DIR", Path.cwd())) / "appearance-win.json"
     candidates = [
+        primary,
         Path(getattr(module, "APP_DIR", Path.cwd())) / "appearance.json",
         Path(__file__).resolve().parents[2] / "core" / "appearance.json",
     ]
@@ -215,7 +224,7 @@ def _load_from_server(panel: Any, module: Any, *, quiet: bool = False) -> bool:
     panel._apply_theme(_resolved_dark(appearance))
     _fill_editor(panel)
     if not quiet:
-        _set_status(panel, "已从 Server 读取通用主题。")
+        _set_status(panel, "已从 Server 读取 Windows 专用主题。")
     return True
 
 
@@ -233,7 +242,7 @@ def _save_to_server(panel: Any, module: Any) -> bool:
     _set_class_palettes(type(panel), saved)
     panel._apply_theme(_resolved_dark(saved))
     _fill_editor(panel)
-    _set_status(panel, "已保存到 Server；Windows/Web 共用 appearance.json。")
+    _set_status(panel, "Windows 专用主题已保存到 appearance-win.json。")
     return True
 
 

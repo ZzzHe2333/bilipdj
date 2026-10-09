@@ -127,7 +127,9 @@ def check_runtime_wiring() -> None:
     runtime_layout = (ROOT / "apps/server/runtime_layout.py").read_text(encoding="utf-8")
     assert "install_backup_cleanup_ui()" in desktop
     assert "install_queue_clear_dialog(panel_class)" in desktop
-    assert "sync_local_data_archive(app_root" in runtime_layout
+    # Issue #311 replaces the destructive roaming mirror with safe copy-only migration.
+    assert "user_data.migrate_if_needed(plan)" in runtime_layout
+    assert "_sync_windows_roaming_archive(app_root, logger=logger)" not in runtime_layout
     assert "if data_dir_overridden():" in runtime_layout
 
 

@@ -33,6 +33,27 @@
     return Math.max(min, Number.isFinite(value) ? value : fallback);
   }
 
+  async function checkStorageConflict() {
+    try {
+      const state = await json('/api/storage/status');
+      if (!state.conflict) return;
+      const dialog = $('storage-conflict-dialog');
+      $('storage-conflict-paths').textContent = '项目目录：' + state.legacy + ' ｜ 用户目录：' + state.user;
+      if (dialog && !dialog.open) dialog.showModal();
+    } catch (_) { /* Older servers may not yet implement this API. */ }
+  }
+
+  async function selectStorage(choice) {
+    try {
+      await post('/api/storage/choice', {choice});
+      $('storage-conflict-status').textContent = '选择已保存；必须重启 BiliPDJ 才会切换数据来源，两份原数据均未删除。';
+      $('storage-use-user').disabled = true;
+      $('storage-use-legacy').disabled = true;
+    } catch (error) {
+      $('storage-conflict-status').textContent = '保存选择失败：' + error.message;
+    }
+  }
+
   function switchView(name) {
     state.view = name;
     document.querySelectorAll('.nav').forEach(n => n.classList.toggle('active', n.dataset.view === name));
@@ -472,6 +493,8 @@
   $('blacklist-list').addEventListener('click', async event => { const btn = event.target.closest('[data-blacklist-delete]'); if (!btn) return; try { await post('/api/blacklist/delete', { index: Number(btn.dataset.blacklistDelete) }); await loadBlacklist(); } catch (e) { message('blacklist-status', e.message, false); } });
   $('style-save').addEventListener('click', async () => { try { const payload = JSON.parse($('style-json').value); await post('/api/style', payload); message('style-status', '样式保存成功。'); } catch (e) { message('style-status', `保存失败：${e.message}`, false); } });
   $('config-save').addEventListener('click', async () => { try { const payload = JSON.parse($('config-json').value); await post('/api/config', payload); message('config-status', '完整配置保存成功。'); await Promise.all([refreshHeader(), loadPlatform(), loadGifts()]); } catch (e) { message('config-status', `保存失败：${e.message}`, false); } });
+  $('storage-use-user').addEventListener('click', () => selectStorage('user'));
+  $('storage-use-legacy').addEventListener('click', () => selectStorage('legacy'));
   $('perm-add').addEventListener('click', () => editPermission());
   $('perm-list').addEventListener('click', event => { const row = event.target.closest('[data-perm-edit]'); if (row) editPermission(Number(row.dataset.permEdit)); });
   $('perm-form').addEventListener('submit', applyPermission);
@@ -487,5 +510,5 @@
   $('overlay-url').textContent = `${location.origin}/index`;
 
   window.addEventListener('beforeunload', () => { stopTimers(); if (state.headerTimer) clearInterval(state.headerTimer); });
-  refreshHeader(); state.headerTimer = window.setInterval(refreshHeader, 4500); switchView('queue');
+  refreshHeader(); state.headerTimer = window.setInterval(refreshHeader, 4500); switchView('queue'); void checkStorageConflict();
 })();

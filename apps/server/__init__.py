@@ -19,6 +19,8 @@ from . import style_option_guard as _style_option_guard
 from . import web_queue_layout as _web_queue_layout
 from . import websocket_performance_guard as _websocket_performance_guard
 from .runtime_layout import data_dir_overridden as _data_dir_overridden
+from .runtime_layout import data_root_is_external as _data_root_is_external
+from . import user_data as _user_data
 from .runtime_layout import ensure_runtime_layout as _ensure_runtime_layout
 from .runtime_layout import resolve_data_dir as _resolve_data_dir
 
@@ -63,13 +65,13 @@ def configure_runtime_paths(module: Any = server) -> Any:
     app_dir = Path(sys.executable).resolve().parent if frozen else REPO_ROOT
     compatibility_core_dir = REPO_ROOT / "core"
     data_dir = _resolve_data_dir(app_dir)
-    external_data_dir = _data_dir_overridden()
+    external_data_dir = _data_root_is_external(app_dir)
     runtime_core_dir, key_dir = _ensure_runtime_layout(
         app_dir,
         defaults_dir=compatibility_core_dir,
     )
-    # Legacy source/portable layouts stay unchanged unless BILIPDJ_DATA_DIR is
-    # explicitly configured. Docker uses the external data root for settings.
+    # User settings follow the OS account directory; explicit Docker volumes
+    # remain authoritative; unresolved conflicts safely read the old root.
     misc_config_dir = data_dir if external_data_dir else (app_dir if frozen else compatibility_core_dir)
 
     source_web = REPO_ROOT / "apps" / "web" / "static"
@@ -92,14 +94,16 @@ def configure_runtime_paths(module: Any = server) -> Any:
     module.BUNDLE_UI_DIR = bundled_web
     module.UI_DIR = ui_dir
     module.CONFIG_PATH = runtime_core_dir / "config.yaml"
-    module.LOG_DIR = (data_dir if external_data_dir else app_dir) / "log"
+    module.LOG_DIR = ((data_dir / "log") if _data_dir_overridden() else (_user_data.local_log_root() if external_data_dir else app_dir / "log"))
     module.PD_DIR = runtime_core_dir / "cd"
     module.QUEUE_STATE_PATH = module.PD_DIR / "queue_archive_state.json"
     module.BLACKLIST_PATH = runtime_core_dir / "blacklist.csv"
     module.QUANXIAN_PATH = runtime_core_dir / "quanxian.yaml"
     module.KAIGUAN_PATH = runtime_core_dir / "kaiguan.yaml"
-    module.STYLE_PATH = misc_config_dir / "style.json"
-    module.APPEARANCE_PATH = misc_config_dir / "appearance.json"
+    module.STYLE_PATH = misc_config_dir / ("style.json" if _data_dir_overridden() else "style-web.json")
+    module.STYLE_WIN_PATH = misc_config_dir / "style-win.json"
+    module.APPEARANCE_PATH = misc_config_dir / ("appearance.json" if _data_dir_overridden() else "appearance-web.json")
+    module.APPEARANCE_WIN_PATH = misc_config_dir / "appearance-win.json"
     module.KEY_DIR = key_dir
     module.UPDATE_RESULT_PATH = key_dir / "update-result.json"
     module.PLUGINS_DIR = (data_dir if external_data_dir else app_dir) / "plugins"
@@ -131,6 +135,8 @@ from . import plugin_config_schema as _plugin_config_schema  # noqa: E402
 from . import plugin_config_web as _plugin_config_web  # noqa: E402
 from . import language_plugins as _language_plugins  # noqa: E402
 from . import appearance_guard as _appearance_guard  # noqa: E402
+from . import storage_api as _storage_api  # noqa: E402
+from . import client_style as _client_style  # noqa: E402
 from . import issue123_guard as _issue123_guard  # noqa: E402
 from . import gift_compatibility as _gift_compatibility  # noqa: E402
 from . import security_hardening_guard as _security_hardening_guard  # noqa: E402
@@ -142,10 +148,23 @@ if "appearance.json" not in _settings_backup.SETTINGS_FILES:
     _settings_backup.SETTINGS_FILES = tuple(_settings_backup.SETTINGS_FILES) + ("appearance.json",)
 _original_settings_paths = _settings_backup.SettingsBackupService.settings_paths
 
+for _name in ("style-web.json", "style-win.json", "appearance-web.json", "appearance-win.json"):
+    if _name not in _settings_backup.SETTINGS_FILES:
+        _settings_backup.SETTINGS_FILES += (_name,)
+
 
 def _settings_paths_with_appearance(self: Any) -> dict[str, Path]:
     paths = dict(_original_settings_paths(self))
-    paths["appearance.json"] = Path(getattr(self.server, "APPEARANCE_PATH", Path(getattr(self.server, "_YAML_DIR")) / "appearance.json"))
+    root = Path(getattr(self.server, "_YAML_DIR"))
+    paths["appearance.json"] = Path(getattr(self.server, "APPEARANCE_PATH", root / "appearance.json"))
+    style_web = Path(getattr(self.server, "STYLE_PATH", root / "style-web.json"))
+    appearance_web = Path(getattr(self.server, "APPEARANCE_PATH", root / "appearance-web.json"))
+    # Legacy backup fixtures still expose style.json/appearance.json only.
+    # Do not duplicate those files under new ZIP names in old deployments.
+    paths["style-web.json"] = style_web if style_web.name == "style-web.json" else root / "style-web.json"
+    paths["style-win.json"] = Path(getattr(self.server, "STYLE_WIN_PATH", root / "style-win.json"))
+    paths["appearance-web.json"] = appearance_web if appearance_web.name == "appearance-web.json" else root / "appearance-web.json"
+    paths["appearance-win.json"] = Path(getattr(self.server, "APPEARANCE_WIN_PATH", root / "appearance-win.json"))
     return paths
 
 
@@ -181,6 +200,7 @@ _language_plugins.install_language_plugin_system(server, _plugin_manager, _setti
 # re-run the idempotent mutation guard so that final method remains serialized.
 _plugin_mutation_guard.install_plugin_mutation_guard(_plugin_manager)
 
+_client_style.install_win_style(server)
 _appearance_guard.install_appearance_guard(server)
 _issue123_guard.install_issue123_guard(
     server,
@@ -191,6 +211,7 @@ _issue123_guard.install_issue123_guard(
 _backup_scope_guard.install_backup_scope_guard(_settings_backup, server)
 _gift_compatibility.install_gift_compatibility(server, _plugin_manager, _settings_backup)
 _security_hardening_guard.install_security_hardening(server)
+_storage_api.install_storage_api(server)
 
 # Keep this outermost: original plugin-management POST requests must pass the
 # browser origin/content-type/body-size safety boundary before their handlers.

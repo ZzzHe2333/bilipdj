@@ -7,6 +7,8 @@ project_root = spec_dir.parents[1]
 datas = [
     (str(project_root / "VERSION"), "."),
     (str(project_root / "core" / "appearance.json"), "."),
+    # The native startup dialog inspects storage BEFORE importing apps.server.
+    (str(project_root / "apps" / "server" / "user_data.py"), "apps/server"),
     (str(project_root / "apps" / "web" / "static"), "apps/web/static"),
 ]
 

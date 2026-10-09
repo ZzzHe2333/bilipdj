@@ -4,9 +4,20 @@ import hashlib
 import importlib.util
 import os
 import shutil
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+if __package__:
+    from . import user_data
+else:
+    import importlib.util as _importlib_util
+    _spec = _importlib_util.spec_from_file_location("bilipdj_user_data_runtime", Path(__file__).with_name("user_data.py"))
+    if _spec is None or _spec.loader is None:
+        raise ImportError("Cannot load user_data.py")
+    user_data = _importlib_util.module_from_spec(_spec)
+    _spec.loader.exec_module(user_data)
 
 CORE_CONFIG_FILES = ("config.yaml", "quanxian.yaml", "kaiguan.yaml")
 LEGACY_UPDATE_METADATA_FILES = ("update-result.json",)
@@ -16,25 +27,27 @@ KEY_DIR_NAME = "key"
 
 
 def resolve_data_dir(app_dir: Path) -> Path:
-    """Resolve the user-data root without changing legacy defaults.
-
-    When ``BILIPDJ_DATA_DIR`` is unset, runtime data stays under ``app_dir`` as
-    before. Docker can point the variable at a mounted directory such as
-    ``/data`` without moving program files there.
-    """
-
-    app_root = Path(app_dir).resolve()
-    raw = str(os.getenv(DATA_DIR_ENV, "") or "").strip()
-    if not raw:
-        return app_root
-    candidate = Path(raw).expanduser()
-    if not candidate.is_absolute():
-        candidate = app_root / candidate
-    return candidate.resolve()
+    """Select OS-specific user data, preserving explicit Docker/portable overrides."""
+    return Path(user_data.storage_plan(Path(app_dir))["active"])
 
 
 def data_dir_overridden() -> bool:
+    """True only for explicit BILIPDJ_DATA_DIR, never implicitly for desktop."""
     return bool(str(os.getenv(DATA_DIR_ENV, "") or "").strip())
+
+
+def data_root_is_external(app_dir: Path) -> bool:
+    return resolve_data_dir(app_dir).resolve() != Path(app_dir).resolve()
+
+
+def storage_status(app_dir: Path) -> dict[str, Any]:
+    plan = user_data.storage_plan(Path(app_dir))
+    return {
+        "mode": plan["mode"], "conflict": bool(plan["conflict"]),
+        "legacy": str(plan["legacy"]), "user": str(plan["user"]),
+        "active": str(plan["active"]), "choice": plan["choice"],
+    }
+
 
 
 def _same_file_content(left: Path, right: Path) -> bool:
@@ -145,22 +158,9 @@ def _load_archive_sync():
 
 
 def _sync_windows_roaming_archive(app_root: Path, *, logger: Any | None = None) -> None:
-    # BILIPDJ_DATA_DIR is the Docker/external-storage contract and must not be
-    # mixed with the Windows roaming archive. Off Windows this path is skipped
-    # before loading the helper, preserving lightweight standalone CI probes.
-    if data_dir_overridden() or os.name != "nt":
-        return
-    try:
-        sync_local_data_archive = _load_archive_sync()
-        sync_local_data_archive(app_root, logger=logger)
-    except (ImportError, OSError, ValueError) as exc:
-        # The roaming copy is a recovery mirror, never a reason to stop BiliPDJ
-        # from starting if a profile/permission problem prevents synchronization.
-        if logger is not None:
-            try:
-                logger.warning("Local AppData archive sync unavailable: %s", exc)
-            except Exception:
-                pass
+    """Disabled: old mirror could silently overwrite user data on startup."""
+    return None
+
 
 
 def ensure_runtime_layout(
@@ -169,17 +169,20 @@ def ensure_runtime_layout(
     logger: Any | None = None,
     defaults_dir: Path | None = None,
 ) -> tuple[Path, Path]:
-    """Create portable/Docker data folders and migrate legacy root-owned files.
+    """Use user data dirs, preserving explicit Docker layout and legacy fallback.
 
-    Program files stay under ``app_dir``. Only user-owned state is redirected to
-    ``BILIPDJ_DATA_DIR`` when that environment variable is explicitly set.
-    On Windows portable/source runs, user-owned state is additionally mirrored
-    to ``%APPDATA%\\bilipdj`` for reinstall recovery while ``core`` remains the
-    normal runtime authority.
+    Managed migration copies only missing user files and never overwrites or
+    deletes originals. Unresolved conflicts keep the old root until chosen.
     """
 
     app_root = Path(app_dir).resolve()
-    data_root = resolve_data_dir(app_root)
+    plan = user_data.storage_plan(app_root)
+    if plan["mode"] == "managed":
+        # Safe copy-only transfer; in a conflict keep the old data active until
+        # the user chooses. Never mirror or overwrite on timestamps.
+        user_data.migrate_if_needed(plan)
+    data_root = Path(plan["active"])
+    external = data_root != app_root
     core_dir = data_root / "core"
     key_dir = data_root / KEY_DIR_NAME
 
@@ -187,24 +190,45 @@ def ensure_runtime_layout(
         data_root,
         core_dir,
         key_dir,
-        data_root / "log",
         data_root / "plugins",
         data_root / "backup",
         core_dir / "cd",
     ):
         path.mkdir(parents=True, exist_ok=True)
+    if data_dir_overridden():
+        # Docker and explicit custom deployments preserve /data/log.
+        (data_root / "log").mkdir(parents=True, exist_ok=True)
 
-    for name in CORE_CONFIG_FILES:
-        _migrate_one(app_root / name, core_dir / name, logger=logger)
-    for name in LEGACY_UPDATE_METADATA_FILES:
-        _migrate_one(app_root / name, key_dir / name, logger=logger)
+    if (data_dir_overridden() or not external) and not plan.get("conflict"):
+        for name in CORE_CONFIG_FILES:
+            _migrate_one(app_root / name, core_dir / name, logger=logger)
+        for name in LEGACY_UPDATE_METADATA_FILES:
+            _migrate_one(app_root / name, key_dir / name, logger=logger)
 
     if data_dir_overridden() and defaults_dir is not None:
         source_root = Path(defaults_dir).resolve()
         for name in DEFAULT_DATA_FILES:
             _seed_default(source_root / name, data_root / name, logger=logger)
 
-    _sync_windows_roaming_archive(app_root, logger=logger)
+    # Import legacy style and theme independently into Win/Web settings, while
+    # keeping both original files untouched for rollback.
+    if plan["mode"] == "managed" and not plan.get("conflict"):
+        style_root = data_root if external else (app_root if getattr(sys, "frozen", False) else app_root / "core")
+        for base_name in ("style", "appearance"):
+            legacy_sources = (
+                data_root / f"{base_name}.json",
+                data_root / "core" / f"{base_name}.json",
+                app_root / f"{base_name}.json",
+                app_root / "core" / f"{base_name}.json",
+            )
+            for client in ("win", "web"):
+                dest = style_root / f"{base_name}-{client}.json"
+                if not dest.exists():
+                    for src in legacy_sources:
+                        if src.is_file() and not src.is_symlink():
+                            dest.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.copy2(src, dest)
+                            break
     return core_dir, key_dir
 
 
@@ -226,14 +250,16 @@ def configure_server_runtime_layout(server_module: Any) -> tuple[Path, Path]:
     server_module.KEY_DIR = key_dir
     server_module.UPDATE_RESULT_PATH = key_dir / "update-result.json"
 
-    if data_dir_overridden():
+    if data_root_is_external(app_dir):
         server_module._YAML_DIR = data_dir
-        server_module.LOG_DIR = data_dir / "log"
+        server_module.LOG_DIR = (data_dir / "log" if data_dir_overridden() else user_data.local_log_root())
         server_module.PD_DIR = core_dir / "cd"
         server_module.QUEUE_STATE_PATH = server_module.PD_DIR / "queue_archive_state.json"
         server_module.BLACKLIST_PATH = server_module.PD_DIR / "blacklist.csv"
-        server_module.STYLE_PATH = data_dir / "style.json"
-        server_module.APPEARANCE_PATH = data_dir / "appearance.json"
+        server_module.STYLE_PATH = data_dir / ("style.json" if data_dir_overridden() else "style-web.json")
+        server_module.STYLE_WIN_PATH = data_dir / "style-win.json"
+        server_module.APPEARANCE_PATH = data_dir / ("appearance.json" if data_dir_overridden() else "appearance-web.json")
+        server_module.APPEARANCE_WIN_PATH = data_dir / "appearance-win.json"
         # Generated CSS belongs in persistent storage, not readonly Web assets.
         server_module.LIVE_STYLE_CSS_PATH = data_dir / "moren.css"
         server_module.PLUGINS_DIR = data_dir / "plugins"
@@ -250,4 +276,6 @@ __all__ = [
     "data_dir_overridden",
     "ensure_runtime_layout",
     "resolve_data_dir",
+    "data_root_is_external",
+    "storage_status",
 ]
