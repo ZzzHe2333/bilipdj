@@ -19,7 +19,7 @@ from apps.server.command_console import install_command_console  # noqa: E402
 from apps.server.issue185_runtime_guard import install_issue185_runtime_guards  # noqa: E402
 from apps.server.issue187_web_update_guard import install_issue187_web_update_guard  # noqa: E402
 from apps.server.issue189_release_selector import install_issue189_release_selector  # noqa: E402
-from apps.server.runtime_layout import configure_server_runtime_layout, data_dir_overridden  # noqa: E402
+from apps.server.runtime_layout import configure_server_runtime_layout, data_root_is_external  # noqa: E402
 from apps.server.update_estimate_api import install_update_estimate_api  # noqa: E402
 from apps.server.web_update_api import install_web_update_api  # noqa: E402
 
@@ -53,7 +53,7 @@ def configure_web_assets(web_dir: str | os.PathLike[str] | None = None) -> Path:
         raise FileNotFoundError(f"Web assets directory does not exist: {target}")
     backend.UI_DIR = target
     backend.BUNDLE_UI_DIR = target
-    backend.LIVE_STYLE_CSS_PATH = (Path(backend.DATA_DIR) if data_dir_overridden() else target) / "moren.css"
+    backend.LIVE_STYLE_CSS_PATH = (Path(backend.DATA_DIR) if data_root_is_external(backend.APP_DIR) else target) / "moren.css"
     return target
 
 
