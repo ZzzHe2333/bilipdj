@@ -619,8 +619,19 @@ def _build_permissions_page(panel: Any, frame: Any, module: Any) -> None:
         module.ttk.Button(footer, text="保存", command=commit).pack(side="right")
         id_input.focus_set()
 
+    # Keep the existing global blacklist editor while privileged roles migrate
+    # to the structured per-platform list. Blacklist is not a scoped role.
+    blacklist_card = module.ttk.LabelFrame(frame, text="黑名单（全平台，仍按用户名匹配）", padding=7)
+    blacklist_card.grid(row=3, column=0, sticky="ew", pady=(9, 0))
+    blacklist_card.columnconfigure(0, weight=1)
+    blacklist_editor = module.tk.Text(blacklist_card, height=3, wrap="word", undo=True)
+    blacklist_editor.grid(row=0, column=0, sticky="ew")
+    panel._quanxian_text["blacklist"] = blacklist_editor
+    if isinstance(getattr(panel, "_all_text_widgets", None), list):
+        panel._all_text_widgets.append(blacklist_editor)
+
     actions = module.ttk.Frame(frame)
-    actions.grid(row=3, column=0, sticky="ew", pady=(10, 0))
+    actions.grid(row=4, column=0, sticky="ew", pady=(10, 0))
     module.ttk.Button(actions, text="＋ 新增权限", command=lambda: editor()).pack(side="left")
     module.ttk.Button(actions, text="刷新", command=panel._load_quanxian).pack(side="right")
     module.ttk.Button(actions, text="保存全部", command=panel._save_quanxian).pack(side="right", padx=8)
