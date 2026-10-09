@@ -47,6 +47,8 @@ def main() -> None:
             FakeServer.QUEUE_STATE_PATH: '{"active_slot": 1}\n',
             FakeServer.BLACKLIST_PATH: "name\n",
             pd_dir / "queue_archive_slot_1.csv": "name\nalpha\n",
+            pd_dir / "pingtai_config_1.yaml": "platform: douyin\n",
+            pd_dir / "cdang_1.css": ".queue {color: red}\n",
         }
         for path, text in fixtures.items():
             _write(path, text)
@@ -69,12 +71,22 @@ def main() -> None:
         assert "queue_archive_state.json" not in included
 
         service.save_config({"backup_config": False, "backup_archive": True, "backup_style": False})
-        _data, included = service.build_settings_zip()
+        archive_data, included = service.build_settings_zip()
         assert "queue_archive_state.json" in included
         assert "blacklist.csv" in included
         assert "queue_archive_slot_1.csv" in included
+        assert "pingtai_config_1.yaml" in included
+        assert "cdang_1.css" in included
         assert "config.yaml" not in included
         assert "style.json" not in included
+        # Both platform and CSS slot must survive a complete archive restore.
+        (pd_dir / "pingtai_config_1.yaml").write_text("platform: wrong\\n", encoding="utf-8")
+        (pd_dir / "cdang_1.css").write_text(".queue {color: blue}\\n", encoding="utf-8")
+        restored_archives = service.restore_settings_zip(archive_data)
+        assert "pingtai_config_1.yaml" in restored_archives
+        assert "cdang_1.css" in restored_archives
+        assert (pd_dir / "pingtai_config_1.yaml").read_text() == "platform: douyin\\n"
+        assert (pd_dir / "cdang_1.css").read_text() == ".queue {color: red}\\n"
 
         service.save_config({"backup_config": False, "backup_archive": False, "backup_style": True})
         style_data, included = service.build_settings_zip()
