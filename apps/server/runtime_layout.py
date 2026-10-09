@@ -195,6 +195,9 @@ def ensure_runtime_layout(
         core_dir / "cd",
     ):
         path.mkdir(parents=True, exist_ok=True)
+    if data_dir_overridden():
+        # Docker and explicit custom deployments preserve /data/log.
+        (data_root / "log").mkdir(parents=True, exist_ok=True)
 
     if (data_dir_overridden() or not external) and not plan.get("conflict"):
         for name in CORE_CONFIG_FILES:
