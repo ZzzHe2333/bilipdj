@@ -12,7 +12,7 @@ from tkinter import colorchooser, filedialog, messagebox
 from typing import Any
 
 _PATCH_LOCK = threading.RLock()
-PROFILE_NAME = "BiliPDJ-appearance-profile.json"
+PROFILE_NAME = "BiliPDJ-appearance-win-profile.json"
 
 DEFAULT_APPEARANCE: dict[str, Any] = {
     "schema": 1,
@@ -129,6 +129,7 @@ def _api(panel: Any, path: str, *, payload: dict[str, Any] | None = None, timeou
 
 def _bootstrap_appearance(module: Any) -> dict[str, Any]:
     candidates = [
+        Path(getattr(module, "DATA_DIR", Path(getattr(module, "APP_DIR", Path.cwd())))) / "appearance-win.json",
         Path(getattr(module, "APP_DIR", Path.cwd())) / "appearance.json",
         Path(__file__).resolve().parents[2] / "core" / "appearance.json",
     ]
@@ -203,7 +204,7 @@ def _set_status(panel: Any, text: str, *, error: bool = False) -> None:
 
 def _load_from_server(panel: Any, module: Any, *, quiet: bool = False) -> bool:
     try:
-        payload = _api(panel, "/api/appearance")
+        payload = _api(panel, "/api/appearance?client=win")
         appearance = _normalize(payload.get("appearance"))
     except Exception as exc:
         if not quiet:
@@ -222,7 +223,7 @@ def _load_from_server(panel: Any, module: Any, *, quiet: bool = False) -> bool:
 def _save_to_server(panel: Any, module: Any) -> bool:
     appearance = _collect_editor(panel)
     try:
-        payload = _api(panel, "/api/appearance", payload={"appearance": appearance})
+        payload = _api(panel, "/api/appearance?client=win", payload={"appearance": appearance})
         saved = _normalize(payload.get("appearance"))
     except Exception as exc:
         _set_status(panel, f"保存失败：{exc}", error=True)
@@ -319,16 +320,16 @@ def _choose_color(panel: Any, key: str) -> None:
 
 def _export_profile(panel: Any) -> None:
     try:
-        profile = _api(panel, "/api/appearance/profile", timeout=4.0)
+        profile = _api(panel, "/api/appearance/profile?client=win", timeout=4.0)
     except Exception as exc:
         messagebox.showerror("导出失败", f"需要后端服务器正在运行。\n\n{exc}", parent=panel.root)
         return
     target = filedialog.asksaveasfilename(
         parent=panel.root,
-        title="导出 Windows / Web / OBS 通用配置",
+        title="导出 Windows 主题与显示配置",
         initialfile=PROFILE_NAME,
         defaultextension=".json",
-        filetypes=(("BiliPDJ 通用配置", "*.json"), ("所有文件", "*.*")),
+        filetypes=(("BiliPDJ Windows 配置", "*.json"), ("所有文件", "*.*")),
     )
     if not target:
         return
@@ -346,7 +347,7 @@ def _import_profile(panel: Any, module: Any) -> None:
         return
     try:
         raw = json.loads(Path(source).read_text(encoding="utf-8-sig"))
-        payload = _api(panel, "/api/appearance/profile", payload=raw, timeout=5.0)
+        payload = _api(panel, "/api/appearance/profile?client=win", payload=raw, timeout=5.0)
         appearance = _normalize(payload.get("appearance"))
     except Exception as exc:
         messagebox.showerror("导入失败", str(exc), parent=panel.root)
@@ -506,7 +507,7 @@ def patch_control_panel_unified_theme(panel_class: type[Any]) -> bool:
             self._bilipdj_appearance = appearance
             self._unified_theme_dirty = False
             try:
-                payload = _api(self, "/api/appearance", payload={"appearance": appearance})
+                payload = _api(self, "/api/appearance?client=win", payload={"appearance": appearance})
                 self._bilipdj_appearance = _normalize(payload.get("appearance"))
             except Exception:
                 pass
