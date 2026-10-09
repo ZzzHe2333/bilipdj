@@ -88,9 +88,9 @@ python .github/ci/generate_api_docs.py
 生成到本地 `api/` 目录。
 
 
-### 多平台管理员授权（Issue #307）
+### 多平台管理员授权（Issue #307，#309 范围修正）
 
-`GET /api/quanxian` 返回兼容字段 `super_admin`、`admin`、`jianzhang`、`member`、`blacklist`（历史用户名列表、全平台）及可编辑的 `entries` 结构化条目：
+`GET /api/quanxian` 返回兼容字段 `super_admin`、`admin`、`jianzhang`、`member`、`blacklist`（其中最高管理员/管理员为旧版全平台用户名列表；舰长为 B站专属身份，成员为普通用户名单）及可编辑的管理员 `entries` 结构化条目：
 
 ```json
 {
@@ -123,7 +123,9 @@ python .github/ci/generate_api_docs.py
 ```
 
 - `id` 是直播平台实际提供的用户 ID；`kind="id"` 优先以事件的 `user_id` 精确匹配。历史用户名使用 `kind="name"` 匹配昵称，请优先为新管理员使用稳定 ID。
-- `role` 可为 `super_admin`、`admin`、`jianzhang` 或 `member`；`platforms` 可包含 `bilibili`、`douyin`、`huya`、`youtube`、`twitch`，空数组代表全平台。无法识别的来源平台条目不生效，绝不自动转为全平台。
+- **多平台来源选项仅用于管理员。** `scoped_entries[].role` 只接受 `super_admin` 或 `admin`；`platforms` 可包含 `bilibili`、`douyin`、`huya`、`youtube`、`twitch`，空数组代表管理员权限全平台生效。舰长、成员不可使用 `scoped_entries`，旧配置中误写入的这两种跨平台范围条目不会被授权。无法识别的平台条目也不生效。
+- **舰长：** 仅 Bilibili 弹幕可使用舰长专属插队，依赖 B站舰长原生身份或原有 `jianzhang` 用户名名单及现有舰长插队开关；不属于全平台管理身份，抖音及其他平台的同名账号不可凭 B站舰长缓存获得权限。
+- **成员：** 仍为普通排队用户，不因来源平台不同升级为管理员，原有 `member` 名单保持独立。多平台监听时，各平台普通用户继续进入共享队列/存档。
 - `entries` 是 GET 展示字段，不参与写入；`scoped_entries` 是可读可写的实际来源范围数据，存盘时为兼容简易 YAML 解析器采用不透明的 base64 JSON 字符串。第三方客户端应始终提交**对象数组**，不依赖磁盘编码。
 - 旧客户端省略 `scoped_entries` 时保存现有角色数组，服务端保留已有范围授权；显式传入 `"scoped_entries":[]` 才清空范围授权。
 - 原有黑名单仍是全平台用户名列表，优先于管理员授权；原平台的主播 / 房管原生权限继续独立生效。该接口仅允许可信本机管理调用，不应暴露到公网。
