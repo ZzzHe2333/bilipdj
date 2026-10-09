@@ -66,6 +66,8 @@ def main() -> None:
         assert "quanxian.yaml" in included
         assert "kaiguan.yaml" in included
         assert "platform-slot-1.yaml" in included
+        assert "pingtai_config_1.yaml" in included
+        assert "cdang_1.css" not in included
         assert "style.json" not in included
         assert "appearance.json" not in included
         assert "queue_archive_state.json" not in included
@@ -90,7 +92,7 @@ def main() -> None:
 
         service.save_config({"backup_config": False, "backup_archive": False, "backup_style": True})
         style_data, included = service.build_settings_zip()
-        assert set(included) == {"style.json", "appearance.json"}
+        assert set(included) == {"style.json", "appearance.json", "cdang_1.css"}
 
         service.save_config({"backup_config": False, "backup_archive": False, "backup_style": False})
         try:
