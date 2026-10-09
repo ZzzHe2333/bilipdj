@@ -10,7 +10,7 @@ from typing import Any
 
 _PATCH_LOCK = threading.RLock()
 _SELECTION_KEYS = ("backup_config", "backup_archive", "backup_style")
-_STYLE_FILES = frozenset({"style.json", "appearance.json"})
+_STYLE_FILES = frozenset({"style.json", "appearance.json", "style-win.json", "style-web.json", "appearance-win.json", "appearance-web.json"})
 
 
 def _read_raw_config(path: Path) -> dict[str, Any]:
