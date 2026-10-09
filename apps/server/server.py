@@ -1540,6 +1540,12 @@ def save_config(config: dict[str, Any], *, preserve_legacy_api_schema: bool | No
                     quanxian_lines.append(f"    - {_yaml_quote_string(item)}")
             else:
                 quanxian_lines.append(f"  {key}: []")
+    scoped_items = _encode_scoped_permissions(quanxian_cfg.get("scoped_entries", [])) if isinstance(quanxian_cfg, dict) else []
+    if scoped_items:
+        quanxian_lines.append("  scoped_entries:")
+        quanxian_lines.extend(f"    - {_yaml_quote_string(item)}" for item in scoped_items)
+    else:
+        quanxian_lines.append("  scoped_entries: []")
     quanxian_block = "\n".join(quanxian_lines) if quanxian_lines else "  # 权限配置"
 
     kaiguan_lines = []
@@ -1924,6 +1930,7 @@ class QueueManager:
         # without nesting the queue lock inside file/config locks.
         self._archive_write_lock = threading.RLock()
         self._admins: list[str] = []
+        self._scoped_permissions: list[dict[str, Any]] = []
         self._blacklist: list[str] = []
         self._jianzhang: list[str] = []
         self._anchor_uid: int = 0
@@ -2006,6 +2013,7 @@ class QueueManager:
         with self._lock:
             normalized = _normalize_quanxian_config(quanxian)
             self._super_admins = list(normalized.get("super_admin", []))
+            self._scoped_permissions = _decode_scoped_permissions(normalized.get("scoped_entries", []))
             self._admins = list(normalized.get("admin", []))
             self._jianzhang = list(normalized.get("jianzhang", []))
             self._blacklist = list(normalized.get("blacklist", []))
@@ -2072,10 +2080,12 @@ class QueueManager:
             "jianzhang": list(self._jianzhang),
             "member": list(current_quanxian.get("member", [])),
             "blacklist": list(self._blacklist),
+            "scoped_entries": list(current_quanxian.get("scoped_entries", [])),
         }
         save_quanxian(payload)
         persisted = load_quanxian()
         self._super_admins = list(persisted.get("super_admin", []))
+        self._scoped_permissions = _decode_scoped_permissions(persisted.get("scoped_entries", []))
         self._admins = list(persisted.get("admin", []))
         self._jianzhang = list(persisted.get("jianzhang", []))
         self._blacklist = list(persisted.get("blacklist", []))
@@ -2390,13 +2400,28 @@ class QueueManager:
         self._broadcast_and_archive("system", f"switch_slot_{slot}")
         return list(items)
 
+    def _has_scoped_role(self, role: str, uname: str) -> bool:
+        platform = str(getattr(self._queue_origin_context, "platform", "") or "").lower()
+        user_id = str(getattr(self._queue_origin_context, "user_id", "") or "").strip()
+        for entry in self._scoped_permissions:
+            if entry["role"] != role:
+                continue
+            platforms = entry["platforms"]
+            if platforms and platform not in platforms:
+                continue
+            if entry["kind"] == "id" and user_id and entry["id"] == user_id:
+                return True
+            if entry["kind"] == "name" and entry["id"] == uname:
+                return True
+        return False
+
     def _has_super_admin(self, uname: str, is_anchor: bool) -> bool:
-        return is_anchor or uname in self._super_admins
+        return is_anchor or uname in self._super_admins or self._has_scoped_role("super_admin", uname)
 
     def _has_op_permission(self, uname: str, is_anchor: bool, is_admin: bool) -> bool:
         if self._has_super_admin(uname, is_anchor):
             return True
-        return (uname in self._admins) or (is_admin and self._fangguan_can_doing)
+        return uname in self._admins or self._has_scoped_role("admin", uname) or (is_admin and self._fangguan_can_doing)
 
     def _find_index(self, uname: str) -> int:
         target = str(uname or "").strip()
@@ -2497,10 +2522,12 @@ class QueueManager:
         self._logger.info("[弹幕][%s] %s(%s%s): %s", event.platform, uname, perm, medal_text, msg)
 
         self._queue_origin_context.platform = event.platform
+        self._queue_origin_context.user_id = event.user_id
         try:
             modified, note = self._process(uid, uname, msg, is_anchor, is_admin_flag, is_guard, guard_level)
         finally:
             self._queue_origin_context.platform = ""
+            self._queue_origin_context.user_id = ""
         if modified:
             self._broadcast_and_archive(uname, msg)
             self._logger.info(
@@ -2620,7 +2647,7 @@ class QueueManager:
                 self._jianzhang.append(uname)
 
             index = self._find_index(uname)
-            is_jianzhang = uname in self._jianzhang
+            is_jianzhang = uname in self._jianzhang or self._has_scoped_role("jianzhang", uname)
             modified = False
 
             # --- Join commands (not yet in queue) ---
@@ -2841,8 +2868,57 @@ DEFAULT_QUANXIAN: dict[str, Any] = {
 }
 
 
-def _normalize_quanxian_config(raw: Any) -> dict[str, list[str]]:
-    normalized: dict[str, list[str]] = {key: list(values) for key, values in DEFAULT_QUANXIAN.items()}
+SCOPED_PERMISSION_ROLES = ("super_admin", "admin", "jianzhang", "member")
+SCOPED_PERMISSION_PLATFORMS = ("bilibili", "douyin", "huya", "youtube", "twitch")
+
+
+def _decode_scoped_permissions(raw: Any) -> list[dict[str, Any]]:
+    """Decode JSON records kept as base64 scalar items for our small YAML parser."""
+    if not isinstance(raw, list):
+        return []
+    results: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, tuple[str, ...]]] = set()
+    for item in raw[:1000]:
+        try:
+            if isinstance(item, dict):
+                entry = item
+            elif isinstance(item, str):
+                entry = json.loads(base64.urlsafe_b64decode(item.encode("ascii")).decode("utf-8"))
+            else:
+                continue
+            if not isinstance(entry, dict):
+                continue
+            role = str(entry.get("role", "")).strip()
+            kind = str(entry.get("kind", "id")).strip()
+            identity = str(entry.get("id", "")).strip()
+            if role not in SCOPED_PERMISSION_ROLES or kind not in ("id", "name"):
+                continue
+            if not identity or len(identity) > 256 or any(c in identity for c in "\r\n\0"):
+                continue
+            requested = entry.get("platforms", [])
+            if not isinstance(requested, list):
+                continue
+            platforms = sorted(set(str(p).strip().lower() for p in requested))
+            # Crucial: invalid platform input must never degrade to an all-platform grant.
+            if any(p not in SCOPED_PERMISSION_PLATFORMS for p in platforms):
+                continue
+            key = (role, kind, identity, tuple(platforms))
+            if key in seen:
+                continue
+            seen.add(key)
+            results.append({"role": role, "kind": kind, "id": identity, "platforms": platforms})
+        except (ValueError, TypeError, UnicodeError, json.JSONDecodeError):
+            continue
+    return results
+
+
+def _encode_scoped_permissions(raw: Any) -> list[str]:
+    records = _decode_scoped_permissions(raw)
+    return [base64.urlsafe_b64encode(json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).decode("ascii") for item in records]
+
+
+def _normalize_quanxian_config(raw: Any) -> dict[str, Any]:
+    normalized: dict[str, Any] = {key: list(values) for key, values in DEFAULT_QUANXIAN.items()}
     if isinstance(raw, dict):
         for key in DEFAULT_QUANXIAN:
             normalized[key] = _dedupe_string_list(raw.get(key, normalized[key]))
@@ -2850,6 +2926,8 @@ def _normalize_quanxian_config(raw: Any) -> dict[str, list[str]]:
     blacklist = set(normalized.get("blacklist", []))
     for key in ("super_admin", "admin", "jianzhang", "member"):
         normalized[key] = [name for name in normalized.get(key, []) if name not in blacklist]
+    scoped = _decode_scoped_permissions(raw.get("scoped_entries", []) if isinstance(raw, dict) else [])
+    normalized["scoped_entries"] = _encode_scoped_permissions([item for item in scoped if item["kind"] != "name" or item["id"] not in blacklist])
     return normalized
 
 
@@ -2891,7 +2969,17 @@ def load_quanxian() -> dict[str, Any]:
             result[key] = _dedupe_string_list(config_section[key])
         elif isinstance(raw_file.get(key), list):
             result[key] = _dedupe_string_list(raw_file[key])
-    return _normalize_quanxian_config(result)
+    # Old config.yaml / quanxian.yaml files carry only newline-separated role lists.
+    if isinstance(config_section, dict) and isinstance(config_section.get("scoped_entries"), list):
+        result["scoped_entries"] = config_section["scoped_entries"]
+    elif isinstance(raw_file.get("scoped_entries"), list):
+        result["scoped_entries"] = raw_file["scoped_entries"]
+    normalized = _normalize_quanxian_config(result)
+    normalized["entries"] = [
+        {"id": name, "kind": "name", "role": key, "platforms": []}
+        for key in SCOPED_PERMISSION_ROLES for name in normalized[key]
+    ] + _decode_scoped_permissions(normalized["scoped_entries"])
+    return normalized
 
 
 def _write_quanxian_file(normalized: dict[str, Any]) -> None:
@@ -2909,12 +2997,24 @@ def _write_quanxian_file(normalized: dict[str, Any]) -> None:
             escaped = str(item).replace('"', '\\"')
             lines.append(f'  - "{escaped}"\n')
         lines.append("\n")
+    lines.append("# 多平台权限条目，空平台列表代表全平台；使用 base64 JSON 兼容旧 YAML 读取器\n")
+    lines.append("scoped_entries:\n")
+    scoped = normalized.get("scoped_entries", [])
+    if not scoped:
+        lines[-1] = "scoped_entries: []\n"
+    else:
+        for item in scoped:
+            lines.append(f'  - "{item}"\n')
     _atomic_write_text(QUANXIAN_PATH, "".join(lines), encoding="utf-8")
     write_blacklist_entries(BLACKLIST_PATH, blacklist_names_to_entries(normalized.get("blacklist", [])))
 
 
 @_serialized_config_io
 def save_quanxian(config: dict[str, Any]) -> None:
+    # Legacy clients updating role-name arrays must not silently erase scoped rules.
+    if "scoped_entries" not in config:
+        config = dict(config)
+        config["scoped_entries"] = load_quanxian().get("scoped_entries", [])
     normalized = _normalize_quanxian_config(config)
     _write_quanxian_file(normalized)
 
