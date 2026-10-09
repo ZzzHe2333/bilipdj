@@ -89,7 +89,7 @@ class SettingsBackupService:
             "quanxian.yaml": Path(getattr(self.server, "QUANXIAN_PATH")),
             "kaiguan.yaml": Path(getattr(self.server, "KAIGUAN_PATH")),
             "style.json": Path(getattr(self.server, "_YAML_DIR")) / "style.json",
-            "style-web.json": Path(getattr(self.server, "STYLE_PATH")),
+            "style-web.json": Path(getattr(self.server, "_YAML_DIR")) / "style-web.json",
             "style-win.json": Path(getattr(self.server, "_YAML_DIR")) / "style-win.json",
             "appearance-web.json": Path(getattr(self.server, "_YAML_DIR")) / "appearance-web.json",
             "appearance-win.json": Path(getattr(self.server, "_YAML_DIR")) / "appearance-win.json",
