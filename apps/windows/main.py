@@ -110,7 +110,11 @@ def _application_dir() -> Path:
 
 
 def _startup_log_path() -> Path:
-    return _application_dir() / "log" / GUI_STARTUP_LOG_NAME
+    # Avoid roaming potentially large crash logs with profile settings.
+    try:
+        return Path(os.getenv("LOCALAPPDATA") or (Path.home() / "AppData" / "Local")) / "bilipdj" / "log" / GUI_STARTUP_LOG_NAME
+    except Exception:
+        return _application_dir() / "log" / GUI_STARTUP_LOG_NAME
 
 
 def _write_startup_error(message: str, *, exc: BaseException | None = None, trace: str = "") -> Path:
