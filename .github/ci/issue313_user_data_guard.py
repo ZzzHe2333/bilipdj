@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from apps.server.user_data_paths import (preferred_root, preferred_state_root, preferred_archive_dir,
     preferred_backup_dir, migrate, migrate_legacy_local_state, seed_client_styles,
-    promote_legacy_archive_settings, DataConflictError)
+    promote_legacy_archive_settings, migrate_explicit_root_files, DataConflictError)
 
 
 def main():
@@ -206,6 +206,75 @@ def main():
             else:
                 live_backend.BACKUP_DIR = old_backup_dir
 
+
+    # Regression: an explicit Docker/custom volume must never pick by mtime
+    # or remove the portable root copy of config/permission/update metadata.
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        app = root / "portable"
+        data = root / "docker-data"
+        app.mkdir()
+        (app / "config.yaml").write_text("project", encoding="utf-8")
+        (app / "quanxian.yaml").write_text("admin: user", encoding="utf-8")
+        (app / "update-result.json").write_text("result", encoding="utf-8")
+        report = migrate_explicit_root_files(app, data)
+        assert report["copied"] == 3, report
+        assert (data / "core/config.yaml").read_text() == "project"
+        assert (data / "core/quanxian.yaml").read_text() == "admin: user"
+        assert (data / "key/update-result.json").read_text() == "result"
+        assert (app / "config.yaml").read_text() == "project"
+        (app / "config.yaml").write_text("new project", encoding="utf-8")
+        prompts = []
+        migrate_explicit_root_files(app, data, chooser=lambda conflicts: (prompts.extend(conflicts), "user")[1])
+        assert len(prompts) == 1
+        assert (data / "core/config.yaml").read_text() == "project"
+        migrate_explicit_root_files(app, data, chooser=lambda conflicts: (_ for _ in ()).throw(
+            AssertionError("Unchanged source must not prompt twice")
+        ))
+        (app / "config.yaml").write_text("newer project", encoding="utf-8")
+        migrate_explicit_root_files(app, data, chooser=lambda conflicts: "project")
+        assert (data / "core/config.yaml").read_text() == "newer project"
+        assert (app / "config.yaml").read_text() == "newer project"
+        assert list((data / "migration-backup/core").glob("config.yaml.before-import-*"))
+        # Even if BILIPDJ_DATA_DIR is the portable root, source must survive.
+        same_root = root / "same-root"
+        same_root.mkdir()
+        (same_root / "config.yaml").write_text("portable-root")
+        migrate_explicit_root_files(same_root, same_root)
+        assert (same_root / "config.yaml").is_file()
+        assert (same_root / "core/config.yaml").read_text() == "portable-root"
+
+    # Regression: keep full update rollback bundles discoverable under the
+    # original app/backup directory; move only genuine application backups.
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        app = root / "program"
+        user = root / "roaming"
+        local = root / "local"
+        (app / "backup/update-20261009-to-v3.0.23").mkdir(parents=True)
+        (app / "backup/update-20261009-to-v3.0.23/VERSION").write_text("3.0.22")
+        (app / "backup/update-20261009-to-v3.0.23/main.exe").write_bytes(b"exe")
+        (app / "backup/BiliPDJ-settings.zip").write_bytes(b"zip")
+        report = migrate(app, user, state_root=local)
+        assert report["copied"] == 1, report
+        assert (local / "backups/BiliPDJ-settings.zip").read_bytes() == b"zip"
+        assert not (local / "backups/update-20261009-to-v3.0.23").exists()
+        assert (app / "backup/update-20261009-to-v3.0.23/main.exe").is_file()
+
+    # Explicit override must be wired into the full runtime layout, too.
+    from unittest.mock import patch
+    from apps.server.runtime_layout import ensure_runtime_layout as runtime_ensure
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        app = root / "program"
+        app.mkdir()
+        (app / "config.yaml").write_text("old", encoding="utf-8")
+        target = root / "volume"
+        with patch.dict("os.environ", {"BILIPDJ_DATA_DIR": str(target)}):
+            core, _ = runtime_ensure(app)
+            assert (core / "config.yaml").read_text() == "old"
+            assert (app / "config.yaml").read_text() == "old"
+
     backend = (ROOT / "apps/server/server.py").read_text(encoding="utf-8")
     win = (ROOT / "apps/windows/control_panel.py").read_text(encoding="utf-8")
     layout = (ROOT / "apps/server/runtime_layout.py").read_text(encoding="utf-8")
@@ -213,6 +282,19 @@ def main():
     assert 'appearance-web.json' in layout
     assert 'client="win"' in win
     assert '"style-win.json"' in backend
+    from apps.server import server as live_server
+    with tempfile.TemporaryDirectory() as td:
+        current = live_server.BLACKLIST_PATH
+        try:
+            live_server.BLACKLIST_PATH = Path(td) / "user-config" / "blacklist.csv"
+            live_server.write_blacklist_entries(
+                live_server.BLACKLIST_PATH, [{"id": "runtime-admin", "content": ""}]
+            )
+            assert "runtime-admin" in [
+                entry["id"] for entry in live_server.read_blacklist_entries()
+            ], "read_blacklist_entries() must follow runtime BLACKLIST_PATH"
+        finally:
+            live_server.BLACKLIST_PATH = current
     print("issue #313 OS paths, conflict migration, Win/Web style separation: PASS")
 
 
