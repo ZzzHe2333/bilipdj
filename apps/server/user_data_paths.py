@@ -100,7 +100,7 @@ def ask_preference(conflicts: list[tuple[Path, Path]]) -> str:
                "用户目录：%s\n项目文件：%s" % (len(conflicts), conflicts[0][1], conflicts[0][0]))
     if sys.stdin and sys.stdin.isatty():
         while True:
-            choice = input(f"{title}\\n{message}\\n选 1=用户目录，2=项目目录，q=取消: ").strip().lower()
+            choice = input(f"{title}\n{message}\n选 1=用户目录，2=项目目录，q=取消: ").strip().lower()
             if choice in ("1", "2"):
                 return "user" if choice == "1" else "project"
             if choice in ("q", ""):
@@ -117,7 +117,8 @@ def ask_preference(conflicts: list[tuple[Path, Path]]) -> str:
                 dialog.destroy()
             if result is not None:
                 return "user" if result else "project"
-        except (ImportError, RuntimeError, OSError):
+        except Exception:
+            # Headless Linux/macOS may have tkinter installed without a display.
             pass
     raise DataConflictError("存在两份不同的 BiliPDJ 数据；无交互界面时停止迁移，不会覆盖。请在终端设置 BILIPDJ_MIGRATION_CHOICE=user 或 project 后重试。")
 
