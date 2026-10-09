@@ -47,7 +47,8 @@ def main():
         source.write_text("new project", encoding="utf-8")
         migrate(app, target, chooser=lambda c: "project")
         assert (target / "core/config.yaml").read_text() == "new project"
-        assert len(list((target / "migration-backup/core").glob("config.yaml.before-import-*"))) == 1\n        assert list((target / "migration-backup/core").glob("config.yaml.before-import-*"))[0].read_text() == "user edits"
+        assert len(list((target / "migration-backup/core").glob("config.yaml.before-import-*"))) == 1
+        assert list((target / "migration-backup/core").glob("config.yaml.before-import-*"))[0].read_text() == "user edits"
         assert source.read_text() == "new project"
         other = target / "appearance.json"
         other.write_text(json.dumps({"mode": "light"}), encoding="utf-8")
