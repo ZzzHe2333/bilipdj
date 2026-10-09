@@ -168,13 +168,10 @@ def ensure_runtime_layout(
     logger: Any | None = None,
     defaults_dir: Path | None = None,
 ) -> tuple[Path, Path]:
-    """Create portable/Docker data folders and migrate legacy root-owned files.
+    """Use user data dirs, preserving explicit Docker layout and legacy fallback.
 
-    Program files stay under ``app_dir``. Only user-owned state is redirected to
-    ``BILIPDJ_DATA_DIR`` when that environment variable is explicitly set.
-    On Windows portable/source runs, user-owned state is additionally mirrored
-    to ``%APPDATA%\\bilipdj`` for reinstall recovery while ``core`` remains the
-    normal runtime authority.
+    Managed migration copies only missing user files and never overwrites or
+    deletes originals. Unresolved conflicts keep the old root until chosen.
     """
 
     app_root = Path(app_dir).resolve()
@@ -198,7 +195,7 @@ def ensure_runtime_layout(
     ):
         path.mkdir(parents=True, exist_ok=True)
 
-    if data_dir_overridden() or not external:
+    if (data_dir_overridden() or not external) and not plan.get("conflict"):
         for name in CORE_CONFIG_FILES:
             _migrate_one(app_root / name, core_dir / name, logger=logger)
         for name in LEGACY_UPDATE_METADATA_FILES:
@@ -211,14 +208,21 @@ def ensure_runtime_layout(
 
     # Import legacy style and theme independently into Win/Web settings, while
     # keeping both original files untouched for rollback.
-    if plan["mode"] == "managed" and external:
+    if plan["mode"] == "managed" and not plan.get("conflict"):
+        style_root = data_root if external else (app_root if getattr(sys, "frozen", False) else app_root / "core")
         for base_name in ("style", "appearance"):
-            legacy_sources = (data_root / f"{base_name}.json", data_root / "core" / f"{base_name}.json")
+            legacy_sources = (
+                data_root / f"{base_name}.json",
+                data_root / "core" / f"{base_name}.json",
+                app_root / f"{base_name}.json",
+                app_root / "core" / f"{base_name}.json",
+            )
             for client in ("win", "web"):
-                dest = data_root / f"{base_name}-{client}.json"
+                dest = style_root / f"{base_name}-{client}.json"
                 if not dest.exists():
                     for src in legacy_sources:
                         if src.is_file() and not src.is_symlink():
+                            dest.parent.mkdir(parents=True, exist_ok=True)
                             shutil.copy2(src, dest)
                             break
     return core_dir, key_dir
