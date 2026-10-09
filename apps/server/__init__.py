@@ -135,6 +135,7 @@ from . import plugin_config_schema as _plugin_config_schema  # noqa: E402
 from . import plugin_config_web as _plugin_config_web  # noqa: E402
 from . import language_plugins as _language_plugins  # noqa: E402
 from . import appearance_guard as _appearance_guard  # noqa: E402
+from . import client_style as _client_style  # noqa: E402
 from . import issue123_guard as _issue123_guard  # noqa: E402
 from . import gift_compatibility as _gift_compatibility  # noqa: E402
 from . import security_hardening_guard as _security_hardening_guard  # noqa: E402
@@ -146,10 +147,19 @@ if "appearance.json" not in _settings_backup.SETTINGS_FILES:
     _settings_backup.SETTINGS_FILES = tuple(_settings_backup.SETTINGS_FILES) + ("appearance.json",)
 _original_settings_paths = _settings_backup.SettingsBackupService.settings_paths
 
+for _name in ("style-web.json", "style-win.json", "appearance-web.json", "appearance-win.json"):
+    if _name not in _settings_backup.SETTINGS_FILES:
+        _settings_backup.SETTINGS_FILES += (_name,)
+
 
 def _settings_paths_with_appearance(self: Any) -> dict[str, Path]:
     paths = dict(_original_settings_paths(self))
-    paths["appearance.json"] = Path(getattr(self.server, "APPEARANCE_PATH", Path(getattr(self.server, "_YAML_DIR")) / "appearance.json"))
+    root = Path(getattr(self.server, "_YAML_DIR"))
+    paths["appearance.json"] = Path(getattr(self.server, "APPEARANCE_PATH", root / "appearance.json"))
+    paths["style-web.json"] = Path(getattr(self.server, "STYLE_PATH", root / "style-web.json"))
+    paths["style-win.json"] = Path(getattr(self.server, "STYLE_WIN_PATH", root / "style-win.json"))
+    paths["appearance-web.json"] = Path(getattr(self.server, "APPEARANCE_PATH", root / "appearance-web.json"))
+    paths["appearance-win.json"] = Path(getattr(self.server, "APPEARANCE_WIN_PATH", root / "appearance-win.json"))
     return paths
 
 
@@ -185,6 +195,7 @@ _language_plugins.install_language_plugin_system(server, _plugin_manager, _setti
 # re-run the idempotent mutation guard so that final method remains serialized.
 _plugin_mutation_guard.install_plugin_mutation_guard(_plugin_manager)
 
+_client_style.install_win_style(server)
 _appearance_guard.install_appearance_guard(server)
 _issue123_guard.install_issue123_guard(
     server,
