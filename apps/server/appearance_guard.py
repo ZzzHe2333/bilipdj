@@ -59,7 +59,7 @@ PALETTE_KEYS = tuple(DEFAULT_APPEARANCE["dark"].keys())
 
 
 def _appearance_path(server_module: Any) -> Path:
-    return Path(getattr(server_module, "_YAML_DIR")) / "appearance.json"
+    return Path(getattr(server_module, "_YAML_DIR")) / "appearance-web.json"
 
 
 def _atomic_write(server_module: Any, path: Path, text: str) -> None:
