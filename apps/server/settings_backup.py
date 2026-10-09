@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-SETTINGS_FILES = ("config.yaml", "quanxian.yaml", "kaiguan.yaml", "style.json")
+SETTINGS_FILES = ("config.yaml", "quanxian.yaml", "kaiguan.yaml", "style.json", "style-web.json", "style-win.json", "appearance-web.json", "appearance-win.json")
 BACKUP_NAME_RE = re.compile(r"^BiliPDJ-settings-(\d{8}-\d{6})\.zip$")
 DEFAULT_WEBDAV_CONFIG: dict[str, Any] = {
     "url": "",
@@ -88,7 +88,11 @@ class SettingsBackupService:
             "config.yaml": Path(getattr(self.server, "CONFIG_PATH")),
             "quanxian.yaml": Path(getattr(self.server, "QUANXIAN_PATH")),
             "kaiguan.yaml": Path(getattr(self.server, "KAIGUAN_PATH")),
-            "style.json": Path(getattr(self.server, "STYLE_PATH")),
+            "style.json": Path(getattr(self.server, "_YAML_DIR")) / "style.json",
+            "style-web.json": Path(getattr(self.server, "STYLE_PATH")),
+            "style-win.json": Path(getattr(self.server, "_YAML_DIR")) / "style-win.json",
+            "appearance-web.json": Path(getattr(self.server, "_YAML_DIR")) / "appearance-web.json",
+            "appearance-win.json": Path(getattr(self.server, "_YAML_DIR")) / "appearance-win.json",
         }
 
     def load_config(self, *, include_password: bool = False) -> dict[str, Any]:
