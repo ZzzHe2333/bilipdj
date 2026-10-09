@@ -157,9 +157,13 @@ def _settings_paths_with_appearance(self: Any) -> dict[str, Path]:
     paths = dict(_original_settings_paths(self))
     root = Path(getattr(self.server, "_YAML_DIR"))
     paths["appearance.json"] = Path(getattr(self.server, "APPEARANCE_PATH", root / "appearance.json"))
-    paths["style-web.json"] = Path(getattr(self.server, "STYLE_PATH", root / "style-web.json"))
+    style_web = Path(getattr(self.server, "STYLE_PATH", root / "style-web.json"))
+    appearance_web = Path(getattr(self.server, "APPEARANCE_PATH", root / "appearance-web.json"))
+    # Legacy backup fixtures still expose style.json/appearance.json only.
+    # Do not duplicate those files under new ZIP names in old deployments.
+    paths["style-web.json"] = style_web if style_web.name == "style-web.json" else root / "style-web.json"
     paths["style-win.json"] = Path(getattr(self.server, "STYLE_WIN_PATH", root / "style-win.json"))
-    paths["appearance-web.json"] = Path(getattr(self.server, "APPEARANCE_PATH", root / "appearance-web.json"))
+    paths["appearance-web.json"] = appearance_web if appearance_web.name == "appearance-web.json" else root / "appearance-web.json"
     paths["appearance-win.json"] = Path(getattr(self.server, "APPEARANCE_WIN_PATH", root / "appearance-win.json"))
     return paths
 
