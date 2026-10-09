@@ -106,7 +106,7 @@ def main() -> None:
         # not prevent a valid existing ZIP from being restored.
         FakeServer.STYLE_PATH.write_text('{"changed": true}\n', encoding="utf-8")
         restored = service.restore_settings_zip(style_data)
-        assert set(restored) == {"style.json", "appearance.json"}
+        assert set(restored) == {"style.json", "appearance.json", "cdang_1.css"}
         assert FakeServer.STYLE_PATH.read_text(encoding="utf-8") == "{}\n"
 
     ui_source = (ROOT / "apps/windows/backup_options_guard.py").read_text(encoding="utf-8")
