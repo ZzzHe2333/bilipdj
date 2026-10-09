@@ -44,10 +44,10 @@ def check_data_dir_layout() -> None:
     with tempfile.TemporaryDirectory() as raw:
         app = Path(raw) / "app"
         app.mkdir()
-        with _with_env(BILIPDJ_DATA_DIR=None):
+        with _with_env(BILIPDJ_DATA_DIR=None, XDG_DATA_HOME=str(Path(raw) / "xdg")):
             core, key = layout.ensure_runtime_layout(app)
-            assert core == app / "core"
-            assert key == app / "key"
+            assert core == Path(raw) / "xdg" / "bilipdj" / "core"
+            assert key == Path(raw) / "xdg" / "bilipdj" / "key"
 
     with tempfile.TemporaryDirectory() as raw:
         root = Path(raw)
