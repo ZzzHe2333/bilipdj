@@ -60,6 +60,8 @@ jobs:
         run: python .github/ci/issue155_incremental_update_guard.py
       - name: Validate command/update/runtime layout migration
         run: python .github/ci/issue167_runtime_layout_guard.py
+      - name: Validate OS user data migration and Win/Web style isolation
+        run: python .github/ci/issue311_user_data_guard.py
       - name: Validate Docker foundation
         run: python .github/ci/issue202_docker_guard.py
       - name: Validate Docker build-context privacy
