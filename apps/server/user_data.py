@@ -168,6 +168,15 @@ def _copy_missing(source: Path, destination: Path) -> int:
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(child, target)
             count += 1
+    # Legacy source checkouts stored these service settings inside core/,
+    # while the new server stores them directly at the data root.
+    for name in ("webdav_backup.json", "gift_compatibility.json", "language.json"):
+        target = destination / name
+        source_path = source / "core" / name
+        if _is_safe_file(source_path) and not target.exists() and not target.is_symlink():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_path, target)
+            count += 1
     return count
 
 
