@@ -27,6 +27,9 @@ MIGRATION_FILES = (
     "gift_compatibility.json", "language.json",
     "core/style.json", "core/appearance.json",
     "style.json", "appearance.json",
+    "style-win.json", "style-web.json", "appearance-win.json", "appearance-web.json",
+    "core/style-win.json", "core/style-web.json",
+    "core/appearance-win.json", "core/appearance-web.json",
 )
 MIGRATION_DIRS = ("core/cd", "plugins", "key", "backup")
 
