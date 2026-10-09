@@ -76,6 +76,16 @@ def main():
         assert (target / "core/quanxian.yaml").read_text() == "old"
         assert invalid.read_text() == "new"
 
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        portable = root / "portable"
+        (portable / "core").mkdir(parents=True)
+        (portable / "core/config.yaml").write_text("bundled default", encoding="utf-8")
+        (portable / "config.yaml").write_text("real portable user data", encoding="utf-8")
+        migrate(portable, root / "new-user-data", portable_layout=True)
+        assert (root / "new-user-data/core/config.yaml").read_text() == "real portable user data"
+        assert (portable / "core/config.yaml").read_text() == "bundled default"
+
     backend = (ROOT / "apps/server/server.py").read_text(encoding="utf-8")
     win = (ROOT / "apps/windows/control_panel.py").read_text(encoding="utf-8")
     layout = (ROOT / "apps/server/runtime_layout.py").read_text(encoding="utf-8")
