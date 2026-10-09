@@ -65,7 +65,7 @@ docker compose ps
 
 ## 🧩 功能一览
 
-- 🎨 Windows / Web 共用同一套 **BiliPDJ Aurora** 主题，配置一次两端同步，还能互相导入 / 导出「主题 + OBS 样式」配置文件
+- 🎨 Windows Tk 和 Web 共用 Aurora 设计基础，但主题/排队样式分别存储为 `*-win.json` 与 `*-web.json`，可手动导入 / 导出，不会自动互相覆盖
 - 🖌️ Web 样式页支持可视化设置 + 实时预览，同时保留高级 JSON 编辑
 - 📦 Windows / Web 更新逻辑统一走 `update-manifest.json`，校验和下载全自动
 - 🙋 Windows / Web 手动排队统一为「用户名必填、内容可选」，减少误操作
@@ -108,7 +108,7 @@ bilipdj/
 
 `core/` 已不再承载 Server 或 Windows 的主业务实现，迁移后的同名 Python 文件仅保留轻量转发，用来兼容旧代码里的 `import core.server`、`import core.control_panel` 之类的入口，真正的业务实现在 `apps/server` 与 `apps/windows`。项目的使用教程、更新日志、发行说明、贡献者说明和 AI 上下文也统一收在 `core/`，入口见 [core/README.md](./core/README.md)。
 
-源码模式下的 `config.yaml`、`quanxian.yaml`、`kaiguan.yaml`、`style.json`、`appearance.json` 与 `core/cd/` 使用兼容运行位置，Web 静态资源只有 `apps/web/static/` 这一套。
+源码及桌面运行时，用户数据优先位于系统个人数据目录（Windows Roaming、macOS Application Support、Linux XDG_DATA_HOME）；首次启动从项目目录复制迁移，两份数据冲突时要求明确选择。详见 [数据迁移规则](docs/USER_DATA.md)。Web 静态资源仍只保留 `apps/web/static/` 一套。
 
 </details>
 
@@ -187,11 +187,11 @@ docker run --rm -p 9816:9816 bilipdj-server
 
 </details>
 
-## 🎨 Windows / Web 通用主题
+## 🎨 Windows Tk / Web 独立主题
 
-Windows Tk 与 Web 控制台共用 Server 管理的 `appearance.json`，保存统一的 Aurora Design Tokens：白天/夜晚模式、品牌色、背景、侧栏、卡片、输入框、边框、文字、状态色、字体和字号等。
+Windows Tk 与 Web 控制台保留 Aurora Design Tokens，但各自保存到 `appearance-win.json` 与 `appearance-web.json`，避免互不兼容的主题设置被另一个前端覆盖：白天/夜晚模式、品牌色、背景、侧栏、卡片、输入框、边框、文字、状态色、字体和字号等。
 
-OBS / 队列展示仍然使用原来的 `style.json`，两者职责分开，避免破坏旧 OBS 样式。但用户导入 / 导出时会组合成同一种文件：
+Windows 原生显示样式使用 `style-win.json`，Web/OBS 展示使用 `style-web.json`，不会自动双向同步。但用户仍可以通过导入 / 导出主动交换兼容的 JSON 字段：
 
 ```json
 {
@@ -211,7 +211,7 @@ GET  /api/appearance/profile
 POST /api/appearance/profile
 ```
 
-旧版 Web localStorage 主题与旧 `style.json` 仍然提供迁移兼容，设置 ZIP / WebDAV 备份也会包含 `appearance.json`。
+旧版 Web localStorage 主题与旧 `style.json` / `appearance.json` 保持迁移兼容，设置 ZIP / WebDAV 备份保留旧字段并包含 `-win/-web` 独立样式文件。详见 [跨平台用户数据目录与迁移](docs/USER_DATA.md)。
 
 ## 📡 默认地址
 
@@ -223,7 +223,7 @@ POST /api/appearance/profile
 | `GET /api/runtime-status` | 运行状态 |
 | `GET /api/queue/state` | 队列状态 |
 | `GET /api/platforms/active` | 多平台激活状态 |
-| `GET /api/appearance` | Windows/Web 通用主题 |
+| `GET /api/appearance` | Web 主题；Windows Tk 使用 `?client=win` |
 | `ws://127.0.0.1:9816/ws` | WebSocket 实时事件 |
 
 ## 🧭 架构
