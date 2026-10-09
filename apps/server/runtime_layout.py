@@ -192,7 +192,6 @@ def ensure_runtime_layout(
         data_root,
         core_dir,
         key_dir,
-        data_root / "log",
         data_root / "plugins",
         data_root / "backup",
         core_dir / "cd",
@@ -249,9 +248,9 @@ def configure_server_runtime_layout(server_module: Any) -> tuple[Path, Path]:
         server_module.PD_DIR = core_dir / "cd"
         server_module.QUEUE_STATE_PATH = server_module.PD_DIR / "queue_archive_state.json"
         server_module.BLACKLIST_PATH = server_module.PD_DIR / "blacklist.csv"
-        server_module.STYLE_PATH = data_dir / "style-web.json"
+        server_module.STYLE_PATH = data_dir / ("style.json" if data_dir_overridden() else "style-web.json")
         server_module.STYLE_WIN_PATH = data_dir / "style-win.json"
-        server_module.APPEARANCE_PATH = data_dir / "appearance-web.json"
+        server_module.APPEARANCE_PATH = data_dir / ("appearance.json" if data_dir_overridden() else "appearance-web.json")
         server_module.APPEARANCE_WIN_PATH = data_dir / "appearance-win.json"
         # Generated CSS belongs in persistent storage, not readonly Web assets.
         server_module.LIVE_STYLE_CSS_PATH = data_dir / "moren.css"
