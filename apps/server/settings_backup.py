@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-SETTINGS_FILES = ("config.yaml", "quanxian.yaml", "kaiguan.yaml", "style.json")
+SETTINGS_FILES = ("config.yaml", "quanxian.yaml", "kaiguan.yaml", "style.json", "style-web.json", "style-win.json", "appearance-web.json", "appearance-win.json")
 BACKUP_NAME_RE = re.compile(r"^BiliPDJ-settings-(\d{8}-\d{6})\.zip$")
 DEFAULT_WEBDAV_CONFIG: dict[str, Any] = {
     "url": "",
@@ -88,7 +88,11 @@ class SettingsBackupService:
             "config.yaml": Path(getattr(self.server, "CONFIG_PATH")),
             "quanxian.yaml": Path(getattr(self.server, "QUANXIAN_PATH")),
             "kaiguan.yaml": Path(getattr(self.server, "KAIGUAN_PATH")),
-            "style.json": Path(getattr(self.server, "STYLE_PATH")),
+            "style.json": Path(getattr(self.server, "_YAML_DIR")) / "style.json",
+            "style-web.json": Path(getattr(self.server, "_YAML_DIR")) / "style-web.json",
+            "style-win.json": Path(getattr(self.server, "_YAML_DIR")) / "style-win.json",
+            "appearance-web.json": Path(getattr(self.server, "_YAML_DIR")) / "appearance-web.json",
+            "appearance-win.json": Path(getattr(self.server, "_YAML_DIR")) / "appearance-win.json",
         }
 
     def load_config(self, *, include_password: bool = False) -> dict[str, Any]:
@@ -219,7 +223,19 @@ class SettingsBackupService:
             safety_data, _ = self.build_settings_zip()
             _atomic_write_bytes(safety_path, safety_data)
             try:
-                for name, content in restored.items():
+                # Historical ZIPs contain only unsuffixed styles. Restore those
+                # into both client-specific files unless the archive explicitly
+                # supplies a newer -win/-web variant.
+                apply_files = dict(restored)
+                for old_name in ("style.json", "appearance.json"):
+                    if old_name not in restored:
+                        continue
+                    stem = old_name.removesuffix(".json")
+                    for client in ("win", "web"):
+                        new_name = f"{stem}-{client}.json"
+                        if new_name in paths and new_name not in apply_files:
+                            apply_files[new_name] = restored[old_name]
+                for name, content in apply_files.items():
                     _atomic_write_bytes(paths[name], content)
                     written.append(name)
                 if httpd is not None:

@@ -72,7 +72,23 @@ def _application_dir() -> Path:
 
 
 def _startup_log_path() -> Path:
-    return _application_dir() / "log" / GUI_STARTUP_LOG_NAME
+    # This path must work even if importing apps.server raised an exception.
+    # Never import the backend again while logging an early startup failure.
+    override = str(os.environ.get("BILIPDJ_DATA_DIR", "") or "").strip()
+    if override:
+        data = Path(override).expanduser()
+        if not data.is_absolute():
+            data = _application_dir() / data
+        directory = data / "log"
+    elif sys.platform == "win32":
+        directory = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "bilipdj" / "log"
+    elif sys.platform == "darwin":
+        directory = Path.home() / "Library" / "Logs" / "bilipdj"
+    else:
+        value = str(os.environ.get("XDG_STATE_HOME", "") or "").strip()
+        base = Path(value).expanduser() if value and Path(value).expanduser().is_absolute() else Path.home() / ".local" / "state"
+        directory = base / "bilipdj" / "log"
+    return directory / GUI_STARTUP_LOG_NAME
 
 
 def _write_startup_error(message: str, *, exc: BaseException | None = None, trace: str = "") -> Path:
@@ -122,6 +138,7 @@ def _configure_control_panel_paths() -> None:
     control_panel.CORE_DIR = windows_dir
     control_panel.BUNDLE_DIR = bundle_root
     control_panel.APP_DIR = app_dir
+    control_panel.DATA_DIR = config_dir.parent
     control_panel._YAML_DIR = config_dir
     control_panel.BUNDLE_CORE_DIR = bundle_root / "apps" / "windows"
     control_panel.RUNTIME_CORE_DIR = windows_dir

@@ -65,7 +65,7 @@ docker compose ps
 
 ## 🧩 功能一览
 
-- 🎨 Windows / Web 共用同一套 **BiliPDJ Aurora** 主题，配置一次两端同步，还能互相导入 / 导出「主题 + OBS 样式」配置文件
+- 🎨 Windows 与 Web/未来 Go Web 前端分别保存主题（`-win` / `-web`），共用后端与队列，但不会因修改不同 UI 的主题而相互覆盖；仍支持手动导入/导出主题配置。
 - 🖌️ Web 样式页支持可视化设置 + 实时预览，同时保留高级 JSON 编辑
 - 📦 Windows / Web 更新逻辑统一走 `update-manifest.json`，校验和下载全自动
 - 🙋 Windows / Web 手动排队统一为「用户名必填、内容可选」，减少误操作
@@ -108,7 +108,7 @@ bilipdj/
 
 `core/` 已不再承载 Server 或 Windows 的主业务实现，迁移后的同名 Python 文件仅保留轻量转发，用来兼容旧代码里的 `import core.server`、`import core.control_panel` 之类的入口，真正的业务实现在 `apps/server` 与 `apps/windows`。项目的使用教程、更新日志、发行说明、贡献者说明和 AI 上下文也统一收在 `core/`，入口见 [core/README.md](./core/README.md)。
 
-源码模式下的 `config.yaml`、`quanxian.yaml`、`kaiguan.yaml`、`style.json`、`appearance.json` 与 `core/cd/` 使用兼容运行位置，Web 静态资源只有 `apps/web/static/` 这一套。
+源码/便携运行时的用户数据优先保存在系统用户目录（Windows `%APPDATA%/bilipdj`、macOS `~/Library/Application Support/bilipdj`、Linux `$XDG_DATA_HOME/bilipdj` 或 `~/.local/share/bilipdj`）。旧项目目录数据首次迁移保留原件，两处冲突会要求用户选择。Docker 仍优先使用 `BILIPDJ_DATA_DIR=/data`。
 
 </details>
 
@@ -187,31 +187,37 @@ docker run --rm -p 9816:9816 bilipdj-server
 
 </details>
 
-## 🎨 Windows / Web 通用主题
+## 🎨 Windows 与 Web 分开保存主题
 
-Windows Tk 与 Web 控制台共用 Server 管理的 `appearance.json`，保存统一的 Aurora Design Tokens：白天/夜晚模式、品牌色、背景、侧栏、卡片、输入框、边框、文字、状态色、字体和字号等。
+共用 Server、队列和多平台弹幕不代表两套 UI 必须共用样式。Windows Tk 使用 `appearance-win.json`、`style-win.json`；Web（未来 BiliPDJ-Go Web 前端也使用同一套）使用 `appearance-web.json`、`style-web.json`。旧 `appearance.json`、`style.json` 仅在新文件不存在时作为首次迁移基线，**修改一端不会自动覆盖另一端**。
 
-OBS / 队列展示仍然使用原来的 `style.json`，两者职责分开，避免破坏旧 OBS 样式。但用户导入 / 导出时会组合成同一种文件：
-
-```json
-{
-  "schema": 1,
-  "kind": "bilipdj-appearance-profile",
-  "appearance": { "...": "Windows / Web 主题" },
-  "display_style": { "...": "OBS / 队列样式" }
-}
-```
-
-也就是说 **Windows 导出 → Web 可以直接导入，Web 导出 → Windows 也可以直接导入**。对应接口：
+主题接口默认 Web，可明确指定 Windows：
 
 ```text
-GET  /api/appearance
-POST /api/appearance
-GET  /api/appearance/profile
-POST /api/appearance/profile
+GET  /api/appearance?client=web
+POST /api/appearance?client=web
+GET  /api/appearance?client=win
+POST /api/appearance?client=win
+GET  /api/appearance/profile?client=win
+POST /api/appearance/profile?client=win
 ```
 
-旧版 Web localStorage 主题与旧 `style.json` 仍然提供迁移兼容，设置 ZIP / WebDAV 备份也会包含 `appearance.json`。
+配置文件仍可通过导出/导入手动复制到另一端，但不会自动同步。原有主题与 OBS/队列样式的兼容导入仍保留，设置 ZIP/WebDAV 备份包含两端的专用样式文件。
+
+### 用户数据和迁移
+
+| 系统 | 小型配置与 Win/Web 主题 | **排队存档与本地备份** | 日志 |
+| --- | --- | --- | --- |
+| Windows | `%APPDATA%\\bilipdj` | `%LOCALAPPDATA%\\bilipdj\\archives`、`%LOCALAPPDATA%\\bilipdj\\backups` | `%LOCALAPPDATA%\\bilipdj\\log` |
+| macOS | `~/Library/Application Support/bilipdj` | 同一数据目录下的 `archives/`、`backups/` | `~/Library/Logs/bilipdj` |
+| Linux | `$XDG_DATA_HOME/bilipdj`（默认 `~/.local/share/bilipdj`） | 同一数据目录下的 `archives/`、`backups/` | `$XDG_STATE_HOME/bilipdj/log`（默认 `~/.local/state/bilipdj/log`） |
+| Docker / 自定义 | `BILIPDJ_DATA_DIR`，例如 `/data` | **保留兼容布局** `/data/core/cd`、`/data/backup` | `/data/log` |
+
+Windows 将高频更新的排队 CSV、队列状态、平台配置槽位以及随槽位保存的显示 CSS 放在本机 Local 目录，不会参与 Roaming 漫游配置同步。缓存位于本机数据目录的 `cache/`；B站、抖音及其他直播平台继续读取同一套 `archives/` 数据，不按直播平台拆分存档。**每次更新已有队列槽位前按半小时窗口保留一个旧版本到 `backups/queue/queue_archive_slot_N/`，每槽自动保留最近 96 个快照**（约两天的连续修改），不会在每条弹幕到来时重复复制文件。更新器用于程序回滚的独立快照仍按原更新器约定存放，不与排队存档备份混用。
+
+升级迁移兼容原项目目录的 `core/cd/`、旧 Roaming 镜像的 `core/cd/` / `backup/` 和新 Local 目录。所有迁移保留原文件，只有冲突并经用户明确选择时才覆盖目标，覆盖前保留迁移备份。
+
+迁移不会删除原始项目文件。当两边存在内容不同的文件时，启动时会要求选择用户目录或项目目录，并在覆写用户目录数据前留下迁移备份。无终端、无可用图形界面时会安全停止，不擅自覆盖任何一份数据。远程/无头环境可在明确决定后临时设置 `BILIPDJ_MIGRATION_CHOICE=user`（使用用户数据目录）或 `BILIPDJ_MIGRATION_CHOICE=project`（导入项目文件），仅在发生数据冲突时使用该设置。
 
 ## 📡 默认地址
 

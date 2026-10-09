@@ -711,8 +711,42 @@ def read_queue_archive_entries(path: Path) -> list[dict[str, str]]:
     return parse_queue_archive_rows(rows)[1]
 
 
+def _backup_existing_queue_slot(path: Path) -> None:
+    """Best-effort bounded local history before replacing the shared queue CSV.
+
+    Back up at most once per 30-minute bucket per queue slot. Avoid disk churn
+    while live rooms receive many rapid messages. This does not affect WebDAV.
+    """
+    if path.parent != PD_DIR or not re.fullmatch(r"queue_archive_slot_\d+\.csv", path.name):
+        return
+    if not path.is_file():
+        return
+    target_root = Path(globals().get("BACKUP_DIR", APP_DIR / "backup")) / "queue" / path.stem
+    # Stable time buckets mean checks after the first copy are O(1).
+    bucket = int(time.time() // (30 * 60))
+    target = target_root / f"{bucket}.csv"
+    if target.is_file():
+        return
+    try:
+        import shutil  # imported lazily to keep the server's common path small
+        target_root.mkdir(parents=True, exist_ok=True)
+        temp = target.with_name("." + target.name + f".{os.getpid()}.tmp")
+        try:
+            shutil.copy2(path, temp)
+            os.replace(temp, target)
+        finally:
+            temp.unlink(missing_ok=True)
+        snapshots = sorted(target_root.glob("*.csv"), key=lambda entry: entry.name)
+        for stale in snapshots[:-96]:
+            stale.unlink(missing_ok=True)
+    except OSError:
+        # A full/read-only backup volume must never break live queue persistence.
+        logging.getLogger("danmuji.backend").warning("Queue backup unavailable: %s", target)
+
+
 def write_queue_archive_entries(path: Path, entries: list[dict[str, Any]], meta: dict[str, Any] | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    _backup_existing_queue_slot(path)
     metadata = meta if isinstance(meta, dict) else {}
     timestamp = _format_archive_timestamp(metadata.get("timestamp"))
     buffer = io.StringIO(newline="")
@@ -3305,7 +3339,20 @@ def apply_css_archive_to_live(slot: int, *, force: bool = False) -> bool:
     return True
 
 
-def load_style() -> dict[str, Any]:
+def load_style(client: str = "web") -> dict[str, Any]:
+    if client not in ("web", "win"):
+        raise ValueError("unknown style client")
+    if client == "win":
+        # Windows front-end customization is independent of Web/Go/OBS style.
+        result = dict(DEFAULT_STYLE)
+        source = _YAML_DIR / "style-win.json"
+        try:
+            values = json.loads(source.read_text(encoding="utf-8"))
+            if isinstance(values, dict):
+                result.update(values)
+        except (OSError, json.JSONDecodeError):
+            pass
+        return result
     ensure_style_css_archives()
     raw_config = _read_raw_config()
     result = dict(DEFAULT_STYLE)
@@ -3331,9 +3378,14 @@ def load_style() -> dict[str, Any]:
 
 
 @_serialized_config_io
-def save_style(data: dict[str, Any]) -> None:
+def save_style(data: dict[str, Any], client: str = "web") -> None:
+    if client not in ("web", "win"):
+        raise ValueError("unknown style client")
     merged = dict(DEFAULT_STYLE)
     merged.update(data)
+    if client == "win":
+        _atomic_write_text(_YAML_DIR / "style-win.json", json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+        return
     _atomic_write_text(STYLE_PATH, json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
     current = _merge_config(DEFAULT_CONFIG, _read_raw_config())
     current["style"] = merged

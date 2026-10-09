@@ -20,6 +20,9 @@ def _load_file_module(name: str, path: Path):
 
 
 def check_runtime_migration() -> None:
+    # Legacy portable migration behavior is still available via an explicit
+    # data-directory override. Desktop defaults now use OS user storage.
+    os.environ["BILIPDJ_DATA_DIR"] = "."
     layout = _load_file_module("runtime_layout_probe", ROOT / "apps/server/runtime_layout.py")
     with tempfile.TemporaryDirectory() as raw:
         app = Path(raw)

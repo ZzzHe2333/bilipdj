@@ -8,6 +8,30 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+if __package__:
+    from .user_data_paths import (preferred_root, preferred_log_root, preferred_state_root,
+        preferred_archive_dir, preferred_backup_dir, migrate, migrate_legacy_local_state,
+        seed_client_styles, promote_legacy_archive_settings)
+else:
+    # Runtime layout has standalone file-loader compatibility probes.
+    import importlib.util as _importlib_util
+    _spec = _importlib_util.spec_from_file_location(
+        "bilipdj_user_data_paths_probe", Path(__file__).resolve().with_name("user_data_paths.py")
+    )
+    if _spec is None or _spec.loader is None:
+        raise ImportError("Could not load user_data_paths")
+    _paths = _importlib_util.module_from_spec(_spec)
+    _spec.loader.exec_module(_paths)
+    preferred_root = _paths.preferred_root
+    preferred_log_root = _paths.preferred_log_root
+    migrate = _paths.migrate
+    seed_client_styles = _paths.seed_client_styles
+    promote_legacy_archive_settings = _paths.promote_legacy_archive_settings
+    preferred_state_root = _paths.preferred_state_root
+    preferred_archive_dir = _paths.preferred_archive_dir
+    preferred_backup_dir = _paths.preferred_backup_dir
+    migrate_legacy_local_state = _paths.migrate_legacy_local_state
+
 CORE_CONFIG_FILES = ("config.yaml", "quanxian.yaml", "kaiguan.yaml")
 LEGACY_UPDATE_METADATA_FILES = ("update-result.json",)
 DEFAULT_DATA_FILES = ("style.json", "appearance.json")
@@ -16,21 +40,9 @@ KEY_DIR_NAME = "key"
 
 
 def resolve_data_dir(app_dir: Path) -> Path:
-    """Resolve the user-data root without changing legacy defaults.
+    """Resolve small configuration directory (Roaming, Application Support, XDG)."""
 
-    When ``BILIPDJ_DATA_DIR`` is unset, runtime data stays under ``app_dir`` as
-    before. Docker can point the variable at a mounted directory such as
-    ``/data`` without moving program files there.
-    """
-
-    app_root = Path(app_dir).resolve()
-    raw = str(os.getenv(DATA_DIR_ENV, "") or "").strip()
-    if not raw:
-        return app_root
-    candidate = Path(raw).expanduser()
-    if not candidate.is_absolute():
-        candidate = app_root / candidate
-    return candidate.resolve()
+    return preferred_root(Path(app_dir))
 
 
 def data_dir_overridden() -> bool:
@@ -145,22 +157,8 @@ def _load_archive_sync():
 
 
 def _sync_windows_roaming_archive(app_root: Path, *, logger: Any | None = None) -> None:
-    # BILIPDJ_DATA_DIR is the Docker/external-storage contract and must not be
-    # mixed with the Windows roaming archive. Off Windows this path is skipped
-    # before loading the helper, preserving lightweight standalone CI probes.
-    if data_dir_overridden() or os.name != "nt":
-        return
-    try:
-        sync_local_data_archive = _load_archive_sync()
-        sync_local_data_archive(app_root, logger=logger)
-    except (ImportError, OSError, ValueError) as exc:
-        # The roaming copy is a recovery mirror, never a reason to stop BiliPDJ
-        # from starting if a profile/permission problem prevents synchronization.
-        if logger is not None:
-            try:
-                logger.warning("Local AppData archive sync unavailable: %s", exc)
-            except Exception:
-                pass
+    """Obsolete mirror. The per-user directory is the live data authority."""
+    return
 
 
 def ensure_runtime_layout(
@@ -182,29 +180,50 @@ def ensure_runtime_layout(
     data_root = resolve_data_dir(app_root)
     core_dir = data_root / "core"
     key_dir = data_root / KEY_DIR_NAME
+    state_root = preferred_state_root(app_root)
+    archive_dir = preferred_archive_dir(app_root)
+    backup_dir = preferred_backup_dir(app_root)
 
     for path in (
         data_root,
         core_dir,
         key_dir,
-        data_root / "log",
         data_root / "plugins",
-        data_root / "backup",
-        core_dir / "cd",
+        state_root,
+        state_root / "cache",
+        archive_dir,
+        backup_dir,
+        preferred_log_root(data_root),
     ):
         path.mkdir(parents=True, exist_ok=True)
 
-    for name in CORE_CONFIG_FILES:
-        _migrate_one(app_root / name, core_dir / name, logger=logger)
-    for name in LEGACY_UPDATE_METADATA_FILES:
-        _migrate_one(app_root / name, key_dir / name, logger=logger)
+    # Recover older Roaming mirror settings before project defaults are copied.
+    promote_legacy_archive_settings(data_root)
 
-    if data_dir_overridden() and defaults_dir is not None:
-        source_root = Path(defaults_dir).resolve()
-        for name in DEFAULT_DATA_FILES:
-            _seed_default(source_root / name, data_root / name, logger=logger)
-
-    _sync_windows_roaming_archive(app_root, logger=logger)
+    if data_dir_overridden():
+        # Explicit Docker/hosting mount: never sync with a host user's home.
+        for name in CORE_CONFIG_FILES:
+            _migrate_one(app_root / name, core_dir / name, logger=logger)
+        for name in LEGACY_UPDATE_METADATA_FILES:
+            _migrate_one(app_root / name, key_dir / name, logger=logger)
+        if defaults_dir is not None:
+            for name in DEFAULT_DATA_FILES:
+                _seed_default(Path(defaults_dir) / name, data_root / name, logger=logger)
+    else:
+        # Existing profiles may already have old queue data mirrored into
+        # Roaming/core/cd. Bring that into Local FIRST, then check the program
+        # directory separately. Divergent files require a deliberate choice.
+        migrate_legacy_local_state(data_root, state_root)
+        migrate(app_root, data_root, defaults_dir=defaults_dir, state_root=state_root)
+    # The older archive code stored blacklist.csv with queue slots. It is
+    # a small permission/configuration file and now stays with Roaming config.
+    saved_blacklist = core_dir / "blacklist.csv"
+    if not saved_blacklist.exists():
+        for candidate in (core_dir / "cd" / "blacklist.csv", archive_dir / "blacklist.csv"):
+            if candidate.is_file() and not candidate.is_symlink():
+                shutil.copy2(candidate, saved_blacklist)
+                break
+    seed_client_styles(data_root)
     return core_dir, key_dir
 
 
@@ -226,18 +245,17 @@ def configure_server_runtime_layout(server_module: Any) -> tuple[Path, Path]:
     server_module.KEY_DIR = key_dir
     server_module.UPDATE_RESULT_PATH = key_dir / "update-result.json"
 
-    if data_dir_overridden():
-        server_module._YAML_DIR = data_dir
-        server_module.LOG_DIR = data_dir / "log"
-        server_module.PD_DIR = core_dir / "cd"
-        server_module.QUEUE_STATE_PATH = server_module.PD_DIR / "queue_archive_state.json"
-        server_module.BLACKLIST_PATH = server_module.PD_DIR / "blacklist.csv"
-        server_module.STYLE_PATH = data_dir / "style.json"
-        server_module.APPEARANCE_PATH = data_dir / "appearance.json"
-        # Generated CSS belongs in persistent storage, not readonly Web assets.
-        server_module.LIVE_STYLE_CSS_PATH = data_dir / "moren.css"
-        server_module.PLUGINS_DIR = data_dir / "plugins"
-        server_module.BACKUP_DIR = data_dir / "backup"
+    server_module._YAML_DIR = data_dir
+    server_module.LOG_DIR = preferred_log_root(data_dir)
+    server_module.PD_DIR = preferred_archive_dir(app_dir)
+    server_module.QUEUE_STATE_PATH = server_module.PD_DIR / "queue_archive_state.json"
+    server_module.BLACKLIST_PATH = core_dir / "blacklist.csv"
+    server_module.STYLE_PATH = data_dir / "style-web.json"
+    server_module.APPEARANCE_PATH = data_dir / "appearance-web.json"
+    # Generated CSS belongs in persistent storage, not readonly Web assets.
+    server_module.LIVE_STYLE_CSS_PATH = data_dir / "moren.css"
+    server_module.PLUGINS_DIR = data_dir / "plugins"
+    server_module.BACKUP_DIR = preferred_backup_dir(app_dir)
     return core_dir, key_dir
 
 

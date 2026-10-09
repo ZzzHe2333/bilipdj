@@ -53,7 +53,7 @@ def configure_web_assets(web_dir: str | os.PathLike[str] | None = None) -> Path:
         raise FileNotFoundError(f"Web assets directory does not exist: {target}")
     backend.UI_DIR = target
     backend.BUNDLE_UI_DIR = target
-    backend.LIVE_STYLE_CSS_PATH = (Path(backend.DATA_DIR) if data_dir_overridden() else target) / "moren.css"
+    backend.LIVE_STYLE_CSS_PATH = Path(backend.DATA_DIR) / "moren.css"
     return target
 
 

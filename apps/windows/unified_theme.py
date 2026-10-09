@@ -12,7 +12,7 @@ from tkinter import colorchooser, filedialog, messagebox
 from typing import Any
 
 _PATCH_LOCK = threading.RLock()
-PROFILE_NAME = "BiliPDJ-appearance-profile.json"
+PROFILE_NAME = "BiliPDJ-appearance-win-profile.json"
 
 DEFAULT_APPEARANCE: dict[str, Any] = {
     "schema": 1,
@@ -129,6 +129,7 @@ def _api(panel: Any, path: str, *, payload: dict[str, Any] | None = None, timeou
 
 def _bootstrap_appearance(module: Any) -> dict[str, Any]:
     candidates = [
+        Path(getattr(module, "DATA_DIR", Path(getattr(module, "APP_DIR", Path.cwd())))) / "appearance-win.json",
         Path(getattr(module, "APP_DIR", Path.cwd())) / "appearance.json",
         Path(__file__).resolve().parents[2] / "core" / "appearance.json",
     ]
@@ -203,7 +204,7 @@ def _set_status(panel: Any, text: str, *, error: bool = False) -> None:
 
 def _load_from_server(panel: Any, module: Any, *, quiet: bool = False) -> bool:
     try:
-        payload = _api(panel, "/api/appearance")
+        payload = _api(panel, "/api/appearance?client=win")
         appearance = _normalize(payload.get("appearance"))
     except Exception as exc:
         if not quiet:
@@ -215,14 +216,14 @@ def _load_from_server(panel: Any, module: Any, *, quiet: bool = False) -> bool:
     panel._apply_theme(_resolved_dark(appearance))
     _fill_editor(panel)
     if not quiet:
-        _set_status(panel, "已从 Server 读取通用主题。")
+        _set_status(panel, "已从 Server 读取 Windows 专用主题。")
     return True
 
 
 def _save_to_server(panel: Any, module: Any) -> bool:
     appearance = _collect_editor(panel)
     try:
-        payload = _api(panel, "/api/appearance", payload={"appearance": appearance})
+        payload = _api(panel, "/api/appearance?client=win", payload={"appearance": appearance})
         saved = _normalize(payload.get("appearance"))
     except Exception as exc:
         _set_status(panel, f"保存失败：{exc}", error=True)
@@ -233,7 +234,7 @@ def _save_to_server(panel: Any, module: Any) -> bool:
     _set_class_palettes(type(panel), saved)
     panel._apply_theme(_resolved_dark(saved))
     _fill_editor(panel)
-    _set_status(panel, "已保存到 Server；Windows/Web 共用 appearance.json。")
+    _set_status(panel, "已保存到 Server 的 appearance-win.json，不会覆盖 Web 主题。")
     return True
 
 
@@ -319,34 +320,34 @@ def _choose_color(panel: Any, key: str) -> None:
 
 def _export_profile(panel: Any) -> None:
     try:
-        profile = _api(panel, "/api/appearance/profile", timeout=4.0)
+        profile = _api(panel, "/api/appearance/profile?client=win", timeout=4.0)
     except Exception as exc:
         messagebox.showerror("导出失败", f"需要后端服务器正在运行。\n\n{exc}", parent=panel.root)
         return
     target = filedialog.asksaveasfilename(
         parent=panel.root,
-        title="导出 Windows / Web / OBS 通用配置",
+        title="导出 Windows 主题与显示配置",
         initialfile=PROFILE_NAME,
         defaultextension=".json",
-        filetypes=(("BiliPDJ 通用配置", "*.json"), ("所有文件", "*.*")),
+        filetypes=(("BiliPDJ Windows 配置", "*.json"), ("所有文件", "*.*")),
     )
     if not target:
         return
     Path(target).write_text(json.dumps(profile, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    _set_status(panel, f"已导出通用配置：{Path(target).name}")
+    _set_status(panel, f"已导出 Windows 配置：{Path(target).name}")
 
 
 def _import_profile(panel: Any, module: Any) -> None:
     source = filedialog.askopenfilename(
         parent=panel.root,
-        title="导入 Windows / Web / OBS 通用配置",
-        filetypes=(("BiliPDJ 通用配置", "*.json"), ("所有文件", "*.*")),
+        title="导入 Windows 主题与队列样式配置",
+        filetypes=(("BiliPDJ Windows 配置", "*.json"), ("所有文件", "*.*")),
     )
     if not source:
         return
     try:
         raw = json.loads(Path(source).read_text(encoding="utf-8-sig"))
-        payload = _api(panel, "/api/appearance/profile", payload=raw, timeout=5.0)
+        payload = _api(panel, "/api/appearance/profile?client=win", payload=raw, timeout=5.0)
         appearance = _normalize(payload.get("appearance"))
     except Exception as exc:
         messagebox.showerror("导入失败", str(exc), parent=panel.root)
@@ -378,7 +379,7 @@ def _install_theme_tab(panel: Any, module: Any) -> None:
     panel._unified_theme_color_vars = {key: module.tk.StringVar(master=panel.root, value="#000000") for key, _ in COLOR_FIELDS}
     panel._unified_theme_color_buttons = {}
 
-    intro = module.ttk.LabelFrame(page, text="BiliPDJ Aurora · Windows / Web 通用主题", padding=12)
+    intro = module.ttk.LabelFrame(page, text="BiliPDJ Aurora · Windows 专用主题", padding=12)
     intro.grid(row=0, column=0, sticky="ew")
     intro.columnconfigure(1, weight=1)
     module.ttk.Label(intro, text="当前模式", width=14).grid(row=0, column=0, sticky="w", pady=4)
@@ -415,10 +416,10 @@ def _install_theme_tab(panel: Any, module: Any) -> None:
     actions.grid(row=2, column=0, sticky="ew", pady=(12, 0))
     module.ttk.Button(actions, text="保存到后端", style="Primary.TButton", command=lambda: _save_to_server(panel, module)).pack(side="left", padx=(0, 7))
     module.ttk.Button(actions, text="从后端刷新", command=lambda: _load_from_server(panel, module)).pack(side="left", padx=(0, 7))
-    module.ttk.Button(actions, text="导出通用配置", command=lambda: _export_profile(panel)).pack(side="left", padx=(0, 7))
-    module.ttk.Button(actions, text="导入通用配置", command=lambda: _import_profile(panel, module)).pack(side="left", padx=(0, 7))
+    module.ttk.Button(actions, text="导出 Windows 配置", command=lambda: _export_profile(panel)).pack(side="left", padx=(0, 7))
+    module.ttk.Button(actions, text="导入 Windows 配置", command=lambda: _import_profile(panel, module)).pack(side="left", padx=(0, 7))
     module.ttk.Button(actions, text="恢复 Aurora 默认", command=lambda: _reset_preview(panel)).pack(side="left")
-    module.ttk.Label(page, text="导出的 JSON 同时包含 appearance（Windows/Web）和 display_style（OBS/队列），两端可直接互导。", style="Muted.Card.TLabel").grid(row=3, column=0, sticky="w", pady=(10, 0))
+    module.ttk.Label(page, text="导出的 JSON 包含 Windows 主题与队列样式，手动导入到 Web 也不会自动覆盖其他客户端。", style="Muted.Card.TLabel").grid(row=3, column=0, sticky="w", pady=(10, 0))
     module.ttk.Label(page, textvariable=panel._unified_theme_status_var).grid(row=4, column=0, sticky="w", pady=(5, 0))
 
     mode.bind("<<ComboboxSelected>>", lambda _e: _preview_editor(panel))
@@ -434,7 +435,7 @@ def _reset_preview(panel: Any) -> None:
     _set_class_palettes(type(panel), panel._bilipdj_appearance)
     panel._apply_theme(_resolved_dark(panel._bilipdj_appearance))
     _fill_editor(panel)
-    _set_status(panel, "已恢复 Aurora 默认预览；点击“保存到后端”后跨端同步。")
+    _set_status(panel, "已恢复 Aurora 默认预览；点击保存后仅更新 Windows 专用主题。")
 
 
 def _schedule_poll(panel: Any, module: Any) -> None:
@@ -506,7 +507,7 @@ def patch_control_panel_unified_theme(panel_class: type[Any]) -> bool:
             self._bilipdj_appearance = appearance
             self._unified_theme_dirty = False
             try:
-                payload = _api(self, "/api/appearance", payload={"appearance": appearance})
+                payload = _api(self, "/api/appearance?client=win", payload={"appearance": appearance})
                 self._bilipdj_appearance = _normalize(payload.get("appearance"))
             except Exception:
                 pass

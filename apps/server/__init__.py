@@ -19,6 +19,9 @@ from . import style_option_guard as _style_option_guard
 from . import web_queue_layout as _web_queue_layout
 from . import websocket_performance_guard as _websocket_performance_guard
 from .runtime_layout import data_dir_overridden as _data_dir_overridden
+from .user_data_paths import preferred_log_root as _preferred_log_root
+from .user_data_paths import preferred_archive_dir as _preferred_archive_dir
+from .user_data_paths import preferred_backup_dir as _preferred_backup_dir
 from .runtime_layout import ensure_runtime_layout as _ensure_runtime_layout
 from .runtime_layout import resolve_data_dir as _resolve_data_dir
 
@@ -68,9 +71,9 @@ def configure_runtime_paths(module: Any = server) -> Any:
         app_dir,
         defaults_dir=compatibility_core_dir,
     )
-    # Legacy source/portable layouts stay unchanged unless BILIPDJ_DATA_DIR is
-    # explicitly configured. Docker uses the external data root for settings.
-    misc_config_dir = data_dir if external_data_dir else (app_dir if frozen else compatibility_core_dir)
+    # User-specific data is authoritative across desktop operating systems.
+    # Explicit BILIPDJ_DATA_DIR remains the Docker/hosting override.
+    misc_config_dir = data_dir
 
     source_web = REPO_ROOT / "apps" / "web" / "static"
     bundled_web = bundle_root / "apps" / "web" / "static"
@@ -92,19 +95,19 @@ def configure_runtime_paths(module: Any = server) -> Any:
     module.BUNDLE_UI_DIR = bundled_web
     module.UI_DIR = ui_dir
     module.CONFIG_PATH = runtime_core_dir / "config.yaml"
-    module.LOG_DIR = (data_dir if external_data_dir else app_dir) / "log"
-    module.PD_DIR = runtime_core_dir / "cd"
+    module.LOG_DIR = _preferred_log_root(data_dir)
+    module.PD_DIR = _preferred_archive_dir(app_dir)
     module.QUEUE_STATE_PATH = module.PD_DIR / "queue_archive_state.json"
     module.BLACKLIST_PATH = runtime_core_dir / "blacklist.csv"
     module.QUANXIAN_PATH = runtime_core_dir / "quanxian.yaml"
     module.KAIGUAN_PATH = runtime_core_dir / "kaiguan.yaml"
-    module.STYLE_PATH = misc_config_dir / "style.json"
-    module.APPEARANCE_PATH = misc_config_dir / "appearance.json"
+    module.STYLE_PATH = misc_config_dir / "style-web.json"
+    module.APPEARANCE_PATH = misc_config_dir / "appearance-web.json"
     module.KEY_DIR = key_dir
     module.UPDATE_RESULT_PATH = key_dir / "update-result.json"
-    module.PLUGINS_DIR = (data_dir if external_data_dir else app_dir) / "plugins"
-    module.BACKUP_DIR = (data_dir if external_data_dir else app_dir) / "backup"
-    module.LIVE_STYLE_CSS_PATH = (data_dir if external_data_dir else ui_dir) / "moren.css"
+    module.PLUGINS_DIR = data_dir / "plugins"
+    module.BACKUP_DIR = _preferred_backup_dir(app_dir)
+    module.LIVE_STYLE_CSS_PATH = data_dir / "moren.css"
     module._CONFIG_LOCK_PATH = runtime_core_dir / ".config.lock"
     return module
 
@@ -145,7 +148,7 @@ _original_settings_paths = _settings_backup.SettingsBackupService.settings_paths
 
 def _settings_paths_with_appearance(self: Any) -> dict[str, Path]:
     paths = dict(_original_settings_paths(self))
-    paths["appearance.json"] = Path(getattr(self.server, "APPEARANCE_PATH", Path(getattr(self.server, "_YAML_DIR")) / "appearance.json"))
+    paths["appearance.json"] = Path(getattr(self.server, "_YAML_DIR")) / "appearance.json"
     return paths
 
 
