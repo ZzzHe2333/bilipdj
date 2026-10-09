@@ -107,7 +107,7 @@
     pane.dataset.unifiedTheme = '1';
     pane.innerHTML = `
       <div class="card unified-theme-card">
-        <div class="unified-theme-head"><div><h3>BiliPDJ Aurora · 通用界面主题</h3><p class="hint">Windows、Web 共用 Server 的 appearance.json；导出的 JSON 可在任一端直接导入。OBS/队列显示样式会一并放入通用配置文件。</p></div><span class="unified-theme-chip">跨端同步</span></div>
+        <div class="unified-theme-head"><div><h3>BiliPDJ Aurora · 通用界面主题</h3><p class="hint">Web 与未来 Go Web 前端使用 appearance-web.json；Windows Tk 使用 appearance-win.json；两端可手动导入导出配置，但不再自动互相覆盖。</p></div><span class="unified-theme-chip">Web 样式</span></div>
         <div class="unified-theme-grid">
           <label>当前模式<select id="unified-theme-mode"><option value="system">跟随系统</option><option value="light">白天模式</option><option value="dark">夜晚模式</option></select></label>
           <label>正在编辑的配色<select id="unified-theme-scheme"><option value="dark">夜晚配色</option><option value="light">白天配色</option></select></label>
@@ -125,7 +125,7 @@
           <button id="unified-theme-reset" class="button ghost" type="button">恢复 Aurora 默认</button>
           <input id="unified-theme-file" type="file" accept="application/json,.json" hidden>
         </div>
-        <p class="unified-theme-note">通用配置格式同时包含 <code>appearance</code>（Windows/Web 界面）和 <code>display_style</code>（OBS/队列展示）。因此从 Windows 导出的文件可以直接在 Web 导入，反向也一样。</p>
+        <p class="unified-theme-note">导入和导出是主动操作；Web 与 Windows 的本地主题独立保存，不自动同步或覆盖。</p>
         <div id="unified-theme-status" class="unified-theme-status"></div>
       </div>`;
 
@@ -145,7 +145,7 @@
       dirty = true;
       apply(appearance);
       fillEditor();
-      setStatus('已恢复 Aurora 默认预览；点击“保存到后端”后同步到 Windows/Web。');
+      setStatus('已恢复 Aurora 默认预览；点击“保存到后端”后仅更新 Web 主题。');
     });
     fillEditor();
   }
@@ -188,7 +188,7 @@
       dirty = false;
       apply(appearance);
       fillEditor();
-      if (force) setStatus('已从后端读取通用主题。');
+      if (force) setStatus('已从后端读取 Web 主题。');
     } catch (error) {
       setStatus(`读取通用主题失败：${error.message}`, false);
     }
@@ -200,7 +200,7 @@
       appearance = normalize(payload.appearance);
       dirty = false;
       apply(appearance); fillEditor();
-      setStatus('已保存到 Server。Windows 和 Web 将使用同一份 appearance.json。');
+      setStatus('已保存到 Server。只更新 Web 的 appearance-web.json。');
     } catch (error) { setStatus(`保存失败：${error.message}`, false); }
   }
 
