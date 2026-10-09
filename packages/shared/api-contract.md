@@ -65,7 +65,8 @@ Content-Type: application/json
 | GET | `/api/queue/archive` | 队列存档槽与当前槽 |
 | GET | `/api/blacklist/state` | 黑名单 |
 | GET | `/api/gifts/state` | B站礼物规则运行状态 |
-| GET | `/api/quanxian` | 权限配置 |
+| GET | `/api/quanxian` | 权限配置（含可编辑结构化 `entries`、兼容旧角色列表） |
+| POST | `/api/quanxian` | 保存全平台角色列表及多平台范围授权 |
 | GET | `/api/kaiguan` | 功能开关 |
 | GET | `/api/style` | 当前 OBS/队列展示样式 |
 | POST | `/api/style` | 保存 OBS/队列展示样式 |
@@ -85,6 +86,47 @@ python .github/ci/generate_api_docs.py
 ```
 
 生成到本地 `api/` 目录。
+
+
+### 多平台管理员授权（Issue #307）
+
+`GET /api/quanxian` 返回兼容字段 `super_admin`、`admin`、`jianzhang`、`member`、`blacklist`（历史用户名列表、全平台）及可编辑的 `entries` 结构化条目：
+
+```json
+{
+  "status": "ok",
+  "super_admin": ["legacy-owner"],
+  "admin": [],
+  "jianzhang": [],
+  "member": [],
+  "blacklist": [],
+  "entries": [
+    {"id":"legacy-owner","kind":"name","role":"super_admin","platforms":[]},
+    {"id":"12345","kind":"id","role":"admin","platforms":["bilibili","douyin"]}
+  ]
+}
+```
+
+`POST /api/quanxian` 使用原有五组数组，加上 `scoped_entries` 传入结构化新增记录，后端将热加载进统一的 QueueManager：
+
+```json
+{
+  "super_admin": ["legacy-owner"],
+  "admin": [],
+  "jianzhang": [],
+  "member": [],
+  "blacklist": [],
+  "scoped_entries": [
+    {"id":"12345","kind":"id","role":"admin","platforms":["bilibili","douyin"]}
+  ]
+}
+```
+
+- `id` 是直播平台实际提供的用户 ID；`kind="id"` 优先以事件的 `user_id` 精确匹配。历史用户名使用 `kind="name"` 匹配昵称，请优先为新管理员使用稳定 ID。
+- `role` 可为 `super_admin`、`admin`、`jianzhang` 或 `member`；`platforms` 可包含 `bilibili`、`douyin`、`huya`、`youtube`、`twitch`，空数组代表全平台。无法识别的来源平台条目不生效，绝不自动转为全平台。
+- `entries` 是 GET 展示字段，不参与写入；`scoped_entries` 是可读可写的实际来源范围数据，存盘时为兼容简易 YAML 解析器采用不透明的 base64 JSON 字符串。第三方客户端应始终提交**对象数组**，不依赖磁盘编码。
+- 旧客户端省略 `scoped_entries` 时保存现有角色数组，服务端保留已有范围授权；显式传入 `"scoped_entries":[]` 才清空范围授权。
+- 原有黑名单仍是全平台用户名列表，优先于管理员授权；原平台的主播 / 房管原生权限继续独立生效。该接口仅允许可信本机管理调用，不应暴露到公网。
 
 ## 5. 队列读取
 
