@@ -146,7 +146,7 @@ _original_settings_paths = _settings_backup.SettingsBackupService.settings_paths
 
 def _settings_paths_with_appearance(self: Any) -> dict[str, Path]:
     paths = dict(_original_settings_paths(self))
-    paths["appearance.json"] = Path(getattr(self.server, "APPEARANCE_PATH", Path(getattr(self.server, "_YAML_DIR")) / "appearance.json"))
+    paths["appearance.json"] = Path(getattr(self.server, "_YAML_DIR")) / "appearance.json"
     return paths
 
 
