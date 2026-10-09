@@ -796,8 +796,11 @@ def blacklist_entries_to_names(entries: list[dict[str, Any]]) -> list[str]:
     return names
 
 
-def read_blacklist_entries(path: Path = BLACKLIST_PATH) -> list[dict[str, str]]:
-    return blacklist_names_to_entries(blacklist_entries_to_names(read_queue_archive_entries(path)))
+def read_blacklist_entries(path: Path | None = None) -> list[dict[str, str]]:
+    # Runtime paths are rebound after this module is imported. A definition-
+    # time BLACKLIST_PATH default would keep pointing at the old project tree.
+    current_path = BLACKLIST_PATH if path is None else Path(path)
+    return blacklist_names_to_entries(blacklist_entries_to_names(read_queue_archive_entries(current_path)))
 
 
 def write_blacklist_entries(path: Path, entries: list[dict[str, Any]]) -> None:

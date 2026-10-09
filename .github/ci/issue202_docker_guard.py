@@ -66,7 +66,7 @@ def check_data_dir_layout() -> None:
             assert core == data / "core"
             assert key == data / "key"
             assert (core / "config.yaml").is_file()
-            assert not (app / "config.yaml").exists()
+            assert (app / "config.yaml").exists(), "Non-destructive migration must retain portable original"
             assert (data / "style.json").is_file()
             assert (data / "appearance.json").is_file()
             for relative in ("log", "plugins", "backup", "core/cd", "key"):

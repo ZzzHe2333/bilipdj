@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-import hashlib
 import importlib.util
 import os
 import shutil
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 if __package__:
     from .user_data_paths import (preferred_root, preferred_log_root, preferred_state_root,
-        preferred_archive_dir, preferred_backup_dir, migrate, migrate_legacy_local_state,
+        preferred_archive_dir, preferred_backup_dir, migrate, migrate_explicit_root_files, migrate_legacy_local_state,
         seed_client_styles, promote_legacy_archive_settings)
 else:
     # Runtime layout has standalone file-loader compatibility probes.
@@ -25,6 +23,7 @@ else:
     preferred_root = _paths.preferred_root
     preferred_log_root = _paths.preferred_log_root
     migrate = _paths.migrate
+    migrate_explicit_root_files = _paths.migrate_explicit_root_files
     seed_client_styles = _paths.seed_client_styles
     promote_legacy_archive_settings = _paths.promote_legacy_archive_settings
     preferred_state_root = _paths.preferred_state_root
@@ -47,86 +46,6 @@ def resolve_data_dir(app_dir: Path) -> Path:
 
 def data_dir_overridden() -> bool:
     return bool(str(os.getenv(DATA_DIR_ENV, "") or "").strip())
-
-
-def _same_file_content(left: Path, right: Path) -> bool:
-    try:
-        if left.stat().st_size != right.stat().st_size:
-            return False
-
-        def digest(path: Path) -> str:
-            h = hashlib.sha256()
-            with path.open("rb") as handle:
-                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                    h.update(chunk)
-            return h.hexdigest()
-
-        return digest(left) == digest(right)
-    except OSError:
-        return False
-
-
-def _migration_backup_path(destination_dir: Path, source: Path) -> Path:
-    backup_dir = destination_dir / "migration-backup"
-    backup_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    candidate = backup_dir / f"{source.name}.legacy-root-{stamp}"
-    index = 2
-    while candidate.exists():
-        candidate = backup_dir / f"{source.name}.legacy-root-{stamp}-{index}"
-        index += 1
-    return candidate
-
-
-def _migrate_one(source: Path, target: Path, *, logger: Any | None = None) -> bool:
-    if not source.is_file():
-        return False
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if not target.exists():
-        try:
-            source.replace(target)
-        except OSError:
-            shutil.copy2(source, target)
-            source.unlink(missing_ok=True)
-        if logger is not None:
-            logger.info("Migrated legacy runtime file: %s -> %s", source, target)
-        return True
-
-    if _same_file_content(source, target):
-        source.unlink(missing_ok=True)
-        return True
-
-    try:
-        source_mtime = source.stat().st_mtime_ns
-        target_mtime = target.stat().st_mtime_ns
-    except OSError:
-        source_mtime = target_mtime = 0
-
-    if source_mtime > target_mtime:
-        backup = _migration_backup_path(target.parent, target)
-        shutil.copy2(target, backup)
-        try:
-            source.replace(target)
-        except OSError:
-            shutil.copy2(source, target)
-            source.unlink(missing_ok=True)
-        if logger is not None:
-            logger.warning(
-                "Legacy root file was newer; preserved previous target at %s and migrated %s",
-                backup,
-                source,
-            )
-    else:
-        backup = _migration_backup_path(target.parent, source)
-        shutil.copy2(source, backup)
-        source.unlink(missing_ok=True)
-        if logger is not None:
-            logger.warning(
-                "Both legacy and migrated runtime files existed; kept %s and preserved legacy copy at %s",
-                target,
-                backup,
-            )
-    return True
 
 
 def _seed_default(source: Path, target: Path, *, logger: Any | None = None) -> bool:
@@ -202,10 +121,10 @@ def ensure_runtime_layout(
 
     if data_dir_overridden():
         # Explicit Docker/hosting mount: never sync with a host user's home.
-        for name in CORE_CONFIG_FILES:
-            _migrate_one(app_root / name, core_dir / name, logger=logger)
-        for name in LEGACY_UPDATE_METADATA_FILES:
-            _migrate_one(app_root / name, key_dir / name, logger=logger)
+        # Same safety semantics as desktop migration: copy, never delete,
+        # and explicitly resolve every changed two-copy conflict (including
+        # headless Docker mounts and user-chosen BILIPDJ_DATA_DIR paths).
+        migrate_explicit_root_files(app_root, data_root)
         if defaults_dir is not None:
             for name in DEFAULT_DATA_FILES:
                 _seed_default(Path(defaults_dir) / name, data_root / name, logger=logger)

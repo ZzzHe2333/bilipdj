@@ -56,6 +56,10 @@ docker compose up -d
 
 从现有 Docker 部署升级时不要删除 `./data`；从 Windows 便携版迁移配置则应首先停服务并备份，再使用程序内的配置导出/导入功能，不建议直接覆盖含密钥的目录。
 
+**冲突处理：** 首次启动时若镜像内旧根目录配置（如 `/app/config.yaml`）与 `/data/core/config.yaml` 不一致，程序会拒绝在无交互环境中自动裁决，不会按修改时间覆盖，也不会删除原件。先备份 `./data`，核对文件差异，再临时设置 `BILIPDJ_MIGRATION_CHOICE=user`（保留 `/data` 数据）或 `project`（导入应用根目录配置，并将原 `/data` 文件放入 `migration-backup/`）重新启动。不要将 `project` 长期保留为固定环境变量。
+
+ZIP/WebDAV 的存档备份包含 `queue_archive_slot_N.csv`、`queue_archive_state.json`，以及关联的 `pingtai_config_N.yaml`、`cdang_N.css`。更新器 `backup/update-*/` 版本回滚快照留在原程序目录，不会被复制到用户业务存档目录。
+
 如果选择让容器以非 root UID/GID 运行，需**先**为当前 `./data` 在宿主机设置匹配的所有者和权限，确保队列归档、日志和插件可写；不要递归改为所有用户可读写的 777 权限。
 
 ## 4. 升级、日志与故障排查
