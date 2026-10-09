@@ -316,18 +316,73 @@
   }
   function loadSettingsBundle() { loadPlatform(); loadGifts(); loadSwitches(); loadBlacklist(); loadStyle(); loadRawConfig(); }
 
+  const permissionRoles = {super_admin: '最高管理员', admin: '管理员', jianzhang: '舰长', member: '成员'};
+  const permissionPlatforms = {bilibili: 'Bilibili', douyin: '抖音', huya: '虎牙', youtube: 'YouTube', twitch: 'Twitch'};
+  let permissionRows = [], permissionBlacklist = [], editingPermission = -1;
+
+  function renderPermissionRows() {
+    const list = $('perm-list');
+    list.innerHTML = permissionRows.map((entry, index) => `<button type="button" class="permission-row" data-perm-edit="${index}" aria-label="编辑 ${esc(entry.id)} 的权限"><span class="permission-identity"><strong>${esc(entry.id)}</strong><small>${entry.kind === 'name' ? '历史用户名' : '平台用户 ID'}</small></span><span>${esc(permissionRoles[entry.role] || entry.role)}</span><span>${esc(entry.platforms.length ? entry.platforms.map(p => permissionPlatforms[p] || p).join(' / ') : '全平台')}</span><span>编辑 ›</span></button>`).join('') || '<div class="permission-empty">暂无用户权限，点击右上角「＋ 新增权限」。</div>';
+  }
+
   async function loadPermissions() {
     try {
       const payload = await json('/api/quanxian');
-      ['super_admin','admin','jianzhang','member'].forEach(key => { const v = payload[key]; $(`perm-${key}`).value = Array.isArray(v) ? v.join('\n') : ''; });
-      message('perm-status', '权限已加载。');
+      permissionRows = Array.isArray(payload.entries) ? payload.entries.map(item => ({
+        id: String(item.id || ''), kind: item.kind === 'name' ? 'name' : 'id',
+        role: item.role, platforms: Array.isArray(item.platforms) ? item.platforms.slice() : []
+      })) : ['super_admin','admin','jianzhang','member'].flatMap(role =>
+        (payload[role] || []).map(id => ({id, kind: 'name', role, platforms: []})));
+      permissionBlacklist = Array.isArray(payload.blacklist) ? payload.blacklist.slice() : [];
+      renderPermissionRows();
+      message('perm-status', `已加载 ${permissionRows.length} 条权限记录。`);
     } catch (error) { message('perm-status', `加载失败：${error.message}`, false); }
   }
+
   async function savePermissions() {
-    const payload = {}; ['super_admin','admin','jianzhang','member'].forEach(key => { payload[key] = $(`perm-${key}`).value.split(/\r?\n/).map(v => v.trim()).filter(Boolean); });
-    try { await post('/api/quanxian', payload); message('perm-status', '权限已保存并重新加载。'); }
-    catch (error) { message('perm-status', `保存失败：${error.message}`, false); }
+    const payload = {super_admin: [], admin: [], jianzhang: [], member: [], blacklist: permissionBlacklist.slice(), scoped_entries: []};
+    permissionRows.forEach(entry => {
+      if (entry.kind === 'name' && entry.platforms.length === 0) payload[entry.role].push(entry.id);
+      else payload.scoped_entries.push({ id: entry.id, kind: entry.kind, role: entry.role, platforms: entry.platforms });
+    });
+    try {
+      await post('/api/quanxian', payload);
+      message('perm-status', '权限已保存并应用到全部监听平台。');
+      await loadPermissions();
+      return true;
+    } catch (error) { message('perm-status', `保存失败：${error.message}`, false); return false; }
   }
+
+  function editPermission(index = -1) {
+    editingPermission = index;
+    const entry = index >= 0 ? permissionRows[index] : {id: '', kind: 'id', role: 'admin', platforms: []};
+    $('perm-dialog-title').textContent = index < 0 ? '新增权限' : '编辑权限';
+    $('perm-kind').value = entry.kind;
+    $('perm-identity').value = entry.id;
+    $('perm-role').value = entry.role;
+    document.querySelectorAll('[name="perm-platform"]').forEach(cb => { cb.checked = entry.platforms.includes(cb.value); });
+    $('perm-delete').hidden = index < 0;
+    $('perm-dialog').showModal();
+    $('perm-identity').focus();
+  }
+
+  async function applyPermission(event) {
+    event.preventDefault();
+    const id = $('perm-identity').value.trim();
+    const kind = $('perm-kind').value;
+    const role = $('perm-role').value;
+    const platforms = [...document.querySelectorAll('[name="perm-platform"]:checked')].map(node => node.value);
+    if (!id || /[\r\n\0]/.test(id)) { $('perm-identity').reportValidity(); return; }
+    if (permissionRows.some((r, i) => i !== editingPermission && r.id === id && r.kind === kind && r.role === role && JSON.stringify(r.platforms.slice().sort()) === JSON.stringify(platforms.slice().sort()))) {
+      message('perm-status', '该用户、角色和平台组合已存在。', false); return;
+    }
+    if (editingPermission >= 0) permissionRows[editingPermission] = {id, kind, role, platforms};
+    else permissionRows.push({id, kind, role, platforms});
+    renderPermissionRows();
+    $('perm-dialog').close();
+    await savePermissions();
+  }
+
 
   async function refreshPerformance() {
     try {
@@ -409,6 +464,16 @@
   $('blacklist-list').addEventListener('click', async event => { const btn = event.target.closest('[data-blacklist-delete]'); if (!btn) return; try { await post('/api/blacklist/delete', { index: Number(btn.dataset.blacklistDelete) }); await loadBlacklist(); } catch (e) { message('blacklist-status', e.message, false); } });
   $('style-save').addEventListener('click', async () => { try { const payload = JSON.parse($('style-json').value); await post('/api/style', payload); message('style-status', '样式保存成功。'); } catch (e) { message('style-status', `保存失败：${e.message}`, false); } });
   $('config-save').addEventListener('click', async () => { try { const payload = JSON.parse($('config-json').value); await post('/api/config', payload); message('config-status', '完整配置保存成功。'); await Promise.all([refreshHeader(), loadPlatform(), loadGifts()]); } catch (e) { message('config-status', `保存失败：${e.message}`, false); } });
+  $('perm-add').addEventListener('click', () => editPermission());
+  $('perm-list').addEventListener('click', event => { const row = event.target.closest('[data-perm-edit]'); if (row) editPermission(Number(row.dataset.permEdit)); });
+  $('perm-form').addEventListener('submit', applyPermission);
+  $('perm-cancel').addEventListener('click', () => $('perm-dialog').close());
+  $('perm-delete').addEventListener('click', async () => {
+    if (editingPermission < 0 || !confirm('确认移除此账号的权限记录？')) return;
+    permissionRows.splice(editingPermission, 1);
+    $('perm-dialog').close(); renderPermissionRows(); await savePermissions();
+  });
+  $('perm-refresh').addEventListener('click', loadPermissions);
   $('perm-save').addEventListener('click', savePermissions); $('perf-refresh').addEventListener('click', refreshPerformance); $('update-check').addEventListener('click', () => refreshUpdate(true));
   $('copy-overlay').addEventListener('click', async () => { try { await navigator.clipboard.writeText(`${location.origin}/index`); $('copy-overlay').textContent = '已复制'; setTimeout(() => $('copy-overlay').textContent = '复制 OBS 地址', 1200); } catch (_) { prompt('复制此地址', `${location.origin}/index`); } });
   $('overlay-url').textContent = `${location.origin}/index`;
