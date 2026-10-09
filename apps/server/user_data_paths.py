@@ -121,6 +121,19 @@ def _files(root: Path, relative: Path):
     return []
 
 
+
+def _is_updater_snapshot(relative: Path) -> bool:
+    """Updater's portable rollback bundles remain in the executable folder.
+
+    Never recopy update-*/VERSION and bundled binaries into user backups:
+    the Windows updater still discovers those packages in app/backup/.
+    Other (non-updater) user backups may be migrated normally.
+    """
+    parts = Path(relative).parts
+    return len(parts) >= 3 and parts[0] == "backup" and parts[1].startswith("update-")
+
+
+
 def ask_preference(conflicts: list[tuple[Path, Path]]) -> str:
     """Prompt once for a migration conflict; cancel leaves all files intact."""
     explicit = str(os.getenv("BILIPDJ_MIGRATION_CHOICE", "") or "").strip().lower()
@@ -248,6 +261,8 @@ def migrate(app_dir: Path, destination: Path, *, chooser=None, defaults_dir: Pat
     for rel_text in sources:
         rel = Path(rel_text)
         for src_rel, src in _files(app, rel):
+            if _is_updater_snapshot(src_rel):
+                continue
             dest_rel = src_rel
             if rel_text in ("config.yaml", "quanxian.yaml", "kaiguan.yaml", "blacklist.csv"):
                 dest_rel = Path("core") / src_rel
@@ -273,6 +288,29 @@ def migrate(app_dir: Path, destination: Path, *, chooser=None, defaults_dir: Pat
     return _merge_candidates(candidates, dst, chooser=chooser, state_root=state_root)
 
 
+def migrate_explicit_root_files(app_dir: Path, destination: Path, *, chooser=None) -> dict:
+    """Non-destructively import root-level legacy configs to an explicit mount.
+
+    Applies equally when BILIPDJ_DATA_DIR is /data or the app directory
+    itself ("."). Never compare mtimes or move/delete legacy sources.
+    """
+    app = Path(app_dir).resolve()
+    dst = Path(destination).resolve()
+    mapping = {
+        "config.yaml": "core/config.yaml",
+        "quanxian.yaml": "core/quanxian.yaml",
+        "kaiguan.yaml": "core/kaiguan.yaml",
+        "update-result.json": "key/update-result.json",
+    }
+    candidates = []
+    for old, new in mapping.items():
+        src = app / old
+        dest = dst / new
+        if src.is_file() and not src.is_symlink() and src != dest:
+            candidates.append((src, dest))
+    return _merge_candidates(candidates, dst, chooser=chooser, state_root=dst)
+
+
 def migrate_legacy_local_state(data_root: Path, state_root: Path, *, chooser=None) -> dict:
     """Copy old Roaming/core/cd and Roaming/backup files into local storage.
 
@@ -286,6 +324,8 @@ def migrate_legacy_local_state(data_root: Path, state_root: Path, *, chooser=Non
                          ("backup", "backups"), ("backups", "backups")):
         prefix = Path(old)
         for rel, source in _files(root, prefix):
+            if _is_updater_snapshot(rel):
+                continue
             dest = local / current / rel.relative_to(prefix)
             if source == dest:
                 continue
