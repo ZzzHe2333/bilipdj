@@ -2,6 +2,13 @@
   'use strict';
 
   const $ = id => document.getElementById(id);
+  const DOWNLOAD_SOURCE_HOSTS = {
+    'gh-proxy': 'gh-proxy.com',
+    'github.akams.cn': 'github.akams.cn',
+    'ghfile.geekertao.top': 'ghfile.geekertao.top',
+    'github.dpik.top': 'github.dpik.top',
+    'gh.dpik.top': 'gh.dpik.top',
+  };
   const api = async (path, options = {}) => {
     const response = await fetch(path, { cache: 'no-store', ...options });
     let payload = {};
@@ -52,7 +59,7 @@
       <div class="web-update-picker-row">
         <label>范围<select id="web-update-filter"><option value="发行包">发行包</option><option value="全部">全部</option></select></label>
         <label>选择版本<select id="web-update-version"><option>正在读取…</option></select></label>
-        <label>下载线路<select id="web-update-download-source"><option value="official">GitHub 官方</option><option value="gh-proxy">第三方加速（GH-Proxy）</option></select></label>
+        <label>下载线路<select id="web-update-download-source"><option value="official">GitHub 官方</option><option value="gh-proxy">第三方加速（GH-Proxy）</option><option value="github.akams.cn">公益加速 · github.akams.cn</option><option value="ghfile.geekertao.top">公益加速 · ghfile.geekertao.top</option><option value="github.dpik.top">公益加速 · github.dpik.top</option><option value="gh.dpik.top">公益加速 · gh.dpik.top</option></select></label>
         <div class="web-update-actions">
           <button id="web-update-full" class="button" type="button" disabled>全量更新</button>
           <button id="web-update-incremental" class="button ghost" type="button" disabled>增量更新</button>
@@ -130,7 +137,7 @@
       const incrementalText = candidate.cloud.incremental_available
         ? `增量资源上限 ${fmtBytes(candidate.cloud.incremental_max_bytes)}；实际仅按本机 SHA-256 差异 Range 下载。`
         : '当前 Release 没有 Web 增量资源。';
-      const sourceText = currentDownloadSource() === 'gh-proxy' ? '第三方加速（使用前逐次确认）' : 'GitHub 官方';
+      const sourceText = currentDownloadSource() === 'official' ? 'GitHub 官方' : `${$('web-update-download-source')?.selectedOptions?.[0]?.textContent || '第三方加速'}（使用前逐次确认）`;
       detail.innerHTML = `<strong>${releaseKind} v${candidate.version}</strong><span>全量包 ${fmtBytes(candidate.cloud.full_download_bytes)}。${incrementalText} 下载线路：${sourceText}。</span>`;
       const fullEstimate = $('update-full-estimate');
       const incrementalEstimate = $('update-incremental-estimate');
@@ -153,7 +160,7 @@
     const filter = $('web-update-filter');
     if (filter && !['发行包', '全部'].includes(filter.value)) filter.value = '发行包';
     const source = $('web-update-download-source');
-    if (source && !['official', 'gh-proxy'].includes(source.value)) source.value = 'official';
+    if (source && !['official', ...Object.keys(DOWNLOAD_SOURCE_HOSTS)].includes(source.value)) source.value = 'official';
     buildCandidates();
     const chip = $('web-update-capability');
     if (chip) {
@@ -202,15 +209,15 @@
 
     let downloadSource = 'official';
     let thirdPartyConfirmed = false;
-    if (candidate.source === 'cloud' && currentDownloadSource() === 'gh-proxy') {
+    if (candidate.source === 'cloud' && currentDownloadSource() !== 'official') {
       thirdPartyConfirmed = confirm(
         '确认使用第三方加速？\n\n' +
-        '本次 GitHub Release 文件将通过第三方服务 gh-proxy.com 传输。\n' +
+        `本次 GitHub Release 文件将通过第三方服务 ${DOWNLOAD_SOURCE_HOSTS[currentDownloadSource()]} 传输。\n` +
         'GitHub API/版本信息仍从官方读取，下载完成后仍会执行现有 SHA-256 校验。\n' +
         '本次确认不会保存，下次使用第三方加速仍会再次询问。\n\n' +
         '选择“取消”不会取消更新，而是仅本次改用 GitHub 官方下载。'
       );
-      if (thirdPartyConfirmed) downloadSource = 'gh-proxy';
+      if (thirdPartyConfirmed) downloadSource = currentDownloadSource();
       else setStatus('已取消第三方加速，本次将使用 GitHub 官方下载。');
     }
 
