@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 from apps.update_download_source import (
-    GH_PROXY_SOURCE,
     OFFICIAL_SOURCE,
     normalize_download_source,
     rewrite_package_download_urls,
@@ -68,7 +67,7 @@ def install_issue187_web_update_guard(server_module: Any) -> bool:
         download_source = OFFICIAL_SOURCE
         if mode in {"full", "incremental"}:
             download_source = normalize_download_source(payload.get("download_source"))
-            if download_source == GH_PROXY_SOURCE and payload.get("third_party_confirmed") is not True:
+            if download_source != OFFICIAL_SOURCE and payload.get("third_party_confirmed") is not True:
                 raise ValueError("第三方加速必须由用户针对本次下载明确确认")
 
         session_dir = allocate_update_session(app_dir, f"web-{mode}")

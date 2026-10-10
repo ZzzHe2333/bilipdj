@@ -2,6 +2,15 @@
 
 ---
 
+## v3.0.23（2026-10-10）
+
+### 公益下载加速
+- Windows Tk 和 Web Portable 更新线路新增 github.akams.cn、ghfile.geekertao.top、github.dpik.top、gh.dpik.top；原 GitHub 官方与 gh-proxy.com 继续保留。
+- GitHub API 仍官方直连，仅改写公开 Release 资源下载 URL，第三方需每次明确确认；失败回退官方并继续执行 SHA-256 / Range 校验。
+- 第三方服务可能限流或暂时不可用，不保存长期第三方信任。
+
+---
+
 ## v3.0.0（2026-09-11）
 
 ### 插件化与 DanmuEvent

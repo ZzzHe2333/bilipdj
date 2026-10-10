@@ -6,10 +6,21 @@ from urllib.parse import urlsplit
 OFFICIAL_SOURCE = "official"
 GH_PROXY_SOURCE = "gh-proxy"
 GH_PROXY_PREFIX = "https://gh-proxy.com/"
-
+# Allowlisted third-party transports for public GitHub Release assets only.
+SOURCE_PREFIXES = {
+    GH_PROXY_SOURCE: GH_PROXY_PREFIX,
+    "github.akams.cn": "https://github.akams.cn/",
+    "ghfile.geekertao.top": "https://ghfile.geekertao.top/",
+    "github.dpik.top": "https://github.dpik.top/",
+    "gh.dpik.top": "https://gh.dpik.top/",
+}
 SOURCE_LABELS = {
     OFFICIAL_SOURCE: "GitHub 官方",
     GH_PROXY_SOURCE: "第三方加速（GH-Proxy）",
+    "github.akams.cn": "公益加速 · github.akams.cn",
+    "ghfile.geekertao.top": "公益加速 · ghfile.geekertao.top",
+    "github.dpik.top": "公益加速 · github.dpik.top",
+    "gh.dpik.top": "公益加速 · gh.dpik.top",
 }
 
 
@@ -26,6 +37,10 @@ def normalize_download_source(value: Any) -> str:
         "gh-proxy.com": GH_PROXY_SOURCE,
         SOURCE_LABELS[GH_PROXY_SOURCE].casefold(): GH_PROXY_SOURCE,
     }
+    for source, prefix in SOURCE_PREFIXES.items():
+        aliases[source] = source
+        aliases[prefix.rstrip("/").casefold()] = source
+        aliases[SOURCE_LABELS[source].casefold()] = source
     return aliases.get(text, OFFICIAL_SOURCE)
 
 
@@ -68,17 +83,19 @@ def is_github_release_download_url(url: str) -> bool:
 def rewrite_download_url(url: str, source: Any) -> str:
     text = str(url or "").strip()
     selected = normalize_download_source(source)
-    if selected != GH_PROXY_SOURCE or not is_github_release_download_url(text):
+    prefix = SOURCE_PREFIXES.get(selected)
+    if not prefix or not is_github_release_download_url(text):
         return text
-    return f"{GH_PROXY_PREFIX}{text}"
+    return f"{prefix}{text}"
 
 
 def official_url_from_accelerated(url: str) -> str:
     text = str(url or "").strip()
-    if text.startswith(GH_PROXY_PREFIX):
-        candidate = text[len(GH_PROXY_PREFIX):]
-        if is_github_release_download_url(candidate):
-            return candidate
+    for prefix in SOURCE_PREFIXES.values():
+        if text.startswith(prefix):
+            candidate = text[len(prefix):]
+            if is_github_release_download_url(candidate):
+                return candidate
     return text
 
 
@@ -113,6 +130,7 @@ __all__ = [
     "GH_PROXY_SOURCE",
     "OFFICIAL_SOURCE",
     "SOURCE_LABELS",
+    "SOURCE_PREFIXES",
     "is_github_release_download_url",
     "normalize_download_source",
     "official_url_from_accelerated",

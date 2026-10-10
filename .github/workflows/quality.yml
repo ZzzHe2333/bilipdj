@@ -111,6 +111,8 @@ jobs:
         run: timeout --signal=SIGINT --kill-after=5s 90s python -u .github/ci/issue303_shared_queue_guard.py
       - name: Validate gh-proxy update download fallbacks
         run: python .github/ci/issue285_gh_proxy_update_guard.py
+      - name: Validate four community download mirrors and consent
+        run: python .github/ci/issue316_multi_proxy_guard.py
       - name: Validate update page cleanup and updater resume
         run: python .github/ci/issue288_update_resume_guard.py
       - name: Validate update page subtab layout

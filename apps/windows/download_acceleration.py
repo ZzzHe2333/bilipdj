@@ -11,6 +11,7 @@ from apps.update_download_source import (
     GH_PROXY_SOURCE,
     OFFICIAL_SOURCE,
     SOURCE_LABELS,
+    SOURCE_PREFIXES,
     normalize_download_source,
     official_url_from_accelerated,
     rewrite_download_url,
@@ -56,15 +57,15 @@ def _release_source(release: update_client.ReleaseInfo) -> str:
 
 def _confirm_download_source(app: Any, mode_label: str) -> str:
     selected = _selected_source(app)
-    if selected != GH_PROXY_SOURCE:
+    if selected == OFFICIAL_SOURCE:
         return OFFICIAL_SOURCE
     if bool(getattr(app, "_update_proxy_approved_for_retry", False)):
         app._update_proxy_approved_for_retry = False
-        return GH_PROXY_SOURCE
+        return selected
     approved = messagebox.askyesno(
         "确认使用第三方加速",
-        f"你选择了 {SOURCE_LABELS[GH_PROXY_SOURCE]}。\n\n"
-        f"本次{mode_label}的 GitHub Release 文件会经过第三方服务 gh-proxy.com 传输。\n"
+        f"你选择了 {SOURCE_LABELS[selected]}。\n\n"
+        f"本次{mode_label}的 GitHub Release 文件会经过第三方服务 {SOURCE_PREFIXES[selected]} 传输。\n"
         "GitHub API/版本信息仍从官方读取，下载完成后仍执行现有文件大小与 SHA-256 校验。\n"
         "本次确认不会保存，也不会建立长期信任；下次使用第三方加速仍会再次询问。\n\n"
         "选择“否”不会取消更新，而是仅本次改用 GitHub 官方下载。\n\n"
@@ -72,7 +73,7 @@ def _confirm_download_source(app: Any, mode_label: str) -> str:
         parent=getattr(app, "root", None),
     )
     if approved:
-        return GH_PROXY_SOURCE
+        return selected
     status = getattr(app, "update_status_var", None)
     if status is not None:
         try:
@@ -121,9 +122,9 @@ def _install_source_picker() -> None:
         combo = ttk.Combobox(
             source_frame,
             textvariable=app.update_download_source_var,
-            values=(SOURCE_LABELS[OFFICIAL_SOURCE], SOURCE_LABELS[GH_PROXY_SOURCE]),
+            values=tuple(SOURCE_LABELS.values()),
             state="readonly",
-            width=24,
+            width=34,
         )
         combo.grid(row=0, column=1, sticky="w")
         app._update_download_source_frame = source_frame
