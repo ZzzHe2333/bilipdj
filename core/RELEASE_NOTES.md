@@ -25,6 +25,6 @@ Windows Tk：更新设置 →「下载线路」；Web Portable：自动更新页
 - [Windows Tk x64 便携版](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.23/BiliPDJ-v3.0.23-Windows-Tk-Portable-x64.zip)
 - [Web x64 便携版](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.23/BiliPDJ-v3.0.23-Web-Portable-x64.zip)
 
-正式版构建流程自动生成更新清单、增量资源、校验附件。发行包可用性以 GitHub Actions 成功及最终 Release 为准。
+同一正式版 Release 另提供 `Windows-Tk-files.json`、`Windows-Tk-Incremental-x64.pack`、`Web-files.json`、`Web-Incremental-x64.pack`、`update-manifest.json` 与对应 `*.sha256` 附件，供更新器使用。**普通用户无需手动下载**这些清单与增量资源，只需下载相应便携 ZIP。发行包可用性以 GitHub Actions 成功及最终 Release 为准。
 
 **发布版本：v3.0.23 正式版，补丁号 +1。**
