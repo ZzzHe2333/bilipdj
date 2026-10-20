@@ -322,6 +322,13 @@ class DouyinLoginManager:
             # response; the fresh browser credentials remain private on disk.
             dy["live_info"] = live_info
             updated["douyin"] = dy
+            # Activate Douyin without disabling an existing Bilibili relay.
+            active = updated.get("active_platforms")
+            if isinstance(active, list):
+                updated["active_platforms"] = list(dict.fromkeys(
+                    [*active, "douyin"]
+                ))
+            updated["platform"] = "douyin"
             archive = updated.get("platform_config_archive", {})
             slot = max(1, min(10, int(archive.get("active_slot", 1))))
             module.save_platform_config_slot(slot, module._build_platform_config_payload(updated))
