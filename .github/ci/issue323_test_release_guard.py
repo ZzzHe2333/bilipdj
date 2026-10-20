@@ -34,6 +34,8 @@ def check_workflow() -> None:
     assert 'ASSET_TAG="$TAG_NAME"' in win
     assert 'BiliPDJ-$ASSET_TAG-Windows-Tk-Portable-x64.zip' in win
     assert 'BiliPDJ-$ASSET_TAG-Web-Portable-x64.zip' in win
+    assert "BILIPDJ_DATA_DIR = $probeDataRoot" in win
+    assert "Remove-Item -LiteralPath $probeDataRoot" in win
     assert "bodyFile: core/RELEASE_NOTES.md" in win
     assert "prerelease == 'true'" in win
 
