@@ -4717,7 +4717,9 @@ class ControlPanelApp:
         if process is None:
             self._startup_result_queue.put((False, "后端进程未创建", command))
             return
-        deadline = time.monotonic() + 15.0
+        # Frozen Windows executables can take time to load on first run due to
+        # antivirus scanning. Distinguish slow startup from an exited child.
+        deadline = time.monotonic() + 35.0
         last_error = ""
         health_url = f"http://127.0.0.1:{port}/api/config/basic"
         while time.monotonic() < deadline:
@@ -4733,8 +4735,20 @@ class ControlPanelApp:
             except Exception as exc:  # noqa: BLE001
                 last_error = str(exc)
             time.sleep(0.18)
+        return_code = process.poll()
+        if return_code is not None:
+            self._startup_result_queue.put((
+                False, f"后端进程未成功启动（退出码 {return_code}），请检查运行日志中的错误详情",
+                command,
+            ))
+            return
         detail = f"：{last_error}" if last_error else ""
-        self._startup_result_queue.put((False, f"等待后端响应超时{detail}", command))
+        self._startup_result_queue.put((
+            False,
+            f"等待后端响应超时（35秒）{detail}；如后台有旧数据冲突，"
+            "请关闭程序后处理迁移提示，不要删除存档",
+            command,
+        ))
 
     def _poll_backend_start_result(self) -> None:
         if not self._backend_starting:
@@ -4757,8 +4771,12 @@ class ControlPanelApp:
         if process is not None and process.poll() is None:
             try:
                 process.terminate()
-            except OSError:
-                pass
+                process.wait(timeout=3)
+            except (OSError, subprocess.TimeoutExpired):
+                try:
+                    process.kill()
+                except OSError:
+                    pass
         self.server_proc = None
         self._finish_backend_startup_ui()
         self.status_var.set("后端启动失败")
@@ -4788,6 +4806,14 @@ class ControlPanelApp:
                 command = [sys.executable, str(SERVER_PATH)]
             backend_env = os.environ.copy()
             backend_env["DANMUJI_LAUNCHED_BY_GUI"] = "1"
+            backend_env["BILIPDJ_UNATTENDED_BACKEND"] = "1"
+            # Pin the backend to the port and host just saved by this GUI,
+            # even if an older local config is loaded by another process.
+            port = _coerce_int_field(self.port_var.get(), 9816, "后端端口")
+            backend_env["DANMUJI_BACKEND_PORT"] = str(port)
+            backend_env["DANMUJI_BACKEND_HOST"] = (
+                "0.0.0.0" if self.lan_listen_var.get() else "127.0.0.1"
+            )
             creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
             self.server_proc = subprocess.Popen(
                 command,
@@ -4804,10 +4830,6 @@ class ControlPanelApp:
             self._bind_process_logs()
             self._schedule_log_pump()
             self.startup_status_var.set("正在等待后端响应…")
-            try:
-                port = int(self.port_var.get().strip() or "9816")
-            except ValueError:
-                port = 9816
             threading.Thread(target=self._wait_for_backend_ready, args=(port, command), daemon=True).start()
             self.root.after(100, self._poll_backend_start_result)
         except Exception as exc:  # noqa: BLE001
