@@ -143,6 +143,7 @@ class DouyinGiftBridge:
         self.token_path = Path(getattr(server_module, "KEY_DIR", getattr(server_module, "_YAML_DIR"))) / "douyin-gift-bridge-token.txt"
         self.token = token if token is not None else self._load_token()
         self._stop = threading.Event()
+        self._active_backend: Any | None = None
 
     def _load_token(self) -> str:
         env = os.environ.get("BILIPDJ_DOUYIN_GIFT_TOKEN", "").strip()
@@ -188,7 +189,8 @@ class DouyinGiftBridge:
             return ""
         return str(info.get("room_id") or "").strip()
 
-    def handle(self, raw: dict[str, Any], runtime: Any) -> dict[str, Any]:
+    def handle(self, raw: dict[str, Any], runtime: Any, backend: Any) -> dict[str, Any]:
+        self._active_backend = backend
         expected = self.expected_room(runtime)
         if not expected or expected == "0":
             raise ValueError("Douyin enabled/live_info.room_id is required")
@@ -202,7 +204,7 @@ class DouyinGiftBridge:
         return {"status": "ok", "accepted": True, "settled": len(finished)}
 
     def _publish(self, combos: list[dict[str, Any]]) -> None:
-        manager = getattr(self.server, "queue_manager", None)
+        manager = getattr(self._active_backend, "queue_manager", None)
         if manager is None or not callable(getattr(manager, "process_gift_event", None)):
             return
         # Browser events are not reliable payment proofs. Never grant credit
@@ -211,7 +213,7 @@ class DouyinGiftBridge:
         for item in combos:
             uid = DanmuEvent(platform="douyin", user_id=item["user_id"],
                              username=item["username"], content="gift").legacy_uid()
-            event = manager.process_gift_event({
+            manager.process_gift_event({
                 "platform": "douyin", "event": "gift",
                 "uid": uid, "uname": item["username"],
                 "room_id": item["room"],
@@ -224,7 +226,6 @@ class DouyinGiftBridge:
                 "raw": {"source": "browser-wss-hook", "user_id": item["user_id"],
                         "total_diamond": item["total_diamond"]},
             })
-            event["gift"]["value_unit"] = "diamond"
             with self._lock:
                 self.settled += 1
 
@@ -291,7 +292,7 @@ def install_douyin_gift_bridge(server_module: Any) -> bool:
                                  status=HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
                 return
             body = json.loads(self.rfile.read(size).decode("utf-8"))
-            result = service.handle(body, getattr(self.server, "runtime_config", {}))
+            result = service.handle(body, getattr(self.server, "runtime_config", {}), self.server)
             self._write_json(result)
         except (ValueError, TypeError, UnicodeError, json.JSONDecodeError) as exc:
             self._write_json({"status": "error", "message": str(exc)},
