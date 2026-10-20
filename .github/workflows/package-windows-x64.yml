@@ -164,6 +164,8 @@ jobs:
 
       - name: Validate portable outputs
         shell: pwsh
+        env:
+          BILIPDJ_FROZEN_DIAGNOSTIC: '1'
         run: |
           $required = @(
             "dist\bilipdj\main.exe",
@@ -186,8 +188,12 @@ jobs:
           function Assert-FrozenPluginProbe([string]$Executable, [string]$Label) {
             $probe = Start-Process -FilePath $Executable -ArgumentList "--plugin-runtime-self-test" -PassThru
             try {
-              if (-not $probe.WaitForExit(120000)) {
-                throw "$Label frozen JavaScript plugin self-test timed out (120s)"
+              if (-not $probe.WaitForExit(60000)) {
+                if ($env:BILIPDJ_FROZEN_DIAGNOSTIC -eq '1') {
+                  Get-ChildItem $env:TEMP -Filter 'bilipdj-web-probe-*.log' -ErrorAction SilentlyContinue |
+                    ForEach-Object { Write-Host ('Probe checkpoint: ' + $_.Name); Get-Content $_.FullName }
+                }
+                throw "$Label frozen JavaScript plugin self-test timed out (60s)"
               }
               if ($probe.ExitCode -ne 0) {
                 throw "$Label frozen JavaScript plugin self-test failed: $($probe.ExitCode)"
