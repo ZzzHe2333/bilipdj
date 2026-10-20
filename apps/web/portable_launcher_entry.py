@@ -4,13 +4,10 @@ import multiprocessing as mp
 import os
 import sys
 
-from apps.web import portable_launcher
-from apps.web.issue187_runtime_guard import patch_portable_launcher
-
-
 def main() -> None:
+    # A frozen multiprocessing child must be handled before importing the
+    # launcher (which imports Tk, server modules and other startup workers).
     mp.freeze_support()
-    patch_portable_launcher(portable_launcher.WebPortableLauncher)
     if "--plugin-runtime-self-test" in sys.argv[1:]:
         try:
             from apps.windows.frozen_plugin_probe import run_frozen_plugin_probe
@@ -19,6 +16,11 @@ def main() -> None:
         except BaseException:
             os._exit(1)
         os._exit(0)
+
+    from apps.web import portable_launcher
+    from apps.web.issue187_runtime_guard import patch_portable_launcher
+
+    patch_portable_launcher(portable_launcher.WebPortableLauncher)
     portable_launcher.main()
 
 
