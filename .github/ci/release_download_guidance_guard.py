@@ -45,7 +45,14 @@ def main() -> None:
     # RELEASE_NOTES follows the current build version. README follows the latest
     # promoted Release and therefore may intentionally lag behind VERSION while
     # VERSION is represented by a GitHub Pre-release.
-    _assert_release_links("release notes", release_notes, version=version)
+    # A test Release keeps VERSION=x.y.z; only GitHub tag and artifacts
+    # carry the -test suffix. Do not force the notes to falsely point to a
+    # formal vX.Y.Z package when shipping a Pre-release.
+    notes_version = version
+    if f"v{version}-test" in release_notes.splitlines()[0]:
+        assert "测试版" in release_notes and "Pre-release" in release_notes
+        notes_version = version + "-test"
+    _assert_release_links("release notes", release_notes, version=notes_version)
     readme_version = _assert_readme_release_links(readme)
 
     assert "Windows-Tk-files.json" in release_notes
