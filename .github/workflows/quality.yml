@@ -45,6 +45,8 @@ jobs:
         run: python .github/ci/production_gui_dependency_guard.py
       - name: Validate explicit-only release policy
         run: python .github/ci/issue138_release_policy_guard.py
+      - name: Validate v3.0.23-test release tag and asset contract
+        run: python .github/ci/issue323_test_release_guard.py
       - name: Validate release download guidance
         run: python .github/ci/release_download_guidance_guard.py
       - name: Validate live console, landing and DPI behavior
