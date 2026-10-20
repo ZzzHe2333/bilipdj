@@ -25,6 +25,9 @@ from typing import Any
 START_PATH = "/api/douyin/login/start"
 STATUS_PATH = "/api/douyin/login/status"
 PARAMS_PATH = "/api/douyin/login/params"
+COLLECTOR_STATUS_PATH = "/api/douyin/collector/status"
+COLLECTOR_START_PATH = "/api/douyin/collector/start"
+COLLECTOR_STOP_PATH = "/api/douyin/collector/stop"
 _PRIVATE_NAMES = frozenset({
     "sessionid", "sessionid_ss", "ttwid", "msToken", "sid_guard",
     "sid_tt", "uid_tt", "passport_csrf_token", "odin_tt",
@@ -167,6 +170,10 @@ class DouyinLoginManager:
             }
 
     def start_login(self, backend: Any) -> dict[str, Any]:
+        # A Chrome profile cannot be concurrently opened by two browsers.
+        collector = getattr(self, "collector", None)
+        if collector is not None:
+            collector.wait_for_stop()
         with self._lock:
             if self._state == "waiting_scan":
                 return self.status()
@@ -326,6 +333,10 @@ def install_douyin_login(server_module: Any) -> bool:
         if getattr(server_module, "_douyin_login_installed", False):
             return True
         manager = DouyinLoginManager(server_module)
+        from .douyin_headless import DouyinHeadlessCollector
+        collector = DouyinHeadlessCollector(server_module, manager)
+        manager.collector = collector
+        server_module.douyin_headless = collector
         server_module.douyin_login = manager
         relay_cls = server_module.douyin_protocol.DouyinDanmuRelay
         original_load_cfg = relay_cls._load_runtime_cfg
@@ -343,16 +354,17 @@ def install_douyin_login(server_module: Any) -> bool:
 
         @functools.wraps(original_get)
         def do_GET(self: Any) -> None:  # noqa: N802
-            if urllib.parse.urlparse(self.path).path != STATUS_PATH:
+            path = urllib.parse.urlparse(self.path).path
+            if path not in {STATUS_PATH, COLLECTOR_STATUS_PATH}:
                 return original_get(self)
             if not self._require_loopback():
                 return
-            self._write_json(manager.status())
+            self._write_json(collector.status() if path == COLLECTOR_STATUS_PATH else manager.status())
 
         @functools.wraps(original_post)
         def do_POST(self: Any) -> None:  # noqa: N802
             path = urllib.parse.urlparse(self.path).path
-            if path not in {START_PATH, PARAMS_PATH}:
+            if path not in {START_PATH, PARAMS_PATH, COLLECTOR_START_PATH, COLLECTOR_STOP_PATH}:
                 return original_post(self)
             if not self._require_loopback():
                 return
@@ -376,6 +388,10 @@ def install_douyin_login(server_module: Any) -> bool:
                     raise ValueError("Expected JSON object")
                 if path == START_PATH:
                     payload = manager.start_login(self.server)
+                elif path == COLLECTOR_START_PATH:
+                    payload = collector.start(self.server)
+                elif path == COLLECTOR_STOP_PATH:
+                    payload = collector.stop()
                 else:
                     payload = manager.fetch_params(
                         body.get("live_id", ""), backend=self.server,
@@ -398,4 +414,4 @@ def install_douyin_login(server_module: Any) -> bool:
         return True
 
 
-__all__ = ["DouyinLoginManager", "install_douyin_login", "START_PATH", "STATUS_PATH", "PARAMS_PATH"]
+__all__ = ["DouyinLoginManager", "install_douyin_login", "START_PATH", "STATUS_PATH", "PARAMS_PATH", "COLLECTOR_STATUS_PATH", "COLLECTOR_START_PATH", "COLLECTOR_STOP_PATH"]
