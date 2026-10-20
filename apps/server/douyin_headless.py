@@ -183,12 +183,16 @@ class DouyinHeadlessCollector:
             cdp.call("Runtime.enable", session=sid)
             cdp.call("Page.addScriptToEvaluateOnNewDocument",
                      {"source": self._hook_source()}, session=sid)
-            cdp.call("Page.navigate",
-                     {"url": f"https://live.douyin.com/{live_id}"}, session=sid)
+            navigation = cdp.call("Page.navigate",
+                                  {"url": f"https://live.douyin.com/{live_id}"}, session=sid)
+            if navigation.get("errorText"):
+                raise RuntimeError("Douyin live page navigation failed")
             with self._lock:
                 self._state = "running"
                 self._last_error = ""
             tick = 0
+            last_method_count = 0
+            last_im_at = time.monotonic()
             while not self._stop.wait(1):
                 if proc.poll() is not None:
                     raise RuntimeError("Browser exited")
@@ -209,13 +213,26 @@ class DouyinHeadlessCollector:
                     if tick > 30:
                         raise RuntimeError("WebSocket hook did not load")
                     continue
+                methods = payload.get("methods", {})
+                count = sum(int(v) for v in methods.values() if isinstance(v, int) and v >= 0) if isinstance(methods, dict) else 0
+                if count > last_method_count:
+                    last_method_count = count
+                    last_im_at = time.monotonic()
+                    with self._lock:
+                        self._last_frame_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                elif time.monotonic() - last_im_at > 180:
+                    # A tab suspended by Chrome can remain open while its IM
+                    # channel has died. Reconnect without losing the profile.
+                    cdp.call("Page.navigate", {
+                        "url": f"https://live.douyin.com/{live_id}",
+                    }, session=sid)
+                    last_im_at = time.monotonic()
+                    last_method_count = 0
                 received = payload.get("gifts", [])
                 if not isinstance(received, list):
                     continue
                 with self._lock:
                     self._observed += len(received)
-                    if any(payload.get("methods", {}).values()):
-                        self._last_frame_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                 for raw in received:
                     try:
                         self.module.douyin_gift_bridge.handle(
