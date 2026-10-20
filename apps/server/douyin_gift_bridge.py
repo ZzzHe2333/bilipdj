@@ -7,6 +7,7 @@ payment or purchase evidence.
 from __future__ import annotations
 
 import datetime as dt
+import functools
 import hmac
 import json
 import os
@@ -268,6 +269,7 @@ def install_douyin_gift_bridge(server_module: Any) -> bool:
     server_module.douyin_gift_bridge = service
     original_post, original_get = handler_class.do_POST, handler_class.do_GET
 
+    @functools.wraps(original_post)
     def do_POST(self: Any) -> None:  # noqa: N802
         if urlparse(self.path).path != API_PATH:
             return original_post(self)
@@ -302,6 +304,7 @@ def install_douyin_gift_bridge(server_module: Any) -> bool:
             self._write_json({"status": "error", "message": "Internal bridge error"},
                              status=HTTPStatus.INTERNAL_SERVER_ERROR)
 
+    @functools.wraps(original_get)
     def do_GET(self: Any) -> None:  # noqa: N802
         if urlparse(self.path).path != STATUS_PATH:
             return original_get(self)
