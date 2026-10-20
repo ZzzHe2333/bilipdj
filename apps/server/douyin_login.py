@@ -174,6 +174,8 @@ class DouyinLoginManager:
         collector = getattr(self, "collector", None)
         if collector is not None:
             collector.wait_for_stop()
+            if collector.status()["state"] != "stopped":
+                raise RuntimeError("Headless browser is still stopping; retry shortly")
         with self._lock:
             if self._state == "waiting_scan":
                 return self.status()
@@ -298,6 +300,11 @@ class DouyinLoginManager:
             "title": str(info.room_title or "")[:160],
         }
         if apply:
+            collector = getattr(self, "collector", None)
+            if collector is not None:
+                collector.wait_for_stop()
+                if collector.status()["state"] != "stopped":
+                    raise RuntimeError("Stop the collector before changing live room")
             module = self.module
             current = module.load_config()
             updated = copy.deepcopy(current)
