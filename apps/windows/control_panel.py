@@ -154,7 +154,7 @@ KAIGUAN_LABELS = [
 ]
 DEFAULT_KAIGUAN_GUI = {k: True if i < 7 else False for i, (k, _) in enumerate(KAIGUAN_LABELS)}
 SENSITIVE_LOG_PATTERNS = [
-    re.compile(r"(?i)\b(cookie|auth_token|SESSDATA|bili_jct|buvid3|DedeUserID(?:__ckMd5)?)\s*[:=]\s*([^\s,;]+)"),
+    re.compile(r"(?i)\b(cookie|auth_token|SESSDATA|bili_jct|buvid3|DedeUserID(?:__ckMd5)?|sessionid(?:_ss)?|ttwid|msToken|sid_guard)\s*[:=]\s*([^\s,;]+)"),
 ]
 _BACKEND_SERVER_MODULE: Any | None = None
 
@@ -1453,22 +1453,41 @@ class ControlPanelApp:
             method="POST" if body is not None else "GET",
             headers={"Content-Type": "application/json"} if body is not None else {},
         )
-        with urllib.request.urlopen(request, timeout=18) as response:
-            result = json.loads(response.read().decode("utf-8"))
+        try:
+            # The API is explicitly loopback-only. Bypass system proxy
+            # settings so a desktop proxy cannot hijack local QR requests.
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with opener.open(request, timeout=18) as response:
+                result = json.loads(response.read(32 * 1024).decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            try:
+                problem = json.loads(exc.read(16 * 1024).decode("utf-8"))
+                raw_message = str(problem.get("message", "HTTP request failed"))
+                # Never expose backend secrets or arbitrary server output.
+                text = sanitize_log_message(raw_message)[:180]
+                raise RuntimeError(f"后端返回 HTTP {exc.code}：{text}") from None
+            except (ValueError, UnicodeError, AttributeError):
+                raise RuntimeError(f"后端返回 HTTP {exc.code}") from None
         if result.get("status") == "error":
-            raise ValueError(str(result.get("message", "接口失败")))
+            raise ValueError(sanitize_log_message(str(result.get("message", "接口失败")))[:180])
         return result
 
     def _douyin_start_qr_login(self) -> None:
+        if not self._backend_is_running():
+            self._douyin_fetch_status_var.set(
+                "后端未启动：请先点击顶部「启动服务」，确认后端显示已启动后再扫码"
+            )
+            return
         self._douyin_fetch_status_var.set("正在打开本机浏览器上的抖音官方扫码页面…")
 
         def _worker() -> None:
             try:
                 self._douyin_login_api("/api/douyin/login/start", {})
                 self.root.after(0, lambda: self._douyin_poll_qr_login(0))
-            except Exception:
-                self.root.after(0, lambda: self._douyin_fetch_status_var.set(
-                    "登录启动失败：请先启动 BiliPDJ 后端，并确认本机有 Chrome/Edge"
+            except Exception as exc:
+                detail = sanitize_log_message(str(exc))[:160]
+                self.root.after(0, lambda detail=detail: self._douyin_fetch_status_var.set(
+                    f"抖音扫码启动失败：{detail}"
                 ))
 
         threading.Thread(target=_worker, daemon=True).start()
