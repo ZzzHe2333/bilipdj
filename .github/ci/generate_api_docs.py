@@ -37,6 +37,8 @@ HTTP_ENDPOINTS = [
     ep("GET", "/api/language", "读取界面语言和已启用语言插件", response='{"status":"ok","default":"zh-CN","active":"en-US","languages":[...],"translations":{"设置":"Settings"}}', local=False, notes="翻译表以当前中文界面文字作为 key；缺失 key 由客户端自动回退原中文。"),
     ep("POST", "/api/language", "切换界面语言", body='{"language":"en-US"}', response='{"status":"ok","active":"en-US","languages":[...],"translations":{...}}', notes="仅可选择已启用且校验通过的 language 插件；zh-CN 为内置默认语言。"),
     ep("GET", "/api/danmu/identity/latest", "读取最近一条弹幕身份事件", response='{"status":"ok","event":{...}}'),
+    ep("GET", "/api/douyin/gift-hook/status", "抖音浏览器礼物桥接状态", response='{"status":"ok","configured_room_id":"...","received":0,"settled":0,"token_file":"..."}', notes="仅本机。只显示令牌文件路径，不返回令牌；详情见 docs/DOUYIN_GIFT_BRIDGE.md。"),
+    ep("POST", "/api/douyin/gift-hook", "接收抖音网页 WSS 礼物事件", body='{"type":"WebcastGiftMessage","roomId":"...","msgId":"...","user":{"id":"...","nickname":"..."},"gift":{"id":3992,"name":"人气票","diamondCount":1},"repeatCount":1,"repeatEnd":1}', response='{"status":"ok","accepted":true,"settled":1}', notes="仅本机。必须附加 Authorization: Bearer <随机令牌>，Content-Type: application/json，roomId 必须匹配已启用的抖音内部房间 ID；请求体最大 16KiB；浏览器事件可伪造，默认不发放排队资格。"),
     ep("GET", "/api/gifts/state", "读取 B站礼物/插队状态", response='{"status":"ok",...}'),
     ep("GET", "/api/queue/state", "读取当前队列", response='{"queue":[...],"entries":[...],"size":1}', local=False),
     ep("GET", "/api/queue/archive", "读取队列存档槽状态", response="活动槽、存档快照与条目。"),
