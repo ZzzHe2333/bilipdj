@@ -50,7 +50,10 @@ def test_local_private_credentials_and_params() -> None:
         def write_slot(slot, payload):
             saves.append(("slot", slot, payload))
         def write_config(payload):
-            saves.append(("config", payload))
+            saved = json.loads(json.dumps(payload))
+            cfg.clear()
+            cfg.update(saved)
+            saves.append(("config", saved))
         module = SimpleNamespace(
             KEY_DIR=base, _YAML_DIR=base,
             load_config=lambda: cfg,
