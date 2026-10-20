@@ -236,6 +236,22 @@
     }
   }
 
+  async function refreshDouyinCollectorStatus() {
+    try {
+      const info = await json('/api/douyin/collector/status');
+      const names = { stopped: '已停止', starting: '启动中', running: '正在采集', reconnecting: '正在重连', stopping: '停止中', failed: '异常' };
+      message('douyin-collector-status', `后台采集：${names[info.state] || info.state} · 已观察 ${info.observed || 0} 条，已接收 ${info.accepted || 0} 条${info.last_error ? ' · ' + info.last_error : ''}`, info.state !== 'failed');
+    } catch (error) { message('douyin-collector-status', `采集状态获取失败：${error.message}`, false); }
+  }
+
+  async function setDouyinCollector(enabled) {
+    message('douyin-collector-status', enabled ? '正在启动后台浏览器…' : '正在停止后台浏览器…');
+    try {
+      await post(enabled ? '/api/douyin/collector/start' : '/api/douyin/collector/stop', {});
+      await refreshDouyinCollectorStatus();
+    } catch (error) { message('douyin-collector-status', `操作失败：${error.message}`, false); }
+  }
+
   async function startDouyinLogin() {
     message('douyin-login-status', '正在请求本机 Chrome/Edge 打开官方扫码页面…');
     try {
@@ -277,6 +293,7 @@
       $('platform-douyin-cookie').value = '';  // never put existing credentials into a visible DOM input
       message('platform-status', '平台参数已加载。');
       void updateDouyinLoginStatus();
+      void refreshDouyinCollectorStatus();
     } catch (error) { message('platform-status', `加载失败：${error.message}`, false); }
   }
   async function savePlatform() {
@@ -517,6 +534,8 @@
   $('douyin-login-start').addEventListener('click', startDouyinLogin);
   $('douyin-login-status-button').addEventListener('click', updateDouyinLoginStatus);
   $('douyin-login-params').addEventListener('click', fetchDouyinParams);
+  $('douyin-collector-start').addEventListener('click', () => setDouyinCollector(true));
+  $('douyin-collector-stop').addEventListener('click', () => setDouyinCollector(false));
   $('gift-save').addEventListener('click', saveGifts); $('gift-refresh').addEventListener('click', loadGifts);
   $('switch-save').addEventListener('click', saveSwitches);
   $('blacklist-add').addEventListener('click', async () => { const name = $('blacklist-name').value.trim(); if (!name) return; try { await post('/api/blacklist/add', { name }); $('blacklist-name').value = ''; await loadBlacklist(); } catch (e) { message('blacklist-status', e.message, false); } });
