@@ -90,6 +90,11 @@ jobs:
         run: python .github/ci/issue246_backup_options_guard.py
       - name: Validate cross-platform gift compatibility
         run: python .github/ci/issue248_gift_compatibility_guard.py
+      - name: Validate Douyin browser WSS gift bridge and JS syntax
+        run: |
+          python .github/ci/issue319_douyin_gift_bridge_guard.py
+          node --check tools/douyin/douyin_live_gift_hook.user.js
+          node --check tools/douyin/bilipdj_douyin_gift_bridge.user.js
       - name: Validate language plugins and runtime translation
         run: python .github/ci/issue250_language_plugin_guard.py
       - name: Validate bundled English and single-active language policy
