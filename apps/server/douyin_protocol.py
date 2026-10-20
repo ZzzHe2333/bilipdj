@@ -664,7 +664,9 @@ class DouyinDanmuRelay(threading.Thread):
             self.server.queue_manager.process_danmu_event(
                 DanmuEvent(
                     platform="douyin",
-                    user_id=event.sec_uid or str(event.uid),
+                    # Gift hook exposes numeric user.id, so prefer that stable ID for
+                    # the same person's Douyin chat and gift queue credits.
+                    user_id=str(event.uid) if event.uid > 0 else event.sec_uid,
                     username=event.nickname,
                     content=event.content,
                     is_room_admin=event.user_role >= 3,
