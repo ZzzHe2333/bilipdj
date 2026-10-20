@@ -28,7 +28,7 @@
 - [Web x64 便携版](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.23-test/BiliPDJ-v3.0.23-test-Web-Portable-x64.zip)
 - [测试版 Release 页面](https://github.com/ZzzHe2333/bilipdj/releases/tag/v3.0.23-test)
 
-Release 同时包含各安装包的 SHA-256、逐文件清单和增量更新资源。普通用户下载相应 ZIP 并**完整解压到新目录**即可；建议先备份原有数据和配置。上述文件链接仅在打包并成功发布后有效。
+Release 同时提供 `Windows-Tk-files.json`、`Windows-Tk-Incremental-x64.pack`、`Web-files.json`、`Web-Incremental-x64.pack`、`update-manifest.json` 与对应 SHA-256 校验文件，供更新器使用。**普通用户无需手动下载**这些清单和增量文件，只需下载相应 ZIP 并**完整解压到新目录**；建议先备份原有数据和配置。上述文件链接仅在打包并成功发布后有效。
 
 相关开发记录：[Issue #319](https://github.com/ZzzHe2333/bilipdj/issues/319)、[Issue #321](https://github.com/ZzzHe2333/bilipdj/issues/321)、[Issue #323](https://github.com/ZzzHe2333/bilipdj/issues/323)。
 
