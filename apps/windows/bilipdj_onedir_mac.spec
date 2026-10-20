@@ -7,6 +7,7 @@ project_root = spec_dir.parents[1]
 datas = [
     (str(project_root / "VERSION"), "."),
     (str(project_root / "apps" / "web" / "static"), "apps/web/static"),
+    (str(project_root / "tools" / "douyin" / "douyin_live_gift_hook.user.js"), "tools/douyin"),
 ]
 hiddenimports = [
     "apps.server.server",
