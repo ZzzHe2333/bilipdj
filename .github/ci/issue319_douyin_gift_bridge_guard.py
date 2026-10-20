@@ -6,9 +6,13 @@ import json
 import logging
 import os
 import tempfile
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
 
 from apps.server.danmu_event import DanmuEvent
 from apps.server.douyin_gift_bridge import (
