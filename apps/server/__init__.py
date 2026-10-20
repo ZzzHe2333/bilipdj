@@ -138,6 +138,7 @@ from . import issue123_guard as _issue123_guard  # noqa: E402
 from . import gift_compatibility as _gift_compatibility  # noqa: E402
 from . import security_hardening_guard as _security_hardening_guard  # noqa: E402
 from . import docker_runtime as _docker_runtime  # noqa: E402
+from . import douyin_gift_bridge as _douyin_gift_bridge  # noqa: E402
 
 # appearance.json is a first-class cross-client setting and participates in the
 # same ZIP/WebDAV backup format as config.yaml/style.json.
@@ -201,5 +202,8 @@ _plugin_api_security_guard.install_plugin_api_security_guard(server, _plugin_man
 # Docker source-address translation is handled last so every existing local-only
 # guard keeps its Host/Origin validation and only the transport address changes.
 _docker_runtime.install_docker_local_access(server)
+# Browser WSS gift bridge is authenticated independently and must sit outside
+# the generic same-host management Origin boundary.
+_douyin_gift_bridge.install_douyin_gift_bridge(server)
 
 __all__ = ["REPO_ROOT", "configure_runtime_paths", "server"]
