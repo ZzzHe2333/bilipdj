@@ -1441,6 +1441,99 @@ class ControlPanelApp:
         self._apply_douyin_live_info(info, status_str)
         self._append_log(f"[GUI] 已根据抖音链接回填直播参数 live_id={info.live_id} room_id={info.room_id}")
 
+    def _douyin_login_api(self, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Access only the BiliPDJ loopback backend, never a third-party URL."""
+        port = _coerce_int_field(self.port_var.get(), 9816, "后端端口")
+        if not 1 <= port <= 65535:
+            raise ValueError("后端端口不合法")
+        body = json.dumps(payload or {}, ensure_ascii=False).encode("utf-8") if payload is not None else None
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}{path}",
+            data=body,
+            method="POST" if body is not None else "GET",
+            headers={"Content-Type": "application/json"} if body is not None else {},
+        )
+        with urllib.request.urlopen(request, timeout=18) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        if result.get("status") == "error":
+            raise ValueError(str(result.get("message", "接口失败")))
+        return result
+
+    def _douyin_start_qr_login(self) -> None:
+        self._douyin_fetch_status_var.set("正在打开本机浏览器上的抖音官方扫码页面…")
+
+        def _worker() -> None:
+            try:
+                self._douyin_login_api("/api/douyin/login/start", {})
+                self.root.after(0, lambda: self._douyin_poll_qr_login(0))
+            except Exception:
+                self.root.after(0, lambda: self._douyin_fetch_status_var.set(
+                    "登录启动失败：请先启动 BiliPDJ 后端，并确认本机有 Chrome/Edge"
+                ))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _douyin_poll_qr_login(self, attempt: int = 0) -> None:
+        def _worker() -> None:
+            try:
+                result = self._douyin_login_api("/api/douyin/login/status")
+                state = str(result.get("state", ""))
+                if state == "success":
+                    label = "扫码登录成功；可以点击「登录后获取参数」"
+                elif state == "failed":
+                    label = "扫码失败或超时；可再次点击「扫码登录」"
+                else:
+                    label = "等待本机官方抖音页面扫码确认…"
+                self.root.after(0, lambda: self._douyin_fetch_status_var.set(label))
+                if state == "waiting_scan" and attempt < 101:
+                    self.root.after(3000, lambda: self._douyin_poll_qr_login(attempt + 1))
+            except Exception:
+                self.root.after(0, lambda: self._douyin_fetch_status_var.set(
+                    "无法读取登录状态；请检查后端是否仍在运行"
+                ))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _douyin_fetch_after_login(self) -> None:
+        live = self.douyin_fetch_url_var.get().strip() or self.douyin_live_id_var.get().strip()
+        if not live:
+            self._douyin_fetch_status_var.set("请先填写直播间链接或 live_id")
+            return
+        self._douyin_fetch_status_var.set("正在通过本机登录会话获取并保存直播参数…")
+
+        def _worker() -> None:
+            try:
+                result = self._douyin_login_api(
+                    "/api/douyin/login/params", {"live_id": live, "apply": True}
+                )
+                room = result.get("room", {})
+                backend_server = load_backend_server_module()
+                saved = backend_server.load_config().get("douyin", {})
+                info = saved.get("live_info", {})
+                def _finish() -> None:
+                    self.douyin_enabled_var.set(True)
+                    self.douyin_live_id_var.set(str(room.get("live_id", "")))
+                    for key, var in (
+                        ("room_id", self.douyin_room_id_var),
+                        ("user_id", self.douyin_user_id_var),
+                        ("user_unique_id", self.douyin_user_unique_id_var),
+                        ("anchor_id", self.douyin_anchor_id_var),
+                        ("sec_uid", self.douyin_sec_uid_var),
+                        ("ttwid", self.douyin_ttwid_var),
+                    ):
+                        if isinstance(info, dict) and info.get(key):
+                            var.set(str(info[key]))
+                    self._douyin_fetch_status_var.set(
+                        "获取成功；room_id=" + str(room.get("room_id", "")) + "；登录凭据未回显"
+                    )
+                self.root.after(0, _finish)
+            except Exception:
+                self.root.after(0, lambda: self._douyin_fetch_status_var.set(
+                    "参数获取失败：请确认先完成扫码并使用可访问的直播间链接"
+                ))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
     def _fetch_douyin_params(self) -> None:
         """在后台线程中获取抖音直播间参数，成功后回填到 UI。"""
         raw = self.douyin_fetch_url_var.get().strip()
@@ -3744,7 +3837,9 @@ class ControlPanelApp:
         ttk.Label(fetch_bar, text="直播间链接").grid(row=0, column=0, sticky="w", padx=(0, 6))
         ttk.Entry(fetch_bar, textvariable=self.douyin_fetch_url_var, width=48).grid(row=0, column=1, sticky="ew")
         ttk.Button(fetch_bar, text="获取参数", command=self._fetch_douyin_params).grid(row=0, column=2, padx=(6, 0))
-        ttk.Label(fetch_bar, textvariable=self._douyin_fetch_status_var).grid(row=1, column=0, columnspan=3, sticky="w", pady=(2, 0))
+        ttk.Button(fetch_bar, text="扫码登录", command=self._douyin_start_qr_login).grid(row=0, column=3, padx=(6, 0))
+        ttk.Button(fetch_bar, text="登录后获取", command=self._douyin_fetch_after_login).grid(row=0, column=4, padx=(6, 0))
+        ttk.Label(fetch_bar, textvariable=self._douyin_fetch_status_var).grid(row=1, column=0, columnspan=5, sticky="w", pady=(2, 0))
 
         # row=1: 启用开关
         ttk.Checkbutton(douyin_frame, text="启用抖音配置", variable=self.douyin_enabled_var).grid(

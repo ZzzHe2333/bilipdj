@@ -82,7 +82,9 @@
             <label><span>B站登录 UID</span><input id="platform-bili-uid" inputmode="numeric" placeholder="扫码后会自动写入"></label>
             <label><span>抖音 Live ID</span><input id="platform-douyin-live" placeholder="直播间 Live ID"></label>
             <label><span>抖音启用</span><input id="platform-douyin-enabled" type="checkbox"></label>
-            <label class="wide"><span>抖音 Cookie</span><textarea id="platform-douyin-cookie" rows="4" placeholder="需要时填写抖音 Cookie"></textarea></label>
+            <label class="wide"><span>抖音 Cookie（可选，敏感凭据）</span><input id="platform-douyin-cookie" type="password" autocomplete="new-password" placeholder="已保存的值不会回显；留空保持不变"></label>
+            <label class="wide"><span>抖音直播间链接 / web_rid</span><input id="platform-douyin-url" autocomplete="off" placeholder="https://live.douyin.com/直播间号"></label>
+            <div class="wide"><div class="toolbar"><button id="douyin-login-start" class="button" type="button">抖音扫码登录</button><button id="douyin-login-status-button" class="button ghost" type="button">刷新登录状态</button><button id="douyin-login-params" class="button ghost" type="button">获取并保存直播参数</button><button id="douyin-collector-start" class="button ghost" type="button">启动后台礼物采集</button><button id="douyin-collector-stop" class="button ghost" type="button">停止采集</button></div><p class="hint">扫码在本机 Chrome/Edge 官方抖音页面完成；Cookie 仅存于本机私有目录，不从接口返回。Docker 无图形桌面时不可直接弹出登录窗口。</p><div id="douyin-login-status" class="status" aria-live="polite"></div><div id="douyin-collector-status" class="status" aria-live="polite"></div><pre id="douyin-safe-params" class="json-output" aria-label="已获取的直播参数"></pre></div>
           </div>
           <div class="toolbar"><button id="platform-save" class="button">保存平台参数</button><button id="platform-refresh" class="button ghost">刷新</button></div><div id="platform-status" class="status"></div>
         </div>
