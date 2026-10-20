@@ -83,7 +83,7 @@ class DouyinHeadlessCollector:
             if not live_id.isdigit() or not 5 <= len(live_id) <= 24:
                 raise ValueError("Configured Douyin web_rid must be numeric")
             info = dy.get("live_info", {})
-            if not isinstance(info, dict) or not str(info.get("room_id", "")).isdigit():
+            if not isinstance(info, dict) or not str(info.get("room_id", "")).isdigit() or int(info["room_id"]) <= 0:
                 raise ValueError("Internal Douyin room_id is not configured")
             if getattr(self.module, "douyin_gift_bridge", None) is None:
                 raise RuntimeError("Douyin gift bridge must be installed first")
