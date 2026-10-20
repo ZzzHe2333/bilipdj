@@ -220,6 +220,11 @@ jobs:
           $webExe = (Resolve-Path "dist\web-portable\bilipdj-web\BiliPDJ-Web.exe").Path
           Assert-FrozenPluginProbe -Executable $webExe -Label "Web"
 
+      - name: Smoke-test actual frozen Tk backend and Douyin login API
+        shell: pwsh
+        run: |
+          python .github/ci/issue325_frozen_backend_smoke.py --exe dist/bilipdj/main.exe
+
       - name: Download previous compatible portable release baselines
         id: previous_release
         shell: pwsh
