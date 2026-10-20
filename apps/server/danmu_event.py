@@ -49,7 +49,9 @@ def _json_object(value: Any, *, label: str, max_bytes: int = MAX_METADATA_BYTES)
 
 
 def _legacy_uid(platform: str, user_id: str, username: str) -> int:
-    if user_id.isdigit():
+    # Douyin numeric IDs can overlap with Bilibili numeric IDs. Keep the
+    # historical Bilibili UID mapping while isolating Douyin queue credits.
+    if platform != "douyin" and user_id.isdigit():
         numeric = int(user_id)
         if 0 < numeric <= MAX_LEGACY_UID:
             return numeric
