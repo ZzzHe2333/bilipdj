@@ -164,8 +164,6 @@ jobs:
 
       - name: Validate portable outputs
         shell: pwsh
-        env:
-          BILIPDJ_FROZEN_DIAGNOSTIC: '1'
         run: |
           $required = @(
             "dist\bilipdj\main.exe",
@@ -186,13 +184,18 @@ jobs:
           # successful plugin probe if a worker process outlives its launcher.
           # Wait only for the executable's own exit, with an explicit timeout.
           function Assert-FrozenPluginProbe([string]$Executable, [string]$Label) {
-            $probe = Start-Process -FilePath $Executable -ArgumentList "--plugin-runtime-self-test" -PassThru
+            # The frozen server migrates legacy user data during import. Using
+            # the runner's shared AppData can open a modal conflict dialog
+            # that hangs a headless CI probe. Each probe gets an isolated
+            # empty data root without disabling the real migration guard.
+            $priorDataRoot = $env:BILIPDJ_DATA_DIR
+            $probeDataRoot = Join-Path $env:RUNNER_TEMP ("bilipdj-probe-" + [guid]::NewGuid().ToString("N"))
+            New-Item -ItemType Directory -Path $probeDataRoot -Force | Out-Null
+            $probe = $null
             try {
+              $env:BILIPDJ_DATA_DIR = $probeDataRoot
+              $probe = Start-Process -FilePath $Executable -ArgumentList "--plugin-runtime-self-test" -PassThru
               if (-not $probe.WaitForExit(60000)) {
-                if ($env:BILIPDJ_FROZEN_DIAGNOSTIC -eq '1') {
-                  Get-ChildItem $env:TEMP -Filter 'bilipdj-web-probe-*.log' -ErrorAction SilentlyContinue |
-                    ForEach-Object { Write-Host ('Probe checkpoint: ' + $_.Name); Get-Content $_.FullName }
-                }
                 throw "$Label frozen JavaScript plugin self-test timed out (60s)"
               }
               if ($probe.ExitCode -ne 0) {
@@ -200,10 +203,14 @@ jobs:
               }
             }
             finally {
-              if (-not $probe.HasExited) {
-                Stop-Process -Id $probe.Id -Force -ErrorAction SilentlyContinue
+              $env:BILIPDJ_DATA_DIR = $priorDataRoot
+              if ($null -ne $probe) {
+                if (-not $probe.HasExited) {
+                  Stop-Process -Id $probe.Id -Force -ErrorAction SilentlyContinue
+                }
+                $probe.Dispose()
               }
-              $probe.Dispose()
+              Remove-Item -LiteralPath $probeDataRoot -Recurse -Force -ErrorAction SilentlyContinue
             }
           }
 
