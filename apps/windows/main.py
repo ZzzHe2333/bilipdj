@@ -16,6 +16,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+# Dedicated backend children must not initialize the Tk desktop, splash,
+# overlay, updater or GUI callback wiring. The common server entry already
+# loads the canonical runtime configuration and uses the configured port.
+# This path runs before *any* desktop imports or windows are created.
+if __name__ == "__main__" and "--backend" in sys.argv[1:]:
+    from apps.server.main import main as backend_main  # noqa: E402
+
+    backend_main([])
+    raise SystemExit(0)
+
 if getattr(sys, "frozen", False):
     os.environ.setdefault("BILIPDJ_PORTABLE_AUTO_BACKEND", "1")
 
