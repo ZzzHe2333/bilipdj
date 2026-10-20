@@ -2,6 +2,31 @@
 
 Issue #319。仅适用于 BiliPDJ Python 版；不修改 Go 版，不替换现有 HTTP Fetch 弹幕通道。本功能属于用户自己已登录浏览器上的 WSS 消息监听，不是官方抖音开放 API。
 
+## 新增：本机官方扫码登录与参数提取（Issue #321）
+
+仅在具备图形桌面的 Python 后端主机上使用。程序会使用一个**独立于日常 Chrome/Edge 的用户配置目录**打开 `https://live.douyin.com/`，需要用户本人通过抖音 App 在官方页面扫码确认；不会向 BiliPDJ Web API 传输验证码、账号密码、Cookie 或 WebSocket 签名。
+
+在 **Web 控制台 → 设置 → 平台参数**：
+
+1. 点击 **抖音扫码登录**；在弹出的本机 Chrome/Edge 窗口中，用抖音 App 扫码。窗口不是浏览器里嵌入的二维码。登录完成后会自动关闭，页面显示「扫码成功」。
+2. 在「抖音直播间链接 / web_rid」填写自己需要监听的直播间链接或数字 web_rid，点击 **获取并保存直播参数**。
+3. BiliPDJ 会用已保存在**本机私有目录**中的登录会话向官方网页读取参数，回填 `live_id` 和内部 `room_id` 等配置，并请求弹幕监听重连；Web 页面仅显示经过脱敏的房间状态、标题和 ID。
+4. 原有两份 Tampermonkey 脚本可以继续使用：直播礼物消息由浏览器 WSS 解码并经现有令牌保护的礼物桥接 API 发给 BiliPDJ。**登录辅助并不自动开启无头采集器**。
+
+本地状态和参数接口：
+
+- `GET /api/douyin/login/status`：是否已有登录态、扫码流程是否完成；不返回凭据。
+- `POST /api/douyin/login/start`，JSON `{}`：开始一次官方扫码登录。
+- `POST /api/douyin/login/params`，JSON `{"live_id":"100000000000","apply":true}`：读取/保存房间配置，只返回非敏感字段。
+
+安全约束：仅允许**本机、同源 JSON 管理请求**执行扫码/读取参数；登录状态保存在用户私有的 key 目录下（独立 Chrome Profile 及 `douyin-browser-session.json`，POSIX 权限 `0700/0600`）。不要把私有数据目录、浏览器 Profile 或配置文件复制到仓库/网盘/日志/工单。抖音会话到期后需重新扫码。若有原先手动填写的 Cookie，旧版配置仍可沿用；网页不回显 Cookie，输入框留空保持原值。
+
+注意：这里复用了压缩包中 **官方网页 + 独立 Profile + CDP 仅查询登录 Cookie 名称** 的机制，但没有提交压缩包中真实房间号、直播观众 ID、礼物样本、用户昵称、签名和本地路径。浏览器调试端口随机且绑定回环地址，扫码完成会关闭。如果 Chrome/Edge 安全策略禁用远程调试，则无法完成自动获取；可回退手动配置。Docker 或远程 Ubuntu 无图形桌面时无法在访问 Web 的电脑上弹出扫码窗口；需在后端所在主机使用本机图形桌面。
+
+## 原始压缩包与隐私清理
+
+本次仅将代码逻辑转译为 Python 后端模块，不打包上传 `samples/gifts_sample.json`、日志/抓包快照、用户昵称、会话/签名数据或原始调试 Profile。**不要直接把上传的 ZIP 复制到公开仓库**。详见独立安全测试 `.github/ci/issue321_douyin_login_guard.py`。
+
 ## 安装
 
 1. 在 Chrome / Edge 安装 Tampermonkey 或兼容的用户脚本管理器。
