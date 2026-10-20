@@ -219,6 +219,51 @@
     catch (error) { message('queue-status', `操作失败：${error.message}`, false); }
   }
 
+  let douyinLoginTimer = 0;
+  async function updateDouyinLoginStatus() {
+    try {
+      const info = await json('/api/douyin/login/status');
+      const labels = { idle: '未启动扫码', waiting_scan: '等待扫码确认（本机浏览器窗口）', success: '扫码成功', failed: '登录失败' };
+      message('douyin-login-status', `${labels[info.state] || info.state} · ${info.logged_in ? '本机已有登录凭据' : '当前无本机登录凭据'}${info.error ? ' · ' + info.error : ''}`, info.state !== 'failed');
+      if (douyinLoginTimer && info.state !== 'waiting_scan') {
+        window.clearInterval(douyinLoginTimer); douyinLoginTimer = 0;
+      }
+      if (info.state === 'waiting_scan' && !douyinLoginTimer) {
+        douyinLoginTimer = window.setInterval(updateDouyinLoginStatus, 3000);
+      }
+    } catch (error) {
+      message('douyin-login-status', `无法读取登录状态：${error.message}`, false);
+    }
+  }
+
+  async function startDouyinLogin() {
+    message('douyin-login-status', '正在请求本机 Chrome/Edge 打开官方扫码页面…');
+    try {
+      await post('/api/douyin/login/start', {});
+      await updateDouyinLoginStatus();
+    } catch (error) {
+      message('douyin-login-status', `登录启动失败：${error.message}`, false);
+    }
+  }
+
+  async function fetchDouyinParams() {
+    const url = $('platform-douyin-url').value.trim() || $('platform-douyin-live').value.trim();
+    if (!url) { message('douyin-login-status', '请先填写抖音直播间链接或 web_rid', false); return; }
+    message('douyin-login-status', '正在通过已登录会话读取直播间参数…');
+    try {
+      const response = await post('/api/douyin/login/params', { live_id: url, apply: true });
+      const room = response.room || {};
+      $('platform-douyin-live').value = room.live_id || '';
+      $('platform-douyin-enabled').checked = true;
+      $('platform-select').value = 'douyin';
+      $('douyin-safe-params').textContent = JSON.stringify(room, null, 2);
+      message('douyin-login-status', '直播参数已保存，弹幕监听已请求重连；敏感会话信息未回显。');
+      await refreshHeader();
+    } catch (error) {
+      message('douyin-login-status', `获取直播参数失败：${error.message}`, false);
+    }
+  }
+
   async function loadPlatform() {
     try {
       const cfg = await fullConfig();
@@ -229,8 +274,9 @@
       $('platform-bili-uid').value = String(bili.uid || 0);
       $('platform-douyin-live').value = String(douyin.live_id || '');
       $('platform-douyin-enabled').checked = Boolean(douyin.enabled);
-      $('platform-douyin-cookie').value = String(douyin.cookie || '');
+      $('platform-douyin-cookie').value = '';  // never put existing credentials into a visible DOM input
       message('platform-status', '平台参数已加载。');
+      void updateDouyinLoginStatus();
     } catch (error) { message('platform-status', `加载失败：${error.message}`, false); }
   }
   async function savePlatform() {
@@ -238,7 +284,10 @@
       const cfg = await fullConfig();
       cfg.platform = $('platform-select').value;
       cfg.bilibili = { ...(cfg.bilibili || cfg.api || {}), roomid: intValue('platform-bili-room', 0, 0), uid: intValue('platform-bili-uid', 0, 0) };
-      cfg.douyin = { ...(cfg.douyin || {}), enabled: $('platform-douyin-enabled').checked, live_id: $('platform-douyin-live').value.trim(), cookie: $('platform-douyin-cookie').value.trim() };
+      cfg.douyin = { ...(cfg.douyin || {}), enabled: $('platform-douyin-enabled').checked, live_id: $('platform-douyin-live').value.trim() };
+      // Empty password entry means keep the current manual cookie, not erase it.
+      const manualCookie = $('platform-douyin-cookie').value.trim();
+      if (manualCookie) cfg.douyin.cookie = manualCookie;
       await post('/api/config', cfg);
       message('platform-status', '平台参数已保存。');
       await Promise.all([refreshHeader(), loadRawConfig()]);
@@ -465,6 +514,9 @@
   $('queue-reload').addEventListener('click', () => queueAction('/api/queue/reload', {}));
   $('queue-switch').addEventListener('click', () => queueAction('/api/queue/switch', { slot: Number($('queue-slot').value || 1) }).then(refreshArchive));
   $('platform-save').addEventListener('click', savePlatform); $('platform-refresh').addEventListener('click', loadPlatform);
+  $('douyin-login-start').addEventListener('click', startDouyinLogin);
+  $('douyin-login-status-button').addEventListener('click', updateDouyinLoginStatus);
+  $('douyin-login-params').addEventListener('click', fetchDouyinParams);
   $('gift-save').addEventListener('click', saveGifts); $('gift-refresh').addEventListener('click', loadGifts);
   $('switch-save').addEventListener('click', saveSwitches);
   $('blacklist-add').addEventListener('click', async () => { const name = $('blacklist-name').value.trim(); if (!name) return; try { await post('/api/blacklist/add', { name }); $('blacklist-name').value = ''; await loadBlacklist(); } catch (e) { message('blacklist-status', e.message, false); } });
