@@ -132,6 +132,17 @@ def ask_preference(conflicts: list[tuple[Path, Path]]) -> str:
     message = ("用户数据目录和项目目录均有数据，存在 %d 个冲突文件。\n"
                "是：使用用户目录；否：导入项目数据（项目原件不会删除）；取消：退出。\n"
                "用户目录：%s\n项目文件：%s" % (len(conflicts), conflicts[0][1], conflicts[0][0]))
+    # Background/backend subprocesses have no interactive window of their
+    # own. A modal Tk migration prompt here would block the HTTP listener
+    # indefinitely, and the desktop would only report a connection timeout.
+    # Never select either data source implicitly: fail with a clear message.
+    if os.getenv("BILIPDJ_UNATTENDED_BACKEND", "").strip() == "1":
+        raise DataConflictError(
+            "检测到新旧存档冲突：后台启动已停止，避免在隐藏窗口等待确认。"
+            "请先在可交互的桌面端完成数据迁移选择；"
+            "不要删除存档或自动覆盖。如需管理员手动处理，"
+            "BILIPDJ_MIGRATION_CHOICE 仅允许 user 或 project。"
+        )
     if sys.stdin and sys.stdin.isatty():
         while True:
             choice = input(f"{title}\n{message}\n选 1=用户目录，2=项目目录，q=取消: ").strip().lower()

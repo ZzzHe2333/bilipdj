@@ -154,7 +154,7 @@ KAIGUAN_LABELS = [
 ]
 DEFAULT_KAIGUAN_GUI = {k: True if i < 7 else False for i, (k, _) in enumerate(KAIGUAN_LABELS)}
 SENSITIVE_LOG_PATTERNS = [
-    re.compile(r"(?i)\b(cookie|auth_token|SESSDATA|bili_jct|buvid3|DedeUserID(?:__ckMd5)?)\s*[:=]\s*([^\s,;]+)"),
+    re.compile(r"(?i)\b(cookie|auth_token|SESSDATA|bili_jct|buvid3|DedeUserID(?:__ckMd5)?|sessionid(?:_ss)?|ttwid|msToken|sid_guard)\s*[:=]\s*([^\s,;]+)"),
 ]
 _BACKEND_SERVER_MODULE: Any | None = None
 
@@ -1453,22 +1453,41 @@ class ControlPanelApp:
             method="POST" if body is not None else "GET",
             headers={"Content-Type": "application/json"} if body is not None else {},
         )
-        with urllib.request.urlopen(request, timeout=18) as response:
-            result = json.loads(response.read().decode("utf-8"))
+        try:
+            # The API is explicitly loopback-only. Bypass system proxy
+            # settings so a desktop proxy cannot hijack local QR requests.
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with opener.open(request, timeout=18) as response:
+                result = json.loads(response.read(32 * 1024).decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            try:
+                problem = json.loads(exc.read(16 * 1024).decode("utf-8"))
+                raw_message = str(problem.get("message", "HTTP request failed"))
+                # Never expose backend secrets or arbitrary server output.
+                text = sanitize_log_message(raw_message)[:180]
+                raise RuntimeError(f"后端返回 HTTP {exc.code}：{text}") from None
+            except (ValueError, UnicodeError, AttributeError):
+                raise RuntimeError(f"后端返回 HTTP {exc.code}") from None
         if result.get("status") == "error":
-            raise ValueError(str(result.get("message", "接口失败")))
+            raise ValueError(sanitize_log_message(str(result.get("message", "接口失败")))[:180])
         return result
 
     def _douyin_start_qr_login(self) -> None:
+        if not self._backend_is_running():
+            self._douyin_fetch_status_var.set(
+                "后端未启动：请先点击顶部「启动服务」，确认后端显示已启动后再扫码"
+            )
+            return
         self._douyin_fetch_status_var.set("正在打开本机浏览器上的抖音官方扫码页面…")
 
         def _worker() -> None:
             try:
                 self._douyin_login_api("/api/douyin/login/start", {})
                 self.root.after(0, lambda: self._douyin_poll_qr_login(0))
-            except Exception:
-                self.root.after(0, lambda: self._douyin_fetch_status_var.set(
-                    "登录启动失败：请先启动 BiliPDJ 后端，并确认本机有 Chrome/Edge"
+            except Exception as exc:
+                detail = sanitize_log_message(str(exc))[:160]
+                self.root.after(0, lambda detail=detail: self._douyin_fetch_status_var.set(
+                    f"抖音扫码启动失败：{detail}"
                 ))
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -4717,7 +4736,9 @@ class ControlPanelApp:
         if process is None:
             self._startup_result_queue.put((False, "后端进程未创建", command))
             return
-        deadline = time.monotonic() + 15.0
+        # Frozen Windows executables can take time to load on first run due to
+        # antivirus scanning. Distinguish slow startup from an exited child.
+        deadline = time.monotonic() + 35.0
         last_error = ""
         health_url = f"http://127.0.0.1:{port}/api/config/basic"
         while time.monotonic() < deadline:
@@ -4733,8 +4754,20 @@ class ControlPanelApp:
             except Exception as exc:  # noqa: BLE001
                 last_error = str(exc)
             time.sleep(0.18)
+        return_code = process.poll()
+        if return_code is not None:
+            self._startup_result_queue.put((
+                False, f"后端进程未成功启动（退出码 {return_code}），请检查运行日志中的错误详情",
+                command,
+            ))
+            return
         detail = f"：{last_error}" if last_error else ""
-        self._startup_result_queue.put((False, f"等待后端响应超时{detail}", command))
+        self._startup_result_queue.put((
+            False,
+            f"等待后端响应超时（35秒）{detail}；如后台有旧数据冲突，"
+            "请关闭程序后处理迁移提示，不要删除存档",
+            command,
+        ))
 
     def _poll_backend_start_result(self) -> None:
         if not self._backend_starting:
@@ -4757,8 +4790,12 @@ class ControlPanelApp:
         if process is not None and process.poll() is None:
             try:
                 process.terminate()
-            except OSError:
-                pass
+                process.wait(timeout=3)
+            except (OSError, subprocess.TimeoutExpired):
+                try:
+                    process.kill()
+                except OSError:
+                    pass
         self.server_proc = None
         self._finish_backend_startup_ui()
         self.status_var.set("后端启动失败")
@@ -4788,6 +4825,14 @@ class ControlPanelApp:
                 command = [sys.executable, str(SERVER_PATH)]
             backend_env = os.environ.copy()
             backend_env["DANMUJI_LAUNCHED_BY_GUI"] = "1"
+            backend_env["BILIPDJ_UNATTENDED_BACKEND"] = "1"
+            # Pin the backend to the port and host just saved by this GUI,
+            # even if an older local config is loaded by another process.
+            port = _coerce_int_field(self.port_var.get(), 9816, "后端端口")
+            backend_env["DANMUJI_BACKEND_PORT"] = str(port)
+            backend_env["DANMUJI_BACKEND_HOST"] = (
+                "0.0.0.0" if self.lan_listen_var.get() else "127.0.0.1"
+            )
             creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
             self.server_proc = subprocess.Popen(
                 command,
@@ -4804,10 +4849,6 @@ class ControlPanelApp:
             self._bind_process_logs()
             self._schedule_log_pump()
             self.startup_status_var.set("正在等待后端响应…")
-            try:
-                port = int(self.port_var.get().strip() or "9816")
-            except ValueError:
-                port = 9816
             threading.Thread(target=self._wait_for_backend_ready, args=(port, command), daemon=True).start()
             self.root.after(100, self._poll_backend_start_result)
         except Exception as exc:  # noqa: BLE001

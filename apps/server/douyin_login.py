@@ -52,11 +52,18 @@ def _browser_binary() -> str:
     if sys.platform == "win32":
         root = os.environ.get("PROGRAMFILES", r"C:\Program Files")
         root_x86 = os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")
+        local = os.environ.get("LOCALAPPDATA", "")
         candidates.extend([
             str(Path(root) / "Google/Chrome/Application/chrome.exe"),
+            str(Path(root_x86) / "Google/Chrome/Application/chrome.exe"),
             str(Path(root_x86) / "Microsoft/Edge/Application/msedge.exe"),
             str(Path(root) / "Microsoft/Edge/Application/msedge.exe"),
         ])
+        if local:
+            candidates.extend([
+                str(Path(local) / "Google/Chrome/Application/chrome.exe"),
+                str(Path(local) / "Microsoft/Edge/Application/msedge.exe"),
+            ])
     elif sys.platform == "darwin":
         candidates.extend([
             "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -235,7 +242,14 @@ class DouyinLoginManager:
             while time.monotonic() < deadline:
                 if proc.poll() is not None:
                     raise RuntimeError("Login window closed before completing scan")
-                all_cookies = cdp.call("Network.getAllCookies", session=sid).get("cookies", [])
+                # Current Chrome exposes browser-wide cookies via Storage.
+                # Fall back to Network.getAllCookies for older Edge/Chromium.
+                try:
+                    all_cookies = cdp.call("Storage.getCookies").get("cookies", [])
+                except RuntimeError:
+                    all_cookies = cdp.call(
+                        "Network.getAllCookies", session=sid
+                    ).get("cookies", [])
                 cookies = [dict(name=c["name"], value=c["value"], domain=c["domain"])
                            for c in all_cookies if _allowed_cookie(c)]
                 names = {c["name"] for c in cookies if c["value"]}
