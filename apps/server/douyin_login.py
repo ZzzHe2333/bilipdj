@@ -287,9 +287,6 @@ class DouyinLoginManager:
         public = {
             "live_id": str(info.live_id),
             "room_id": str(info.room_id),
-            "user_id": str(info.user_id),
-            "user_unique_id": str(info.user_unique_id),
-            "anchor_id": str(info.anchor_id),
             "room_status": map_room_status(info.room_status),
             "title": str(info.room_title or "")[:160],
         }
@@ -301,8 +298,12 @@ class DouyinLoginManager:
             dy["enabled"] = True
             dy["live_id"] = public["live_id"]
             live_info = dict(dy.get("live_info", {}))
-            for key in ("room_id", "user_id", "user_unique_id", "anchor_id"):
-                live_info[key] = public[key]
+            live_info.update({
+                "room_id": str(info.room_id),
+                "user_id": str(info.user_id),
+                "user_unique_id": str(info.user_unique_id),
+                "anchor_id": str(info.anchor_id),
+            })
             # Keep raw ttwid, sessionid, msToken, sec_uid out of the new API
             # response; the fresh browser credentials remain private on disk.
             dy["live_info"] = live_info
