@@ -103,7 +103,7 @@ Web 控制台 → 设置 → **抖音礼物** 页：勾选启用，然后为一�
 排查顺序：
 
 1. `GET /api/douyin/login/status` 确认 `logged_in` 为真；否则先扫码。
-2. `GET /api/douyin/collector/status`：先看 `browser_logged_in` 是否为 `true`——为 `false` 时页面是未登录状态，收不到礼物；`im_user_unique_id` 应与账号一致。
+2. `GET /api/douyin/collector/status`：先看 `browser_logged_in` 是否为 `true`——为 `false` 时页面是未登录状态，收不到礼物；`im_session_identified` 应为 `true`（不回显实际账号 ID）。
 3. `frames`/`messages` 持续增长说明 IM 已连上；`messages` 一直为 0 说明页面没有建立 IM 连接（常见原因：播放器被暂停、直播间已下播）。
 4. `methods` 里出现 `WebcastGiftMessage` 说明礼物消息已进入解码；`gifts`/`accepted` 增长说明桥接吃下了。
 5. `page_video_seconds` 不增长说明播放器没有真正开始播放，此时也不会建立 IM 连接。
