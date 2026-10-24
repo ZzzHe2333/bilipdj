@@ -16,7 +16,7 @@ transports produce identical bridge events.
 """
 from __future__ import annotations
 
-import gzip
+import zlib
 import time
 from typing import Any, Iterator
 
@@ -165,11 +165,19 @@ def iter_messages(frame: bytes) -> Iterator[tuple[str, bytes]]:
         return
     if payload[:2] == b"\x1f\x8b":
         try:
-            payload = gzip.decompress(payload)
-        except OSError as exc:
+            decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
+            # A remote gzip frame can be a decompression bomb. Bound output
+            # before allocating its full uncompressed size.
+            uncompressed = decompressor.decompress(payload, MAX_PAYLOAD_BYTES + 1)
+            if len(uncompressed) > MAX_PAYLOAD_BYTES:
+                raise FrameDecodeError("payload too large")
+            if not decompressor.eof:
+                raise FrameDecodeError("gzip payload truncated or too large")
+            payload = uncompressed
+        except zlib.error as exc:
             raise FrameDecodeError("gzip payload invalid") from exc
-        if len(payload) > MAX_PAYLOAD_BYTES:
-            raise FrameDecodeError("payload too large")
+    elif len(payload) > MAX_PAYLOAD_BYTES:
+        raise FrameDecodeError("payload too large")
     response = douyin_live_pb2.LiveResponse()
     try:
         response.ParseFromString(payload)
