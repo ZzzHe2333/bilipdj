@@ -14,13 +14,21 @@ def read(path: str) -> str:
 def check_version() -> None:
     version = read("VERSION").strip()
     assert re.fullmatch(r"\d+\.\d+\.\d+", version), version
-    assert version == "3.0.23", "test suffix only belongs in release tag"
+    # Historical -test support remains in release workflow, but the current
+    # release notes must match the version selected for THIS build.
     notes = read("core/RELEASE_NOTES.md")
-    assert "v3.0.23-test" in notes
-    assert "测试版" in notes and "Pre-release" in notes
-    assert "v3.0.23-test-Windows-Tk-Portable-x64.zip" in notes
-    assert "v3.0.23-test-Web-Portable-x64.zip" in notes
-    assert "正式版" not in notes.splitlines()[0]
+    heading = notes.splitlines()[0]
+    prerelease = f"v{version}-test" in heading
+    tag = f"v{version}-test" if prerelease else f"v{version}"
+    assert tag in heading
+    if prerelease:
+        assert "测试版" in heading and "Pre-release" in notes
+        assert "正式版" not in heading
+    else:
+        assert "正式版" in heading
+        assert "测试版" not in heading
+    assert f"BiliPDJ-{tag}-Windows-Tk-Portable-x64.zip" in notes
+    assert f"BiliPDJ-{tag}-Web-Portable-x64.zip" in notes
 
 
 def check_workflow() -> None:
