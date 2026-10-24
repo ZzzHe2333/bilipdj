@@ -25,7 +25,8 @@ IM_READY_SECONDS = 60.0
 MAX_IM_RELOADS = 3
 IDLE_RECONNECT_SECONDS = 180.0
 WARMUP_SECONDS = 8.0
-MAX_TAPPED_FRAMES = 400
+MAX_TAPPED_FRAMES = 128
+MAX_TAPPED_BUFFER_BYTES = 16 * 1024 * 1024
 # Douyin serves a degraded page (logged-out UI, and often no IM socket at all)
 # when the user agent literally says "HeadlessChrome". Present a normal Chrome
 # UA so the logged-in profile is honoured inside the headless browser.
@@ -107,6 +108,7 @@ class _FrameTap:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._frames: list[bytes] = []
+        self._buffered_bytes = 0
         self.frames = 0
         self.messages = 0
         self.gifts = 0
@@ -141,17 +143,21 @@ class _FrameTap:
             raw = base64.b64decode(data, validate=False)
         except (ValueError, TypeError):
             return
-        if not raw:
+        if not raw or len(raw) > 4 * 1024 * 1024:
             return
         with self._lock:
             self.frames += 1
             self._frames.append(raw)
-            if len(self._frames) > MAX_TAPPED_FRAMES:
-                del self._frames[: len(self._frames) - MAX_TAPPED_FRAMES]
+            self._buffered_bytes += len(raw)
+            while (len(self._frames) > MAX_TAPPED_FRAMES or
+                   self._buffered_bytes > MAX_TAPPED_BUFFER_BYTES):
+                old = self._frames.pop(0)
+                self._buffered_bytes -= len(old)
 
     def drain(self) -> list[bytes]:
         with self._lock:
             frames, self._frames = self._frames, []
+            self._buffered_bytes = 0
         return frames
 
     def note_methods(self, names: list[str]) -> None:
