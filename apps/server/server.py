@@ -2597,10 +2597,13 @@ class QueueManager:
         """Load queue/insert rules from the dedicated JSON file (caller holds the lock)."""
         data = _read_gift_queue_rules_file()
         self._gift_queue_rules_enabled = bool(data.get("enabled", False))
-        rules = _normalize_gift_queue_rules(data.get("rules"))
-        self._gift_queue_rules = rules or [
-            dict(rule) for rule in DEFAULT_DOUYIN_GIFT_QUEUE_RULES
-        ]
+        # An explicitly saved empty list means "no eligible gifts", not
+        # "restore the default lantern gift rule".
+        self._gift_queue_rules = (
+            _normalize_gift_queue_rules(data["rules"])
+            if isinstance(data.get("rules"), list)
+            else [dict(rule) for rule in DEFAULT_DOUYIN_GIFT_QUEUE_RULES]
+        )
         return [dict(rule) for rule in self._gift_queue_rules]
 
     def reload_gift_queue_rules(self) -> list[dict[str, Any]]:
@@ -2614,9 +2617,7 @@ class QueueManager:
         _write_gift_queue_rules_file(payload)
         with self._lock:
             self._gift_queue_rules_enabled = payload["enabled"]
-            self._gift_queue_rules = normalized or [
-                dict(rule) for rule in DEFAULT_DOUYIN_GIFT_QUEUE_RULES
-            ]
+            self._gift_queue_rules = normalized
             return {
                 "enabled": self._gift_queue_rules_enabled,
                 "rules": [dict(rule) for rule in self._gift_queue_rules],
@@ -4226,8 +4227,19 @@ class ApiHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/gifts/queue-rules":
             # Per-gift 排队/插队 rules (Douyin by default). Stored next to the
             # config in gift_queue_rules.json; never exposed outside loopback.
-            length = int(self.headers.get("Content-Length", "0"))
-            raw = self.rfile.read(length).decode("utf-8", errors="replace") if length > 0 else "{}"
+            if str(self.headers.get("Content-Type", "")).split(";", 1)[0].strip().lower() != "application/json":
+                self._write_json({"status": "error", "message": "JSON required"},
+                                 status=HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except (TypeError, ValueError):
+                length = 0
+            if length <= 0 or length > 16 * 1024:
+                self._write_json({"status": "error", "message": "Invalid body size"},
+                                 status=HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+                return
+            raw = self.rfile.read(length).decode("utf-8", errors="replace")
             try:
                 payload = json.loads(raw)
             except json.JSONDecodeError:
