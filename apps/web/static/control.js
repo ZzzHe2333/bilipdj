@@ -409,7 +409,7 @@
     try {
       const giftState = await json('/api/gifts/state');
       const configured = Array.isArray(giftState.rules) ? giftState.rules : [];
-      const rules = configured.length ? configured : (giftState.default_rules || [DOUYIN_GIFT_DEFAULT_RULE]);
+      const rules = configured; // Empty saved rule lists must remain empty.
       $('dy-gift-enabled').checked = Boolean(giftState.rules_enabled);
       douyinGiftCatalogCache = douyinGiftCatalog(giftState);
       renderDouyinGiftRules(rules.map(rule => ({ ...DOUYIN_GIFT_DEFAULT_RULE, ...rule })), douyinGiftCatalogCache);

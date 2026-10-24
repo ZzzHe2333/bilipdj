@@ -46,6 +46,8 @@ HTTP_ENDPOINTS = [
     ep("GET", "/api/douyin/gift-hook/status", "抖音浏览器礼物桥接状态", response='{"status":"ok","configured_room_id":"...","received":0,"settled":0,"token_file":"..."}', notes="仅本机。只显示令牌文件路径，不返回令牌；详情见 docs/DOUYIN_GIFT_BRIDGE.md。"),
     ep("POST", "/api/douyin/gift-hook", "接收抖音网页 WSS 礼物事件", body='{"type":"WebcastGiftMessage","roomId":"...","msgId":"...","user":{"id":"...","nickname":"..."},"gift":{"id":3992,"name":"人气票","diamondCount":1},"repeatCount":1,"repeatEnd":1}', response='{"status":"ok","accepted":true,"settled":1}', notes="仅本机。必须附加 Authorization: Bearer <随机令牌>，Content-Type: application/json，roomId 必须匹配已启用的抖音内部房间 ID；请求体最大 16KiB；浏览器事件可伪造，默认不发放排队资格。"),
     ep("GET", "/api/gifts/state", "读取 B站礼物/插队状态", response='{"status":"ok",...}'),
+    ep("POST", "/api/gifts/queue-rules", "保存按礼物分类的排队与插队规则", body='{"enabled":true,"rules":[{"platform":"douyin","gift_id":"685","gift_name":"粉丝团灯牌","queue_count":1,"insert_count":0}]}', response='{"status":"ok","enabled":true,"rules":[...]}', notes="仅本机管理接口。enabled 是显式开关；insert_count>0 为插队资格，insert_count=0 为普通排队资格。输入按类型与礼物平台校验，礼物事件源仍不能作为消费凭证。"),
+
     ep("GET", "/api/queue/state", "读取当前队列", response='{"queue":[...],"entries":[...],"size":1}', local=False),
     ep("GET", "/api/queue/archive", "读取队列存档槽状态", response="活动槽、存档快照与条目。"),
     ep("POST", "/api/queue/reload", "从当前存档槽重载队列", body="{}", response='{"status":"ok","queue":[...],"entries":[...]}'),

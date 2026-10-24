@@ -103,6 +103,8 @@ jobs:
           node --check tools/douyin/bilipdj_douyin_gift_bridge.user.js
       - name: Validate per-gift queue/insert rules (Douyin gifts)
         run: python .github/ci/douyin_gift_queue_rules_guard.py
+      - name: Validate Douyin collector safety and bounded frame decoding
+        run: python .github/ci/issue327_douyin_review_guard.py
       - name: Validate language plugins and runtime translation
         run: python .github/ci/issue250_language_plugin_guard.py
       - name: Validate bundled English and single-active language policy
