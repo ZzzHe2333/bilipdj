@@ -71,38 +71,35 @@ def _kill_tree(proc: subprocess.Popen[bytes]) -> None:
 
 
 def _release_profile(profile: Path) -> None:
-    """Clear a stale Chrome profile lock left by a killed collector browser."""
+    """Clear only an orphaned lock; never kill an unrelated browser process.
+
+    Chrome's profile is also used by the interactive QR login window. A
+    concurrent active browser must be rejected rather than forcibly killed,
+    even when its lock file can be unlinked on the local filesystem.
+    """
     lock = profile / "lockfile"
     try:
-        lock.unlink(missing_ok=True)
-    except OSError:
-        pass
-    if not lock.exists():
+        import psutil
+    except ImportError:
+        if lock.exists():
+            raise RuntimeError("Douyin browser profile appears in use")
         return
-    try:
-        import psutil  # project dependency
-    except Exception:  # noqa: BLE001
-        return
-    target = str(profile).lower()
-    for candidate in psutil.process_iter(["pid", "name", "cmdline"]):
+    target = str(profile.resolve()).casefold()
+    for candidate in psutil.process_iter(["name", "cmdline"]):
         try:
-            name = str(candidate.info.get("name") or "").lower()
-            if not name.startswith(("chrome", "msedge")):
+            name = str(candidate.info.get("name") or "").casefold()
+            if not name.startswith(("chrome", "msedge", "chromium")):
                 continue
-            command = " ".join(candidate.info.get("cmdline") or []).lower()
-            if target in command:
-                candidate.kill()
-        except Exception:  # noqa: BLE001 - process may exit while iterating
+            argv = [str(a).casefold() for a in (candidate.info.get("cmdline") or [])]
+            if any(a.startswith("--user-data-dir=") and
+                   a.partition("=")[2].strip('"').casefold() == target for a in argv):
+                raise RuntimeError("Douyin browser profile appears in use")
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             continue
-    for _ in range(25):
-        if not lock.exists():
-            return
-        time.sleep(0.2)
     try:
         lock.unlink(missing_ok=True)
-    except OSError:
-        pass
-
+    except OSError as exc:
+        raise RuntimeError("Douyin browser profile lock cannot be cleared") from exc
 
 class _FrameTap:
     """Bounded buffer fed by ``_CDP`` protocol events."""
@@ -114,7 +111,7 @@ class _FrameTap:
         self.messages = 0
         self.gifts = 0
         self.methods: dict[str, int] = {}
-        self.im_user_unique_id = ""
+        self.im_session_identified = False
 
     def __call__(self, message: dict[str, Any]) -> None:
         method = message.get("method")
@@ -126,9 +123,9 @@ class _FrameTap:
                 try:
                     query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
                     with self._lock:
-                        self.im_user_unique_id = str(
+                        self.im_session_identified = bool(
                             (query.get("user_unique_id") or [""])[0]
-                        )[:32]
+                        )
                 except (ValueError, TypeError):
                     pass
             return
@@ -192,7 +189,7 @@ class DouyinHeadlessCollector:
         self._last_frame_at = ""
         self._target_room = ""
         self._methods: dict[str, int] = {}
-        self._im_user_unique_id = ""
+        self._im_session_identified = False
         self._browser_logged_in = False
 
     def status(self) -> dict[str, Any]:
@@ -204,7 +201,7 @@ class DouyinHeadlessCollector:
                 "rejected": self._rejected,
                 "frames": self._frames, "messages": self._messages,
                 "methods": dict(self._methods),
-                "im_user_unique_id": self._im_user_unique_id,
+                "im_session_identified": self._im_session_identified,
                 "browser_logged_in": self._browser_logged_in,
                 "page_video_seconds": self._page_seconds,
                 "last_error": self._last_error,
@@ -308,7 +305,7 @@ class DouyinHeadlessCollector:
             self._messages = tap.messages
             self._observed = tap.gifts
             self._methods = tap.top_methods()
-            self._im_user_unique_id = tap.im_user_unique_id
+            self._im_session_identified = tap.im_session_identified
         return len(names)
 
     def _warm_up(self, cdp: _CDP, session: str) -> None:
