@@ -1,6 +1,7 @@
 """Issue #327: local gift-collector safety regressions (synthetic data only)."""
 from __future__ import annotations
 
+import base64
 import gzip
 import sys
 import tempfile
@@ -73,6 +74,20 @@ def check_browser_profile_safety() -> None:
         assert not lock.exists(), "Stale profile lock should be removed"
 
 
+def check_frame_buffer_limit() -> None:
+    tap = _FrameTap()
+    payload = base64.b64encode(b"x" * (256 * 1024)).decode("ascii")
+    for _ in range(180):
+        tap({
+            "method": "Network.webSocketFrameReceived",
+            "params": {"response": {"opcode": 2, "payloadData": payload}},
+        })
+    assert tap.frames == 180
+    assert tap._buffered_bytes <= 16 * 1024 * 1024
+    assert len(tap.drain()) <= 64
+    assert tap._buffered_bytes == 0
+
+
 def check_account_status_redaction() -> None:
     tap = _FrameTap()
     tap({
@@ -91,6 +106,7 @@ def check_account_status_redaction() -> None:
 def main() -> None:
     check_frame_bounds()
     check_browser_profile_safety()
+    check_frame_buffer_limit()
     check_account_status_redaction()
     print("Issue #327 review safety regressions: OK")
 
