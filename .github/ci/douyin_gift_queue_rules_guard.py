@@ -192,6 +192,10 @@ def check_persistence_and_state(root: Path) -> None:
     reloaded = build(root)
     assert reloaded.get_gift_state()["rules_enabled"] is True
     assert len(reloaded.get_gift_state()["rules"]) == 2
+    cleared = reloaded.save_gift_queue_rules(True, [])
+    assert cleared["rules"] == []
+    after_restart = build(root)
+    assert after_restart.get_gift_state()["rules"] == []
 
 
 def main() -> None:
