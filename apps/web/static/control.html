@@ -68,6 +68,7 @@
           <button class="subtab" data-settings="platform">平台参数</button>
           <button class="subtab" data-settings="plugin-config">插件动态配置</button>
           <button class="subtab" data-settings="gifts">B站礼物</button>
+          <button class="subtab" data-settings="douyin-gifts">抖音礼物</button>
           <button class="subtab" data-settings="switches">功能开关</button>
           <button class="subtab" data-settings="blacklist">黑名单</button>
           <button class="subtab" data-settings="style">样式</button>
@@ -103,6 +104,22 @@
             <div class="toolbar"><button id="gift-save" class="button">保存礼物规则</button><button id="gift-refresh" class="button ghost">刷新状态</button></div>
             <div id="gift-status" class="status"></div>
             <details class="details"><summary>当前礼物运行状态 / 礼物目录</summary><pre id="gift-state" class="json-output"></pre></details>
+          </div>
+        </div>
+        <div class="settings-pane" id="settings-douyin-gifts">
+          <div class="card">
+            <div class="form-grid">
+              <label><span>启用抖音礼物排队 / 插队</span><input id="dy-gift-enabled" type="checkbox"></label>
+            </div>
+            <p class="hint">发送下方选中的礼物即可获得对应次数：<b>插队次数 &gt; 0</b> 时，送礼者可用「插队」跳到「B站礼物」里设置的插入名次；<b>插队次数填 0 表示只能「排队」</b>。次数可累加，每发一次「排队」/「插队」指令消耗 1 次。默认礼物为「粉丝团灯牌」。注意：浏览器上报的礼物事件无法证明真实交易，请自行评估风险后启用。</p>
+            <div id="dy-gift-rules" class="rule-list"></div>
+            <div class="toolbar">
+              <button id="dy-gift-add" class="button ghost" type="button">添加礼物规则</button>
+              <button id="dy-gift-save" class="button" type="button">保存抖音礼物规则</button>
+              <button id="dy-gift-refresh" class="button ghost" type="button">刷新状态</button>
+            </div>
+            <div id="dy-gift-status" class="status"></div>
+            <details class="details"><summary>抖音礼物运行状态 / 待用资格</summary><pre id="dy-gift-state" class="json-output"></pre></details>
           </div>
         </div>
         <div class="settings-pane" id="settings-switches"><div class="card"><div id="switch-grid" class="switch-grid"></div><div class="toolbar"><button id="switch-save" class="button">保存开关</button></div><div id="switch-status" class="status"></div></div></div>

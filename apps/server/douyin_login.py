@@ -115,7 +115,7 @@ def _write_private_json(path: Path, payload: dict[str, Any]) -> None:
 
 
 class _CDP:
-    def __init__(self, port: int) -> None:
+    def __init__(self, port: int, event_sink: Any | None = None) -> None:
         import websocket  # installed project dependency: websocket-client
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=2) as response:
             info = json.load(response)
@@ -125,6 +125,10 @@ class _CDP:
             raise RuntimeError("Chrome DevTools did not expose a local endpoint")
         self.socket = websocket.create_connection(remote_url, timeout=8, suppress_origin=True)
         self._next_id = 0
+        # Protocol events (e.g. Network.webSocketFrameReceived) are delivered
+        # between command replies; the collector taps them without a second
+        # DevTools connection.
+        self._event_sink = event_sink
 
     def call(self, method: str, params: dict[str, Any] | None = None,
              session: str = "") -> dict[str, Any]:
@@ -136,6 +140,11 @@ class _CDP:
         while True:
             msg = json.loads(self.socket.recv())
             if msg.get("id") != self._next_id:
+                if self._event_sink is not None and msg.get("method"):
+                    try:
+                        self._event_sink(msg)
+                    except Exception:  # noqa: BLE001 - a tap must never break CDP
+                        pass
                 continue
             if msg.get("error"):
                 raise RuntimeError("Chrome DevTools operation failed: " + method)
@@ -163,6 +172,32 @@ class DouyinLoginManager:
             return _redacted_cookie_header(data.get("cookies", []))
         except (OSError, ValueError, TypeError):
             return ""
+
+    def cookie_records(self) -> list[dict[str, str]]:
+        """Stored session cookies for INTERNAL browser replay only.
+
+        The collector starts Chrome on the same profile, but cookies captured
+        through CDP are not guaranteed to be flushed into the profile's cookie
+        database; replaying them keeps the headless page signed in. Never
+        serialized to an HTTP response.
+        """
+        try:
+            data = json.loads(self.secret_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return []
+        records = data.get("cookies", [])
+        if not isinstance(records, list):
+            return []
+        result: list[dict[str, str]] = []
+        for record in records:
+            if not _allowed_cookie(record):
+                continue
+            result.append({
+                "name": str(record["name"]),
+                "value": str(record["value"]),
+                "domain": str(record.get("domain") or ""),
+            })
+        return result
 
     def status(self) -> dict[str, Any]:
         with self._lock:

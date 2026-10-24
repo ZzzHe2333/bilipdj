@@ -470,6 +470,10 @@ def _normalize_myjs_config(raw: Any) -> dict[str, Any]:
     for key, value in raw.items():
         if not isinstance(key, str):
             continue
+        if key in ("gift_queue_rules", "gift_queue_rules_enabled"):
+            # Legacy experiment that stored the rule list inside config.yaml;
+            # the rules now live in gift_queue_rules.json.
+            continue
         if key in MYJS_LIST_KEYS:
             normalized[key] = _normalize_string_list(value)
         else:
@@ -1545,6 +1549,10 @@ def save_config(config: dict[str, Any], *, preserve_legacy_api_schema: bool | No
         for key, value in myjs_cfg.items():
             if not isinstance(key, str):
                 continue
+            if key == "gift_queue_rules" and isinstance(value, list):
+                # Rules are persisted in gift_queue_rules.json instead; skip
+                # here so a stale value cannot be written into config.yaml.
+                continue
             if isinstance(value, list):
                 if value:
                     myjs_lines.append(f"  {key}:")
@@ -1936,6 +1944,89 @@ class QueueArchiveManager:
         return latest
 
 
+DEFAULT_DOUYIN_GIFT_QUEUE_RULES: list[dict[str, Any]] = [
+    {
+        "platform": "douyin",
+        "gift_id": "685",
+        "gift_name": "粉丝团灯牌",
+        "queue_count": 1,
+        "insert_count": 0,
+    },
+]
+_GIFT_QUEUE_RULE_PLATFORMS = ("bilibili", "douyin")
+_GIFT_QUEUE_RULE_MAX_COUNT = 99
+
+
+def _normalize_gift_queue_rules(raw: Any) -> list[dict[str, Any]]:
+    """Normalize the per-gift queue/insert rule list.
+
+    ``insert_count > 0`` grants insert slots (``插队``); ``insert_count == 0``
+    grants plain queue slots (``排队``) — that is the "插队=0 就是排队" rule.
+    """
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            raw = []
+    if not isinstance(raw, list):
+        return []
+    rules: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in raw[:64]:
+        if not isinstance(item, dict):
+            continue
+        platform = str(item.get("platform") or "douyin").strip().lower()
+        if platform not in _GIFT_QUEUE_RULE_PLATFORMS:
+            continue
+        gift_id = str(item.get("gift_id") or "").strip()[:32]
+        gift_name = str(item.get("gift_name") or "").strip()[:64]
+        if not gift_id and not gift_name:
+            continue
+        queue_count = max(0, min(_GIFT_QUEUE_RULE_MAX_COUNT,
+                                 _to_int(item.get("queue_count", 0))))
+        insert_count = max(0, min(_GIFT_QUEUE_RULE_MAX_COUNT,
+                                  _to_int(item.get("insert_count", 0))))
+        if queue_count <= 0 and insert_count <= 0:
+            continue
+        key = (platform, gift_id or gift_name.casefold())
+        if key in seen:
+            continue
+        seen.add(key)
+        rules.append({
+            "platform": platform,
+            "gift_id": gift_id,
+            "gift_name": gift_name,
+            "queue_count": queue_count,
+            "insert_count": insert_count,
+        })
+    return rules
+
+
+def _gift_queue_rules_path() -> Path:
+    """Rules live in their own JSON file next to config.yaml: the config reader
+    only handles flat myjs scalars, so a nested rule list cannot round-trip."""
+    return Path(CONFIG_PATH).parent / "gift_queue_rules.json"
+
+
+def _read_gift_queue_rules_file() -> dict[str, Any]:
+    try:
+        data = json.loads(_gift_queue_rules_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_gift_queue_rules_file(payload: dict[str, Any]) -> None:
+    path = _gift_queue_rules_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temp, path)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
 class QueueManager:
     """Thread-safe server-side queue manager.
 
@@ -1991,6 +2082,11 @@ class QueueManager:
         self._gift_queue_insert_rank = 1
         self._gift_queue_saved_insert_rank = 1
         self._gift_queue_only = False
+        self._gift_queue_rules_enabled = False
+        self._gift_queue_rules: list[dict[str, Any]] = [
+            dict(rule) for rule in DEFAULT_DOUYIN_GIFT_QUEUE_RULES
+        ]
+        self._gift_queue_join_credits: dict[int, int] = {}
         self._gift_catalog: dict[int, dict[str, Any]] = {}
         self._last_gift_event: dict[str, Any] = {}
 
@@ -2014,6 +2110,9 @@ class QueueManager:
             self._gift_queue_only = bool(myjs_cfg.get("gift_queue_only", False))
             if self._gift_queue_only:
                 self._gift_queue_insert_rank = 0
+            # Queue/insert rules live in gift_queue_rules.json (see
+            # _gift_queue_rules_path); config.yaml only carries flat scalars.
+            self._reload_gift_queue_rules_unlocked()
             if myjs_cfg.get("paidui_list_length_max") is not None:
                 self._max_length = max(1, _to_int(myjs_cfg["paidui_list_length_max"], 100))
             self._daily_queue_limit = min(999, max(0, _to_int(myjs_cfg.get("daily_queue_limit", 0))))
@@ -2494,9 +2593,119 @@ class QueueManager:
         with self._lock:
             return copy.deepcopy(self._last_danmu_event)
 
+    def _reload_gift_queue_rules_unlocked(self) -> list[dict[str, Any]]:
+        """Load queue/insert rules from the dedicated JSON file (caller holds the lock)."""
+        data = _read_gift_queue_rules_file()
+        self._gift_queue_rules_enabled = bool(data.get("enabled", False))
+        rules = _normalize_gift_queue_rules(data.get("rules"))
+        self._gift_queue_rules = rules or [
+            dict(rule) for rule in DEFAULT_DOUYIN_GIFT_QUEUE_RULES
+        ]
+        return [dict(rule) for rule in self._gift_queue_rules]
+
+    def reload_gift_queue_rules(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return self._reload_gift_queue_rules_unlocked()
+
+    def save_gift_queue_rules(self, enabled: Any, rules: Any) -> dict[str, Any]:
+        """Validate and persist the per-gift queue/insert rules."""
+        normalized = _normalize_gift_queue_rules(rules)
+        payload = {"version": 1, "enabled": bool(enabled), "rules": normalized}
+        _write_gift_queue_rules_file(payload)
+        with self._lock:
+            self._gift_queue_rules_enabled = payload["enabled"]
+            self._gift_queue_rules = normalized or [
+                dict(rule) for rule in DEFAULT_DOUYIN_GIFT_QUEUE_RULES
+            ]
+            return {
+                "enabled": self._gift_queue_rules_enabled,
+                "rules": [dict(rule) for rule in self._gift_queue_rules],
+            }
+
+    def _match_gift_queue_rule(self, platform: str, gift_id: Any = "",
+                               gift_name: str = "") -> dict[str, Any] | None:
+        """Match a configured queue/insert rule by gift id first, then by name."""
+        normalized_platform = str(platform or "").strip().lower()
+        normalized_id = str(gift_id or "").strip()
+        normalized_name = str(gift_name or "").strip().casefold()
+        rules = self._gift_queue_rules
+        if normalized_id:
+            for rule in rules:
+                if (rule["platform"] == normalized_platform and rule["gift_id"]
+                        and rule["gift_id"] == normalized_id):
+                    return rule
+        if normalized_name:
+            for rule in rules:
+                if (rule["platform"] == normalized_platform and rule["gift_name"]
+                        and rule["gift_name"].casefold() == normalized_name):
+                    return rule
+        return None
+
+    def _grant_gift_queue_credits(self, platform: str, uid: Any, gift_id: Any = "",
+                                  gift_name: str = "") -> dict[str, Any] | None:
+        """Grant queue or insert slots for a matching gift.
+
+        The caller must already hold ``self._lock`` (``process_gift_event``
+        grants credits inside its critical section).
+        """
+        if not self._gift_queue_rules_enabled:
+            return None
+        try:
+            numeric_uid = int(uid or 0)
+        except (TypeError, ValueError):
+            return None
+        if numeric_uid <= 0:
+            return None
+        rule = self._match_gift_queue_rule(platform, gift_id, gift_name)
+        if rule is None:
+            return None
+        if rule["insert_count"] > 0:
+            mode = "insert"
+            count = int(rule["insert_count"])
+            self._gift_queue_credits[numeric_uid] = (
+                self._gift_queue_credits.get(numeric_uid, 0) + count
+            )
+        else:
+            mode = "queue"
+            count = int(rule["queue_count"])
+            self._gift_queue_join_credits[numeric_uid] = (
+                self._gift_queue_join_credits.get(numeric_uid, 0) + count
+            )
+        return {
+            "mode": mode,
+            "granted": count,
+            "platform": rule["platform"],
+            "gift_id": rule["gift_id"],
+            "gift_name": rule["gift_name"],
+            "insert_credits": self._gift_queue_credits.get(numeric_uid, 0),
+            "queue_credits": self._gift_queue_join_credits.get(numeric_uid, 0),
+        }
+
     def get_gift_state(self) -> dict[str, Any]:
         with self._lock:
-            return {"enabled": self._gift_queue_enabled, "gift_names": sorted(self._gift_queue_names), "min_batteries": self._gift_queue_min_batteries, "allow_multiple": self._gift_queue_allow_multiple, "slots_per_gift": self._gift_queue_slots_per_gift, "insert_rank": self._gift_queue_insert_rank, "gift_only": self._gift_queue_only, "used_uids": sorted(self._gift_queue_used_uids), "catalog": [{"name": name, "batteries": value} for name, value in GIFT_BATTERIES.items()], "observed_catalog": list(self._gift_catalog.values()), "last_event": copy.deepcopy(self._last_gift_event)}
+            return {
+                "enabled": self._gift_queue_enabled,
+                "gift_names": sorted(self._gift_queue_names),
+                "min_batteries": self._gift_queue_min_batteries,
+                "allow_multiple": self._gift_queue_allow_multiple,
+                "slots_per_gift": self._gift_queue_slots_per_gift,
+                "insert_rank": self._gift_queue_insert_rank,
+                "gift_only": self._gift_queue_only,
+                "used_uids": sorted(self._gift_queue_used_uids),
+                "catalog": [{"name": name, "batteries": value} for name, value in GIFT_BATTERIES.items()],
+                "observed_catalog": list(self._gift_catalog.values()),
+                "last_event": copy.deepcopy(self._last_gift_event),
+                # Per-gift queue/insert rules (Douyin by default).
+                "rules_enabled": self._gift_queue_rules_enabled,
+                "rules": [dict(rule) for rule in self._gift_queue_rules],
+                "pending_insert_credits": sum(
+                    max(0, int(value)) for value in self._gift_queue_credits.values()
+                ),
+                "pending_queue_credits": sum(
+                    max(0, int(value)) for value in self._gift_queue_join_credits.values()
+                ),
+                "default_rules": [dict(rule) for rule in DEFAULT_DOUYIN_GIFT_QUEUE_RULES],
+            }
 
     def process_live_event(self, payload: dict[str, Any]) -> None:
         cmd = str(payload.get("cmd", "") or "").split(":", 1)[0]
@@ -2695,7 +2904,11 @@ class QueueManager:
 
             # --- Join commands (not yet in queue) ---
             if index < 0:
-                can_join = len(self._persons) < self._max_length or has_op
+                join_credit = (
+                    max(0, int(self._gift_queue_join_credits.get(uid, 0) or 0))
+                    if uid > 0 else 0
+                )
+                can_join = len(self._persons) < self._max_length or has_op or join_credit > 0
                 new_item: str | None = None
 
                 if (msg == "插队" or msg.startswith("插队 ")) and uid in self._gift_queue_credits:
@@ -2718,7 +2931,8 @@ class QueueManager:
                     self._persist_myjs_state_unlocked()
                     modified = bool(selected)
 
-                if self._gift_queue_only and not modified and self._is_join_cmd(msg) and not has_op:
+                if (self._gift_queue_only and not modified and self._is_join_cmd(msg)
+                        and not has_op and join_credit <= 0):
                     return False, "当前仅允许使用礼物资格排队"
 
                 join_master_enabled = kg.get("paidui", True)
@@ -2773,6 +2987,14 @@ class QueueManager:
                     if not has_op and self._daily_queue_limit > 0:
                         self._daily_queue_counts[daily_identity] = used_count + 1
                         self._persist_myjs_state_unlocked()
+                    if join_credit > 0 and not has_op:
+                        # A queue slot bought with a matching gift is consumed
+                        # by this join; insert slots are spent by 插队 instead.
+                        remaining = join_credit - 1
+                        if remaining > 0:
+                            self._gift_queue_join_credits[uid] = remaining
+                        else:
+                            self._gift_queue_join_credits.pop(uid, None)
                     modified = True
                 elif new_item is not None and not can_join and not has_op:
                     return False, "队列已满，无法加入排队"
@@ -3996,6 +4218,37 @@ class ApiHandler(BaseHTTPRequestHandler):
             uid = int(payload.get("uid", 0))
             cookie = str(payload.get("cookie", "")).strip()
             self._write_json(self._save_login_config(uid=uid, cookie=cookie))
+            return
+
+        if parsed.path == "/api/gifts/queue-rules":
+            # Per-gift 排队/插队 rules (Douyin by default). Stored next to the
+            # config in gift_queue_rules.json; never exposed outside loopback.
+            length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(length).decode("utf-8", errors="replace") if length > 0 else "{}"
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                self._write_json({"status": "error", "message": "Body must be valid JSON"},
+                                 status=HTTPStatus.BAD_REQUEST)
+                return
+            if not isinstance(payload, dict):
+                self._write_json({"status": "error", "message": "Body must be a JSON object"},
+                                 status=HTTPStatus.BAD_REQUEST)
+                return
+            qm = getattr(self.server, "queue_manager", None)
+            if qm is None or not callable(getattr(qm, "save_gift_queue_rules", None)):
+                self._write_json({"status": "error", "message": "queue_manager not ready"},
+                                 status=HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            try:
+                saved = qm.save_gift_queue_rules(payload.get("enabled", False),
+                                                 payload.get("rules", []))
+            except Exception:  # noqa: BLE001
+                self.server.logger.exception("保存礼物排队规则失败")
+                self._write_json({"status": "error", "message": "保存礼物排队规则失败"},
+                                 status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+            self._write_json({"status": "ok", **saved})
             return
 
         if parsed.path == "/api/config":

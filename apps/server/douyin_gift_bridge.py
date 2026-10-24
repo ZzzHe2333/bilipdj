@@ -141,7 +141,10 @@ class DouyinGiftBridge:
         self.received = 0
         self.settled = 0
         self.last_event_at = ""
-        self.token_path = Path(getattr(server_module, "KEY_DIR", getattr(server_module, "_YAML_DIR"))) / "douyin-gift-bridge-token.txt"
+        key_dir = (getattr(server_module, "KEY_DIR", None)
+                   or getattr(server_module, "_YAML_DIR", None)
+                   or Path("."))
+        self.token_path = Path(key_dir) / "douyin-gift-bridge-token.txt"
         self.token = token if token is not None else self._load_token()
         self._stop = threading.Event()
         self._active_backend: Any | None = None

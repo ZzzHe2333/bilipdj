@@ -352,6 +352,87 @@
     } catch (error) { message('gift-status', `保存失败：${error.message}`, false); }
   }
 
+  const DOUYIN_GIFT_DEFAULT_RULE = { platform: 'douyin', gift_id: '685', gift_name: '粉丝团灯牌', queue_count: 1, insert_count: 0 };
+  const DOUYIN_GIFT_BUILTIN = [
+    ['685', '粉丝团灯牌'], ['463', '小心心'], ['2001', '玫瑰'],
+    ['2002', '大啤酒'], ['3992', '人气票'], ['6937', '点亮粉丝团'],
+  ];
+  let douyinGiftCatalogCache = [];
+  function douyinGiftCatalog(giftState) {
+    const rows = []; const seen = new Set();
+    const push = (id, name) => {
+      const key = String(id || name || '').trim();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      rows.push({ id: String(id || ''), name: String(name || '') });
+    };
+    DOUYIN_GIFT_BUILTIN.forEach(([id, name]) => push(id, name));
+    (giftState?.observed_catalog || []).forEach(item => {
+      if (item && item.platform === 'douyin') push(item.id, item.name);
+    });
+    return rows;
+  }
+  function douyinGiftRuleRow(rule, catalog) {
+    const row = document.createElement('div');
+    row.className = 'rule-row';
+    const options = catalog.map(item => `<option value="${esc(item.id)}" data-name="${esc(item.name)}" ${String(item.id) === String(rule.gift_id) ? 'selected' : ''}>${esc(item.name || item.id)}</option>`).join('');
+    row.innerHTML = `<select class="rule-gift" aria-label="礼物">${options}</select>
+      <label class="rule-count"><span>排队次数</span><input class="rule-queue" type="number" min="0" max="99" value="${Number(rule.queue_count) || 0}"></label>
+      <label class="rule-count"><span>插队次数</span><input class="rule-insert" type="number" min="0" max="99" value="${Number(rule.insert_count) || 0}"></label>
+      <button class="button ghost rule-remove" type="button">删除</button>`;
+    return row;
+  }
+  function renderDouyinGiftRules(rules, catalog) {
+    const host = $('dy-gift-rules');
+    host.innerHTML = '';
+    if (!rules.length) {
+      host.innerHTML = '<p class="rule-row-empty">还没有规则，点击「添加礼物规则」新增。</p>';
+      return;
+    }
+    rules.forEach(rule => host.appendChild(douyinGiftRuleRow(rule, catalog)));
+  }
+  function collectDouyinGiftRules() {
+    const rules = [];
+    document.querySelectorAll('#dy-gift-rules .rule-row').forEach(row => {
+      const select = row.querySelector('.rule-gift');
+      const option = select && select.selectedOptions ? select.selectedOptions[0] : null;
+      const giftId = String(select ? select.value : '').trim();
+      const giftName = String((option && option.dataset ? option.dataset.name : '') || (option ? option.textContent : '')).trim();
+      const queue = Math.max(0, Math.min(99, Number(row.querySelector('.rule-queue')?.value || 0)));
+      const insert = Math.max(0, Math.min(99, Number(row.querySelector('.rule-insert')?.value || 0)));
+      if ((!giftId && !giftName) || (!queue && !insert)) return;
+      rules.push({ platform: 'douyin', gift_id: giftId, gift_name: giftName, queue_count: queue, insert_count: insert });
+    });
+    return rules;
+  }
+  async function loadDouyinGifts() {
+    try {
+      const giftState = await json('/api/gifts/state');
+      const configured = Array.isArray(giftState.rules) ? giftState.rules : [];
+      const rules = configured.length ? configured : (giftState.default_rules || [DOUYIN_GIFT_DEFAULT_RULE]);
+      $('dy-gift-enabled').checked = Boolean(giftState.rules_enabled);
+      douyinGiftCatalogCache = douyinGiftCatalog(giftState);
+      renderDouyinGiftRules(rules.map(rule => ({ ...DOUYIN_GIFT_DEFAULT_RULE, ...rule })), douyinGiftCatalogCache);
+      const observed = (giftState.observed_catalog || []).filter(item => item && item.platform === 'douyin');
+      $('dy-gift-state').textContent = JSON.stringify({
+        rules_enabled: giftState.rules_enabled,
+        rules: giftState.rules,
+        pending_queue_credits: giftState.pending_queue_credits,
+        pending_insert_credits: giftState.pending_insert_credits,
+        observed_douyin_gifts: observed,
+      }, null, 2);
+      message('dy-gift-status', `已加载 ${rules.length} 条抖音礼物规则。`);
+    } catch (error) { message('dy-gift-status', `加载失败：${error.message}`, false); }
+  }
+  async function saveDouyinGifts() {
+    try {
+      const payload = { enabled: $('dy-gift-enabled').checked, rules: collectDouyinGiftRules() };
+      const saved = await post('/api/gifts/queue-rules', payload);
+      message('dy-gift-status', `抖音礼物规则已保存（${(saved.rules || []).length} 条，${saved.enabled ? '已启用' : '未启用'}）。`);
+      await loadDouyinGifts();
+    } catch (error) { message('dy-gift-status', `保存失败：${error.message}`, false); }
+  }
+
   async function loadSwitches() {
     try {
       const payload = await json('/api/kaiguan');
@@ -380,7 +461,7 @@
     try { const payload = await fullConfig(); $('config-json').value = JSON.stringify(payload, null, 2); message('config-status', '完整配置已加载。'); }
     catch (error) { message('config-status', `加载失败：${error.message}`, false); }
   }
-  function loadSettingsBundle() { loadPlatform(); loadGifts(); loadSwitches(); loadBlacklist(); loadStyle(); loadRawConfig(); }
+  function loadSettingsBundle() { loadPlatform(); loadGifts(); loadDouyinGifts(); loadSwitches(); loadBlacklist(); loadStyle(); loadRawConfig(); }
 
   const permissionRoles = {super_admin: '最高管理员', admin: '管理员'};
   const permissionPlatforms = {bilibili: 'Bilibili', douyin: '抖音', huya: '虎牙', youtube: 'YouTube', twitch: 'Twitch'};
@@ -537,6 +618,20 @@
   $('douyin-collector-start').addEventListener('click', () => setDouyinCollector(true));
   $('douyin-collector-stop').addEventListener('click', () => setDouyinCollector(false));
   $('gift-save').addEventListener('click', saveGifts); $('gift-refresh').addEventListener('click', loadGifts);
+  $('dy-gift-save').addEventListener('click', saveDouyinGifts);
+  $('dy-gift-refresh').addEventListener('click', loadDouyinGifts);
+  $('dy-gift-add').addEventListener('click', () => {
+    const host = $('dy-gift-rules');
+    if (host.querySelector('.rule-row-empty')) host.innerHTML = '';
+    host.appendChild(douyinGiftRuleRow({ ...DOUYIN_GIFT_DEFAULT_RULE }, douyinGiftCatalogCache));
+  });
+  $('dy-gift-rules').addEventListener('click', event => {
+    const btn = event.target.closest('.rule-remove');
+    if (!btn) return;
+    const row = btn.closest('.rule-row');
+    if (row) row.remove();
+    if (!$('dy-gift-rules').querySelector('.rule-row')) renderDouyinGiftRules([], []);
+  });
   $('switch-save').addEventListener('click', saveSwitches);
   $('blacklist-add').addEventListener('click', async () => { const name = $('blacklist-name').value.trim(); if (!name) return; try { await post('/api/blacklist/add', { name }); $('blacklist-name').value = ''; await loadBlacklist(); } catch (e) { message('blacklist-status', e.message, false); } });
   $('blacklist-clear').addEventListener('click', async () => { if (!confirm('确认清空黑名单？')) return; try { await post('/api/blacklist/clear', {}); await loadBlacklist(); } catch (e) { message('blacklist-status', e.message, false); } });

@@ -312,7 +312,19 @@ def install_gift_compatibility(
                         "price": _to_int(gift.get("price", 0), 0),
                         "coin_type": str(gift.get("coin_type", "") or ""),
                     }
-                self._last_gift_event = copy.deepcopy(event)
+                # Per-gift queue/insert rules (Douyin by default). The rule
+                # switch itself is the operator's explicit opt-in: a matching
+                # gift grants either 插队 slots (insert_count > 0) or plain
+                # 排队 slots (insert_count == 0).
+                rule_credit = None
+                grant_rules = getattr(self, "_grant_gift_queue_credits", None)
+                if callable(grant_rules) and uid > 0:
+                    try:
+                        rule_credit = grant_rules(platform, uid, gift_id, gift_name)
+                    except Exception:  # noqa: BLE001 - never break gift handling
+                        rule_credit = None
+                if rule_credit:
+                    event["gift_queue_credit"] = copy.deepcopy(rule_credit)
                 matches_name = gift_name in self._gift_queue_names
                 matches_value = bool(
                     resolved_value is not None
@@ -323,11 +335,13 @@ def install_gift_compatibility(
                 can_repeat = self._gift_queue_allow_multiple or (
                     uid not in self._gift_queue_used_uids and uid not in self._gift_queue_credits
                 )
-                if self._gift_queue_enabled and grant_credit and qualifies and uid > 0 and can_repeat:
+                if (rule_credit is None and self._gift_queue_enabled and grant_credit
+                        and qualifies and uid > 0 and can_repeat):
                     self._gift_queue_credits[uid] = (
                         self._gift_queue_credits.get(uid, 0) + self._gift_queue_slots_per_gift
                     )
                     event["queue_credit_granted"] = True
+                self._last_gift_event = copy.deepcopy(event)
             self._ws_hub.broadcast_json(None, event)
             self._logger.info(
                 "[礼物][%s] %s(%s) %s x%s 价值=%s 来源=%s",

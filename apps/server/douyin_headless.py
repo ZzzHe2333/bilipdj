@@ -1,21 +1,177 @@
 """Optional headless Douyin WSS collector using the operator's local login profile.
 
-No signatures or session cookies are exposed over HTTP. This collector uses
-the existing gift-hook JavaScript and calls the #319 gift bridge directly.
-Only one live room is supported, matching the Python relay configuration.
+No signatures or session cookies are exposed over HTTP. Frames are captured at
+the browser level through the DevTools protocol (``Network.webSocketFrameReceived``)
+and decoded by :mod:`apps.server.douyin_ws_frames`; page JavaScript is never
+patched, so Douyin's own IM client stays untouched. Only one live room is
+supported, matching the Python relay configuration.
 """
 from __future__ import annotations
 
-import copy
+import base64
 import json
 import os
 import subprocess
 import threading
 import time
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
 from .douyin_login import _CDP, _browser_binary
+from .douyin_ws_frames import FrameDecodeError, decode_frame_gifts, iter_messages
+
+IM_READY_SECONDS = 60.0
+MAX_IM_RELOADS = 3
+IDLE_RECONNECT_SECONDS = 180.0
+WARMUP_SECONDS = 8.0
+MAX_TAPPED_FRAMES = 400
+# Douyin serves a degraded page (logged-out UI, and often no IM socket at all)
+# when the user agent literally says "HeadlessChrome". Present a normal Chrome
+# UA so the logged-in profile is honoured inside the headless browser.
+_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36"
+)
+
+_SAFE_ERRORS = frozenset({
+    "Headless Chrome exited",
+    "Headless Chrome startup timeout",
+    "Douyin live page navigation failed",
+    "Browser exited",
+    "Douyin IM channel did not open",
+})
+
+
+def _safe_error(exc: BaseException) -> str:
+    """Only whitelisted, non-sensitive reasons reach the status endpoint."""
+    text = str(exc)
+    return text if text in _SAFE_ERRORS else "Browser collector error; retrying locally"
+
+
+def _kill_tree(proc: subprocess.Popen[bytes]) -> None:
+    """Terminate Chrome *and its children*; a surviving child keeps the
+    profile lock and every later launch then fails with "profile in use"."""
+    if proc.poll() is None:
+        try:
+            proc.terminate()
+            proc.wait(timeout=3)
+        except Exception:  # noqa: BLE001
+            try:
+                proc.kill()
+            except Exception:  # noqa: BLE001
+                pass
+    if os.name == "nt":
+        try:
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=8, check=False)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _release_profile(profile: Path) -> None:
+    """Clear a stale Chrome profile lock left by a killed collector browser."""
+    lock = profile / "lockfile"
+    try:
+        lock.unlink(missing_ok=True)
+    except OSError:
+        pass
+    if not lock.exists():
+        return
+    try:
+        import psutil  # project dependency
+    except Exception:  # noqa: BLE001
+        return
+    target = str(profile).lower()
+    for candidate in psutil.process_iter(["pid", "name", "cmdline"]):
+        try:
+            name = str(candidate.info.get("name") or "").lower()
+            if not name.startswith(("chrome", "msedge")):
+                continue
+            command = " ".join(candidate.info.get("cmdline") or []).lower()
+            if target in command:
+                candidate.kill()
+        except Exception:  # noqa: BLE001 - process may exit while iterating
+            continue
+    for _ in range(25):
+        if not lock.exists():
+            return
+        time.sleep(0.2)
+    try:
+        lock.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+class _FrameTap:
+    """Bounded buffer fed by ``_CDP`` protocol events."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._frames: list[bytes] = []
+        self.frames = 0
+        self.messages = 0
+        self.gifts = 0
+        self.methods: dict[str, int] = {}
+        self.im_user_unique_id = ""
+
+    def __call__(self, message: dict[str, Any]) -> None:
+        method = message.get("method")
+        if method == "Network.webSocketCreated":
+            url = str((message.get("params") or {}).get("url") or "")
+            if "/webcast/im/" in url:
+                # Diagnostic only: the id tells a logged-in session (the
+                # account's user_unique_id) from an anonymous one.
+                try:
+                    query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+                    with self._lock:
+                        self.im_user_unique_id = str(
+                            (query.get("user_unique_id") or [""])[0]
+                        )[:32]
+                except (ValueError, TypeError):
+                    pass
+            return
+        if method != "Network.webSocketFrameReceived":
+            return
+        response = (message.get("params") or {}).get("response") or {}
+        if response.get("opcode") != 2:
+            return
+        data = str(response.get("payloadData") or "")
+        if not data:
+            return
+        try:
+            raw = base64.b64decode(data, validate=False)
+        except (ValueError, TypeError):
+            return
+        if not raw:
+            return
+        with self._lock:
+            self.frames += 1
+            self._frames.append(raw)
+            if len(self._frames) > MAX_TAPPED_FRAMES:
+                del self._frames[: len(self._frames) - MAX_TAPPED_FRAMES]
+
+    def drain(self) -> list[bytes]:
+        with self._lock:
+            frames, self._frames = self._frames, []
+        return frames
+
+    def note_methods(self, names: list[str]) -> None:
+        if not names:
+            return
+        with self._lock:
+            self.messages += len(names)
+            for name in names:
+                self.methods[name] = self.methods.get(name, 0) + 1
+
+    def note_gifts(self, count: int) -> None:
+        with self._lock:
+            self.gifts += max(0, int(count))
+
+    def top_methods(self, limit: int = 12) -> dict[str, int]:
+        with self._lock:
+            return dict(sorted(self.methods.items(), key=lambda kv: -kv[1])[:limit])
 
 
 class DouyinHeadlessCollector:
@@ -29,34 +185,15 @@ class DouyinHeadlessCollector:
         self._last_error = ""
         self._observed = 0
         self._accepted = 0
+        self._rejected = 0
+        self._frames = 0
+        self._messages = 0
+        self._page_seconds = 0.0
         self._last_frame_at = ""
         self._target_room = ""
-
-    def _hook_source(self) -> str:
-        roots = (
-            Path(getattr(self.module, "REPO_DIR", Path("."))),
-            Path(getattr(self.module, "BUNDLE_DIR", Path("."))),
-            Path(getattr(self.module, "APP_DIR", Path("."))),
-        )
-        rel = Path("tools") / "douyin" / "douyin_live_gift_hook.user.js"
-        for root in roots:
-            path = root / rel
-            if path.is_file():
-                raw = path.read_text(encoding="utf-8")
-                # Internal CDP drain, not cross-origin messaging or a public API.
-                hook = raw + """
-;(function () {
-  window.__bilipdjPendingGifts = [];
-  window.addEventListener('douyin-gift', function (ev) {
-    if (!ev.detail || ev.detail.type !== 'WebcastGiftMessage') return;
-    window.__bilipdjPendingGifts.push(ev.detail);
-    if (window.__bilipdjPendingGifts.length > 500)
-      window.__bilipdjPendingGifts.splice(0, window.__bilipdjPendingGifts.length - 500);
-  });
-})();
-"""
-                return hook
-        raise RuntimeError("Packaged Douyin WebSocket hook script is missing")
+        self._methods: dict[str, int] = {}
+        self._im_user_unique_id = ""
+        self._browser_logged_in = False
 
     def status(self) -> dict[str, Any]:
         with self._lock:
@@ -64,6 +201,12 @@ class DouyinHeadlessCollector:
                 "status": "ok", "state": self._state,
                 "live_id": self._target_room,
                 "observed": self._observed, "accepted": self._accepted,
+                "rejected": self._rejected,
+                "frames": self._frames, "messages": self._messages,
+                "methods": dict(self._methods),
+                "im_user_unique_id": self._im_user_unique_id,
+                "browser_logged_in": self._browser_logged_in,
+                "page_video_seconds": self._page_seconds,
                 "last_error": self._last_error,
                 "last_frame_at": self._last_frame_at,
             }
@@ -87,7 +230,6 @@ class DouyinHeadlessCollector:
                 raise ValueError("Internal Douyin room_id is not configured")
             if getattr(self.module, "douyin_gift_bridge", None) is None:
                 raise RuntimeError("Douyin gift bridge must be installed first")
-            self._hook_source()
             _browser_binary()
             self._stop.clear()
             self._last_error = ""
@@ -118,9 +260,9 @@ class DouyinHeadlessCollector:
             while not self._stop.is_set():
                 try:
                     self._run_once(backend, live_id)
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001
                     with self._lock:
-                        self._last_error = "Browser collector error; retrying locally"
+                        self._last_error = _safe_error(exc)
                         self._state = "reconnecting"
                     if self._stop.wait(4):
                         break
@@ -131,9 +273,127 @@ class DouyinHeadlessCollector:
                 self._state = "failed"
                 self._last_error = "Headless collector stopped unexpectedly"
 
+    def _accept(self, raw: Any, backend: Any) -> None:
+        try:
+            self.module.douyin_gift_bridge.handle(
+                raw, getattr(backend, "runtime_config", {}), backend,
+            )
+            with self._lock:
+                self._accepted += 1
+        except (ValueError, TypeError):
+            # Malformed/mismatched room frame; do not log private user fields
+            # from the untrusted browser payload.
+            with self._lock:
+                self._rejected += 1
+
+    def _drain(self, tap: _FrameTap, backend: Any) -> int:
+        frames = tap.drain()
+        if not frames:
+            return 0
+        names: list[str] = []
+        gifts = 0
+        for frame in frames:
+            try:
+                for method, _payload in iter_messages(frame):
+                    names.append(method)
+            except FrameDecodeError:
+                continue
+            for event in decode_frame_gifts(frame):
+                gifts += 1
+                self._accept(event, backend)
+        tap.note_methods(names)
+        tap.note_gifts(gifts)
+        with self._lock:
+            self._frames = tap.frames
+            self._messages = tap.messages
+            self._observed = tap.gifts
+            self._methods = tap.top_methods()
+            self._im_user_unique_id = tap.im_user_unique_id
+        return len(names)
+
+    def _warm_up(self, cdp: _CDP, session: str) -> None:
+        """Load douyin.com first: the live room only opens its IM socket once the
+        browser holds the visitor cookies (ttwid/msToken) the site sets there."""
+        try:
+            cdp.call("Page.navigate", {"url": "https://www.douyin.com/"}, session=session)
+        except Exception:
+            return
+        deadline = time.monotonic() + WARMUP_SECONDS
+        while time.monotonic() < deadline and not self._stop.is_set():
+            if self._stop.wait(0.5):
+                return
+            try:
+                result = cdp.call("Network.getAllCookies", {}, session=session)
+            except Exception:
+                continue
+            names = {
+                str(cookie.get("name"))
+                for cookie in (result.get("cookies") or [])
+                if isinstance(cookie, dict)
+            }
+            if "ttwid" in names:
+                # Cookies are set; give the page a moment to settle.
+                self._stop.wait(1.5)
+                return
+
+    @staticmethod
+    def _has_session_cookie(cdp: _CDP, session: str) -> bool:
+        """True when this browser profile really carries the Douyin login.
+
+        Gift messages are only pushed to sessions Douyin considers signed in,
+        so this is the first thing to check when the collector sees no gifts.
+        """
+        try:
+            result = cdp.call("Network.getAllCookies", {}, session=session)
+        except Exception:  # noqa: BLE001
+            return False
+        for cookie in result.get("cookies") or []:
+            if not isinstance(cookie, dict):
+                continue
+            domain = str(cookie.get("domain", "")).lstrip(".").lower()
+            if domain == "douyin.com" or domain.endswith(".douyin.com"):
+                if cookie.get("name") in {"sessionid", "sessionid_ss"} and cookie.get("value"):
+                    return True
+        return False
+
+    def _apply_session_cookies(self, cdp: _CDP, session: str) -> int:
+        """Replay the stored Douyin session into the headless browser.
+
+        The QR login captures cookies through CDP, which does not guarantee
+        they are flushed into the Chrome profile on disk. Without this replay
+        the headless page loads signed-out and Douyin never pushes gift
+        messages. Values stay in this process; nothing is exposed over HTTP.
+        """
+        getter = getattr(self.login, "cookie_records", None)
+        if not callable(getter):
+            return 0
+        try:
+            records = getter()
+        except Exception:  # noqa: BLE001
+            return 0
+        applied = 0
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            name = str(record.get("name") or "")
+            value = str(record.get("value") or "")
+            domain = str(record.get("domain") or "")
+            if not name or not value or not domain:
+                continue
+            try:
+                cdp.call("Network.setCookie", {
+                    "name": name, "value": value, "domain": domain,
+                    "path": "/", "secure": True,
+                }, session=session)
+                applied += 1
+            except Exception:  # noqa: BLE001 - one bad cookie must not abort
+                continue
+        return applied
+
     def _run_once(self, backend: Any, live_id: str) -> None:
         proc: subprocess.Popen[bytes] | None = None
         cdp: _CDP | None = None
+        tap = _FrameTap()
         # The login window uses the same profile. Never launch both at once.
         try:
             profile = self.login.profile_dir
@@ -142,6 +402,7 @@ class DouyinHeadlessCollector:
                 os.chmod(profile, 0o700)
             port_file = profile / "DevToolsActivePort"
             port_file.unlink(missing_ok=True)
+            _release_profile(profile)
             proc = subprocess.Popen(
                 [
                     _browser_binary(), "--remote-debugging-address=127.0.0.1",
@@ -151,6 +412,11 @@ class DouyinHeadlessCollector:
                     "--disable-background-timer-throttling",
                     "--disable-backgrounding-occluded-windows",
                     "--disable-renderer-backgrounding",
+                    # Headless Chrome pauses autoplay unless told otherwise; a
+                    # paused player never opens the IM socket, so no gifts.
+                    "--autoplay-policy=no-user-gesture-required",
+                    f"--user-agent={_USER_AGENT}",
+                    "--mute-audio",
                     "--no-first-run", "--no-default-browser-check",
                     "about:blank",
                 ],
@@ -173,7 +439,7 @@ class DouyinHeadlessCollector:
                 time.sleep(0.2)
             if port < 1:
                 raise RuntimeError("Headless Chrome startup timeout")
-            cdp = _CDP(port)
+            cdp = _CDP(port, event_sink=tap)
             target = cdp.call("Target.createTarget", {"url": "about:blank"})
             attached = cdp.call("Target.attachToTarget", {
                 "targetId": target["targetId"], "flatten": True,
@@ -181,8 +447,18 @@ class DouyinHeadlessCollector:
             sid = attached["sessionId"]
             cdp.call("Page.enable", session=sid)
             cdp.call("Runtime.enable", session=sid)
-            cdp.call("Page.addScriptToEvaluateOnNewDocument",
-                     {"source": self._hook_source()}, session=sid)
+            # Browser-level frame capture: no page JavaScript is patched.
+            cdp.call("Network.enable", session=sid)
+            with self._lock:
+                self._browser_logged_in = self._has_session_cookie(cdp, sid)
+            if not self._browser_logged_in:
+                # Profile cookies are missing (CDP-captured login was never
+                # flushed to disk): replay the stored session before any
+                # navigation, then re-check.
+                self._apply_session_cookies(cdp, sid)
+                with self._lock:
+                    self._browser_logged_in = self._has_session_cookie(cdp, sid)
+            self._warm_up(cdp, sid)
             navigation = cdp.call("Page.navigate",
                                   {"url": f"https://live.douyin.com/{live_id}"}, session=sid)
             if navigation.get("errorText"):
@@ -190,60 +466,60 @@ class DouyinHeadlessCollector:
             with self._lock:
                 self._state = "running"
                 self._last_error = ""
-            tick = 0
-            last_method_count = 0
-            last_im_at = time.monotonic()
+            started = time.monotonic()
+            last_im_at = started
+            nav_at = started
+            reloads = 0
+            last_message_count = 0
             while not self._stop.wait(1):
                 if proc.poll() is not None:
                     raise RuntimeError("Browser exited")
-                result = cdp.call("Runtime.evaluate", {
-                    "expression": """(function () {
-                      var q = window.__bilipdjPendingGifts || [];
-                      window.__bilipdjPendingGifts = [];
-                      return JSON.stringify({
-                        ready: !!window.__douyinGiftHookInstalled,
-                        gifts: q, methods: window.__douyinMsgCounts || {}
-                      });
-                    })()""",
-                    "returnByValue": True,
-                }, session=sid)
-                payload = json.loads(result.get("result", {}).get("value", "{}"))
-                if not payload.get("ready"):
-                    tick += 1
-                    if tick > 30:
-                        raise RuntimeError("WebSocket hook did not load")
-                    continue
-                methods = payload.get("methods", {})
-                count = sum(int(v) for v in methods.values() if isinstance(v, int) and v >= 0) if isinstance(methods, dict) else 0
-                if count > last_method_count:
-                    last_method_count = count
+                self._drain(tap, backend)
+                try:
+                    probe = cdp.call("Runtime.evaluate", {
+                        "expression": """(function () {
+                          var v = document.querySelector('video');
+                          return JSON.stringify({
+                            t: document.title,
+                            v: v ? Math.round(v.currentTime) : 0,
+                          });
+                        })()""",
+                        "returnByValue": True,
+                    }, session=sid)
+                    page = json.loads(probe.get("result", {}).get("value", "{}"))
+                except (ValueError, TypeError):
+                    page = {}
+                except Exception:
+                    page = {}
+                with self._lock:
+                    self._page_seconds = float(page.get("v") or 0)
+                if tap.messages > last_message_count:
+                    last_message_count = tap.messages
                     last_im_at = time.monotonic()
+                    nav_at = last_im_at
                     with self._lock:
-                        self._last_frame_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-                elif time.monotonic() - last_im_at > 180:
+                        self._last_frame_at = time.strftime(
+                            "%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                elif tap.messages == 0 and time.monotonic() - nav_at > IM_READY_SECONDS:
+                    # The live page sometimes declines to open its IM socket on
+                    # the first load (its own client retries with backoff). Reload
+                    # a few times before giving up instead of idling silently.
+                    reloads += 1
+                    if reloads > MAX_IM_RELOADS:
+                        raise RuntimeError("Douyin IM channel did not open")
+                    cdp.call("Page.navigate", {
+                        "url": f"https://live.douyin.com/{live_id}",
+                    }, session=sid)
+                    nav_at = time.monotonic()
+                elif tap.messages and time.monotonic() - last_im_at > IDLE_RECONNECT_SECONDS:
                     # A tab suspended by Chrome can remain open while its IM
                     # channel has died. Reconnect without losing the profile.
                     cdp.call("Page.navigate", {
                         "url": f"https://live.douyin.com/{live_id}",
                     }, session=sid)
                     last_im_at = time.monotonic()
-                    last_method_count = 0
-                received = payload.get("gifts", [])
-                if not isinstance(received, list):
-                    continue
-                with self._lock:
-                    self._observed += len(received)
-                for raw in received:
-                    try:
-                        self.module.douyin_gift_bridge.handle(
-                            raw, getattr(backend, "runtime_config", {}), backend,
-                        )
-                        with self._lock:
-                            self._accepted += 1
-                    except (ValueError, TypeError):
-                        # Malformed/mismatched room frame; do not log private
-                        # user fields from the untrusted browser payload.
-                        pass
+                    last_message_count = tap.messages
+                    nav_at = last_im_at
         finally:
             if cdp is not None:
                 try:
@@ -254,12 +530,9 @@ class DouyinHeadlessCollector:
                     cdp.close()
                 except Exception:
                     pass
-            if proc is not None and proc.poll() is None:
-                try:
-                    proc.terminate()
-                    proc.wait(timeout=3)
-                except Exception:
-                    proc.kill()
+            if proc is not None:
+                _kill_tree(proc)
 
 
 __all__ = ["DouyinHeadlessCollector"]
+

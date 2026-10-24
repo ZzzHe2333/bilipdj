@@ -45,6 +45,20 @@ Issue #319。仅适用于 BiliPDJ Python 版；不修改 Go 版，不替换现�
 6. 打开 Tampermonkey 第二份脚本的菜单“设置 BiliPDJ 礼物桥接”，输入后端端口（默认 9816）及上述令牌。必须刷新已登录的抖音直播网页，让 WSS Hook 在页面连接创建前生效。
 7. 直播收到礼物后检查日志中的 [礼物][douyin]、状态接口 received/settled，以及 /api/gifts/state 的 last_event。控制台可查看 window.__douyinGifts / window.__douyinMsgCounts 排障。
 
+## 礼物排队 / 插队（按礼物单独配置）
+
+Web 控制台 → 设置 → **抖音礼物** 页：勾选启用，然后为一种或多种礼物分别填写**排队次数**和**插队次数**。
+
+- **插队次数 > 0**：送礼者获得对应次数的插队资格，发送「插队」即可跳到「B站礼物」里设置的**插入名次**。
+- **插队次数 = 0**：该礼物只用于**排队**，送礼者发送「排队」时消耗 1 次资格（这就是「插队=0 就是排队」）。
+- 次数按礼物累加（送几次给几次），每发一次「排队」/「插队」指令消耗 1 次。
+- 有排队资格时，可以突破「队列已满」和「仅允许礼物排队」两个限制；插队资格沿用原有逻辑。
+- 默认规则：抖音 **粉丝团灯牌**（gift_id `685`）→ 排队 1 次、插队 0 次。
+- 规则按平台隔离：抖音规则不会命中 B 站礼物，反之亦然；B 站原有的「指定礼物名称 + 每次可排人数」逻辑保持不变。
+- 规则文件：`core/gift_queue_rules.json`（与 `config.yaml` 同目录）。`config.yaml` 的 myjs 只保存扁平标量，所以规则单独存放。
+- 接口：`GET /api/gifts/state` 返回 `rules_enabled` / `rules` / `default_rules` / `pending_queue_credits` / `pending_insert_credits`；`POST /api/gifts/queue-rules`，JSON `{"enabled":true,"rules":[{"platform":"douyin","gift_id":"685","gift_name":"粉丝团灯牌","queue_count":1,"insert_count":0}]}`，仅本机可访问。
+- 安全提示：浏览器上报的礼物事件无法证明真实交易，打开该开关即表示你接受这一风险；不要把它用于有经济价值的资格。
+
 ## 通信与权限
 
 本机接口为 POST /api/douyin/gift-hook，要求 localhost、Bearer token、JSON、消息大小不超过 16 KiB、消息中的 roomId 匹配 BiliPDJ 当前已启用的抖音内部房间 ID。接口拒绝未配置房间或任意外部房间 ID；不会存储网页登录 Cookie、WebSocket 签名或抖音账号凭据。桥接脚本仅发送到 127.0.0.1，不允许指定任意公网服务端。
@@ -73,3 +87,29 @@ Issue #319。仅适用于 BiliPDJ Python 版；不修改 Go 版，不替换现�
 ## 已知限制
 
 必须保持已登录的抖音网页开启，才能收到礼物。关闭浏览器后不会继续监听；这个接入并非不依赖浏览器的原生 WSS 客户端。私有 Protobuf 字段随抖音调整可能失效；无法承诺长期兼容。必须使用支持 DecompressionStream 的现代浏览器。
+
+### 未登录的网页收不到礼物消息（实测结论）
+
+抖音的网页 IM 通道对**未登录**访客仍会推送弹幕、进场、点赞、房间统计等消息，但**不推送 `WebcastGiftMessage`**。用匿名浏览器在三个不同直播间连续抓取约 8 分钟、共 4000+ 条消息，礼物消息数为 0；同一条连接里弹幕/进场/点赞正常。因此礼物功能必须以扫码登录后的会话为前提，这不是解码脚本的 bug。
+
+反过来验证：把扫码得到的会话 Cookie 回放到无头浏览器后，同一个直播间 70 秒内收到 19 条 `WebcastGiftMessage`，桥接 `received=19 / settled=11`，`/api/gifts/state` 的 `last_event` 与 `observed_catalog` 都正确出现了抖音礼物（小心心=1 钻、大啤酒=2 钻、为你闪耀=9 钻等）。
+
+### 扫码会话必须回放到采集浏览器
+
+扫码流程是通过 CDP `Storage.getCookies` 读取 Cookie 后写入本机私有文件 `douyin-browser-session.json` 的；这些 Cookie **不保证**会被 Chrome 落盘到 `douyin-browser-profile` 的 Cookie 数据库。无头采集器复用同一个 Profile 时，页面可能因此仍是未登录状态（`collector/status` 的 `browser_logged_in=false`），表现为 IM 能连上、弹幕正常，但礼物永远是 0。
+
+因此采集器启动时会检查浏览器里是否存在 `sessionid` Cookie，缺失时用 `Network.setCookie` 把本机保存的会话回放到该浏览器，再访问直播间。回放只发生在本机进程内，不经过任何 HTTP 接口。
+
+排查顺序：
+
+1. `GET /api/douyin/login/status` 确认 `logged_in` 为真；否则先扫码。
+2. `GET /api/douyin/collector/status`：先看 `browser_logged_in` 是否为 `true`——为 `false` 时页面是未登录状态，收不到礼物；`im_user_unique_id` 应与账号一致。
+3. `frames`/`messages` 持续增长说明 IM 已连上；`messages` 一直为 0 说明页面没有建立 IM 连接（常见原因：播放器被暂停、直播间已下播）。
+4. `methods` 里出现 `WebcastGiftMessage` 说明礼物消息已进入解码；`gifts`/`accepted` 增长说明桥接吃下了。
+5. `page_video_seconds` 不增长说明播放器没有真正开始播放，此时也不会建立 IM 连接。
+6. `rejected` 持续增长说明桥接房间号不匹配：重新「获取并保存直播参数」，确认 `live_info.room_id` 与当前直播间一致。
+
+### 后台采集不再改写页面脚本
+
+`DouyinHeadlessCollector` 现在通过 DevTools 协议在浏览器层抓取 `Network.webSocketFrameReceived`，再由 `apps/server/douyin_ws_frames.py` 解码 `PushFrame -> LiveResponse -> WebcastGiftMessage`，不再向页面注入改写 `window.WebSocket` 的脚本，因此不受页面脚本变化影响。启动前会先访问 `https://www.douyin.com/` 取得 `ttwid` 等访客 Cookie，并带 `--autoplay-policy=no-user-gesture-required` 启动无头浏览器，避免播放器被静音策略暂停导致 IM 不连接。若 60 秒内仍未出现任何 IM 消息，采集器会明确报错并重试，而不是静默空转。
+

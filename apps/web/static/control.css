@@ -369,3 +369,12 @@ td.actions { white-space: nowrap; }
 .permission-legacy .card { margin-bottom: 0; }
 .permission-legacy .permission-hint { display: block; min-height: 34px; margin: 6px 0 10px; }
 .permission-legacy textarea { min-height: 85px; }
+
+/* 抖音礼物排队/插队规则编辑（每个礼物一行） */
+.rule-list { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; }
+.rule-row { display: grid; grid-template-columns: minmax(180px, 2fr) repeat(2, minmax(110px, 1fr)) auto; gap: 10px; align-items: end; padding: 10px; border: 1px solid var(--line); border-radius: 10px; }
+.rule-row .rule-count { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 13px; }
+.rule-row .rule-gift { width: 100%; }
+.rule-row .rule-remove { justify-self: end; }
+.rule-row-empty { margin: 0; color: var(--muted); font-size: 13px; }
+@media (max-width: 720px) { .rule-row { grid-template-columns: 1fr 1fr; } .rule-row .rule-gift { grid-column: 1 / -1; } }
