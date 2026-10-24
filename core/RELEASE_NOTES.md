@@ -1,4 +1,4 @@
-# BiliPDJ v3.0.23｜正式版
+# BiliPDJ v3.0.24｜正式版
 
 **正式发行（Release）**。基于 v3.0.22 的稳定修复和抖音直播支持增强，包含 Windows Tk x64 和 Web Portable x64 便携版。
 
@@ -22,16 +22,16 @@
 - 后台扫码/无头礼物采集需在运行服务端的主机上安装可用 Chrome/Edge；Docker 默认镜像不保证支持图形扫码或无头 Chrome。
 - 抖音网页礼物事件可以被伪造，**不能作为付款凭证**；请仅在信任的本地环境下配置礼物排队规则。
 - 建议备份现有存档与配置后，将新 ZIP **完整解压至新目录**，不要把两种版本相互覆盖。
-- 已发布的 `v3.0.23-test` 仍作为历史测试版保留；本次 `v3.0.23` 为正式发行。
+- 已发布的 `v3.0.23-test` 仍作为历史测试版保留；本次 `v3.0.24` 为正式发行。
 
-## 下载（v3.0.23 正式版）
+## 下载（v3.0.24 正式版）
 
-- [Windows Tk x64 便携版](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.23/BiliPDJ-v3.0.23-Windows-Tk-Portable-x64.zip)
-- [Web x64 便携版](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.23/BiliPDJ-v3.0.23-Web-Portable-x64.zip)
-- [GitHub 正式版 Release 页面](https://github.com/ZzzHe2333/bilipdj/releases/tag/v3.0.23)
+- [Windows Tk x64 便携版](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.24/BiliPDJ-v3.0.24-Windows-Tk-Portable-x64.zip)
+- [Web x64 便携版](https://github.com/ZzzHe2333/bilipdj/releases/download/v3.0.24/BiliPDJ-v3.0.24-Web-Portable-x64.zip)
+- [GitHub 正式版 Release 页面](https://github.com/ZzzHe2333/bilipdj/releases/tag/v3.0.24)
 
 Release 同时提供 `Windows-Tk-files.json`、`Windows-Tk-Incremental-x64.pack`、`Web-files.json`、`Web-Incremental-x64.pack`、`update-manifest.json` 与对应 SHA-256 校验文件，供更新器使用。**普通用户无需手动下载**这些清单和增量文件，只需选择相应 ZIP。以上链接仅在正式发行成功后生效。
 
 相关开发与验收：[Issue #325](https://github.com/ZzzHe2333/bilipdj/issues/325)、[Issue #327](https://github.com/ZzzHe2333/bilipdj/issues/327)、[Issue #329](https://github.com/ZzzHe2333/bilipdj/issues/329)，以及 [PR #328](https://github.com/ZzzHe2333/bilipdj/pull/328)。
 
-**发行类型：正式版 / Release；标签：v3.0.23。**
+**发行类型：正式版 / Release；标签：v3.0.24。**
