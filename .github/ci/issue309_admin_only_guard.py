@@ -35,6 +35,7 @@ def minimal_queue(permissions: dict):
     m._jianzhangchadui = True
     m._max_length = 100
     m._gift_queue_credits = {}
+    m._gift_queue_join_credits = {}
     m._gift_queue_only = False
     m._daily_queue_limit = 0
     m._find_index = lambda username: -1

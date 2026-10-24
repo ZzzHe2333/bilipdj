@@ -2904,9 +2904,12 @@ class QueueManager:
 
             # --- Join commands (not yet in queue) ---
             if index < 0:
+                # getattr keeps lightweight QueueManager stubs (guards build one
+                # via __new__) working without initialising every credit map.
+                join_credits = getattr(self, "_gift_queue_join_credits", None)
                 join_credit = (
-                    max(0, int(self._gift_queue_join_credits.get(uid, 0) or 0))
-                    if uid > 0 else 0
+                    max(0, int(join_credits.get(uid, 0) or 0))
+                    if isinstance(join_credits, dict) and uid > 0 else 0
                 )
                 can_join = len(self._persons) < self._max_length or has_op or join_credit > 0
                 new_item: str | None = None
