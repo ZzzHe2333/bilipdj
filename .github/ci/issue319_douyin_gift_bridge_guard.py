@@ -66,6 +66,33 @@ def test_combo_tracker() -> None:
     timeout = tracker.flush_due(now=18)
     assert len(timeout) == 1 and timeout[0]["total_diamond"] == 3
 
+    # Free gifts and gifts without embedded diamond prices must still reach
+    # the configurable per-gift queue rules (value is optional metadata).
+    zero_value = gift("free-zero", 1, ended=1, created=9000, gift_id=8123)
+    zero_value["gift"]["diamondCount"] = 0
+    settled_zero = tracker.accept(zero_value, now=20)
+    assert len(settled_zero) == 1 and settled_zero[0]["total_diamond"] == 0
+    unknown_price = gift("free-unknown", 1, ended=1, created=9001, gift_id=8124)
+    unknown_price["gift"].pop("diamondCount")
+    settled_unknown = tracker.accept(unknown_price, now=21)
+    assert len(settled_unknown) == 1 and settled_unknown[0]["total_diamond"] is None
+
+    # When a groupId identifies a finished combo, a late higher-count
+    # message with a fresh msgId cannot reopen the closed group.
+    grouped = gift("group-final", 5, ended=1, created=10000, gift_id=3997)
+    grouped["groupId"] = "synthetic-group-A"
+    assert tracker.accept(grouped, now=22)[0]["count"] == 5
+    late = gift("group-late", 6, ended=1, created=11000, gift_id=3997)
+    late["groupId"] = "synthetic-group-A"
+    assert tracker.accept(late, now=23) == []
+
+    # No groupId: a new timestamp and a lower cumulative count means a new
+    # combo rather than merging two rapid gifts from the same sender.
+    assert tracker.accept(gift("reset-first", 9, created=12000, gift_id=3998), now=24) == []
+    split = tracker.accept(gift("reset-second", 1, ended=1, created=13000, gift_id=3998), now=25)
+    assert [part["count"] for part in split] == [9, 1]
+    assert tracker.flush_due(now=33) == []
+
 
 def test_bridge_service() -> None:
     queue = Queue()
@@ -91,6 +118,16 @@ def test_bridge_service() -> None:
         assert bridge.authorize("Bearer " + TOKEN)
         assert not bridge.authorize("Bearer bad")
         assert bridge.status(runtime)["settled"] == 1
+        free = gift("bridge-free", 1, ended=1, gift_id=8999, created=8000)
+        free["gift"]["diamondCount"] = 0
+        bridge.handle(free, runtime, backend)
+        assert len(queue.calls) == 2
+        assert queue.calls[-1]["gift"]["value"] == 0
+        missing = gift("bridge-unknown", 1, ended=1, gift_id=8998, created=9000)
+        missing["gift"].pop("diamondCount")
+        bridge.handle(missing, runtime, backend)
+        assert len(queue.calls) == 3
+        assert queue.calls[-1]["gift"]["value"] is None
         try:
             bridge.handle(gift("bad-room", 1, room="different"), runtime, backend)
         except ValueError:
