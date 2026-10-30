@@ -138,6 +138,14 @@ def _positive_int(fields: list[tuple[int, int, Any]], *numbers: int) -> int | No
             return value
     return None
 
+def _nonnegative_int(fields: list[tuple[int, int, Any]], *numbers: int) -> int | None:
+    """A zero-priced gift is still a real gift; missing price remains unknown."""
+    for number in numbers:
+        value = _int(fields, number)
+        if value is not None and 0 <= value <= 10_000_000:
+            return value
+    return None
+
 
 def _string_or_none(value: Any) -> str | None:
     if value is None:
@@ -223,11 +231,12 @@ def decode_gift_message(payload: bytes) -> dict[str, Any] | None:
     room_id = _int(common, 3)
     gift_id = _int(fields, 2) or _int(gift_info, 5)
     repeat_count = _positive_int(fields, 5, 4)
-    diamond = _positive_int(gift_info, 12, 9)
+    diamond = _nonnegative_int(gift_info, 12, 9)
     gift_name = _str(gift_info, 16) or name_from_text
     user_id = _int(user, 1)
     nickname = _str(user, 3) or nick_from_text
-    total = diamond * repeat_count if diamond and repeat_count else None
+    total = (diamond * repeat_count
+             if diamond is not None and repeat_count is not None else None)
     return {
         "type": "WebcastGiftMessage",
         "receivedAt": int(time.time() * 1000),
