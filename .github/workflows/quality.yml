@@ -96,6 +96,8 @@ jobs:
         run: python .github/ci/issue325_windows_douyin_guard.py
       - name: Validate private Douyin browser login and session redaction
         run: python .github/ci/issue321_douyin_login_guard.py
+      - name: Validate free Douyin gifts and missing diamond prices
+        run: python .github/ci/issue331_free_gift_guard.py
       - name: Validate Douyin browser WSS gift bridge and JS syntax
         run: |
           python .github/ci/issue319_douyin_gift_bridge_guard.py

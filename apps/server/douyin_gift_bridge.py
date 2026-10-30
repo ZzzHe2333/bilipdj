@@ -39,6 +39,21 @@ def _integer(value: Any, maximum: int = 1_000_000) -> int:
     return result if 0 < result <= maximum else 0
 
 
+def _optional_gift_diamonds(value: Any) -> int | None:
+    """Keep missing prices unknown, but accept legitimate zero-priced gifts."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        raise ValueError("invalid gift diamond count")
+    try:
+        result = int(value)
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise ValueError("invalid gift diamond count") from exc
+    if not 0 <= result <= 10_000_000:
+        raise ValueError("gift diamond count out of bounds")
+    return result
+
+
 def _string(value: Any, limit: int) -> str:
     result = str(value if value is not None else "").strip()
     if len(result) > limit:
@@ -75,11 +90,11 @@ class GiftComboTracker:
         name = _string(user.get("nickname"), 256)
         gift_id = _string(raw.get("giftId") or gift.get("id"), 80)
         gift_name = _string(gift.get("name"), 120)
-        unit = _integer(gift.get("diamondCount"), 10_000_000)
+        unit = _optional_gift_diamonds(gift.get("diamondCount"))
         count = _integer(raw.get("repeatCount") or raw.get("sendCount"), 1_000_000)
         group = _string(raw.get("groupId") or "", 80)
         created = _created_ms(raw.get("createTime"))
-        if not all((msg_id, room, uid, name, gift_id, gift_name, unit, count)):
+        if not all((msg_id, room, uid, name, gift_id, gift_name, count)):
             raise ValueError("incomplete gift message")
         key = (room, uid, gift_id, group)
         ended = raw.get("repeatEnd") == 1
@@ -89,9 +104,21 @@ class GiftComboTracker:
                 return []
             self._seen[msg_id] = clock
             previous = self._closed.get(key)
+            if previous and group:
+                # A non-empty groupId identifies a completed combo. A late
+                # high-count update must never reopen that completed group.
+                return []
             if previous and created and created <= previous[1] and count <= previous[0]:
                 return []
             state = self._pending.get(key)
+            completed: list[dict[str, Any]] = []
+            if (state is not None and not group and created
+                    and created > state["created_ms"] and count < state["count"]):
+                # Some rooms omit groupId. When the cumulative count resets
+                # in a newer message, settle the previous combo and start
+                # the next one rather than merging unrelated gifts.
+                completed.append(self._finish(key, clock))
+                state = None
             if state is None:
                 state = {
                     "room": room, "user_id": uid, "username": name,
@@ -106,8 +133,8 @@ class GiftComboTracker:
                 state["updated"] = clock
                 state["username"] = name
             if ended:
-                return [self._finish(key, clock)]
-            return []
+                completed.append(self._finish(key, clock))
+            return completed
 
     def flush_due(self, now: float | None = None) -> list[dict[str, Any]]:
         clock = time.monotonic() if now is None else now
@@ -121,7 +148,10 @@ class GiftComboTracker:
         state = dict(self._pending.pop(key))
         self._closed[key] = (state["count"], state["created_ms"], clock)
         state.pop("updated", None)
-        state["total_diamond"] = state["count"] * state["unit_diamond"]
+        state["total_diamond"] = (
+            state["count"] * state["unit_diamond"]
+            if state["unit_diamond"] is not None else None
+        )
         return state
 
     def _prune(self, clock: float) -> None:
